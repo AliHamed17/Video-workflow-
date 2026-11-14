@@ -29,7 +29,9 @@ class MockGenerator:
         for shot in plan.shots:
             path = out_dir / f"shot_{shot.index:02d}.mp4"
             color = _COLORS[shot.index % len(_COLORS)]
-            body = textwrap.fill(shot.prompt.strip(), width=30)[:420]
+            lines = textwrap.wrap(shot.prompt.strip(), width=30)
+            # Keep the description above the caption zone (captions sit around 70% height).
+            body = "\n".join(lines[:7]) + (" …" if len(lines) > 7 else "")
             with tempfile.TemporaryDirectory() as tmp:
                 label, desc = Path(tmp) / "label.txt", Path(tmp) / "desc.txt"
                 label.write_text(f"SHOT {shot.index + 1}", "utf-8")
