@@ -1,0 +1,103 @@
+# Channel configuration. Copy to config/channel.yaml (`vw init` does this) and edit.
+# Everything the agents write is steered by this file — it is the "brand bible".
+
+channel:
+  name: "Mind Blown Daily"
+  niche: "mind-blowing science and nature facts, explained visually"
+  audience: "curious 18-34 year olds scrolling short-form video on their phone"
+  language: "en"
+  voice: >-
+    Punchy, curious and warm. Second person. Short sentences. Every claim must be
+    true and checkable — surprising, never misleading clickbait.
+  content_pillars:
+    - "space and astronomy"
+    - "the human body"
+    - "animal superpowers"
+    - "physics you can see"
+  banned_topics:
+    - "medical advice"
+    - "politics"
+    - "real, identifiable private people"
+  visual_style: >-
+    Cinematic, high-contrast, vibrant teal-and-orange grade, macro detail,
+    smooth dolly and orbit camera moves, volumetric light, photoreal.
+
+video:
+  target_duration_s: 30          # final cut length the scriptwriter aims for
+  aspect_ratio: "9:16"
+  # Which renderer turns shot prompts into clips:
+  #   handoff        -> writes a render request; Claude Code renders it with the Higgsfield MCP
+  #                     connector (see .claude/skills/higgsfield-render). Works today, no extra keys.
+  #   higgsfield_mcp -> headless: this program calls the Higgsfield MCP server itself
+  #                     (needs HIGGSFIELD_MCP_TOKEN).
+  #   mock           -> local ffmpeg placeholder clips, for testing the pipeline for free.
+  generator: "handoff"
+  higgsfield:
+    model: "seedance_2_5"        # see `models_explore` in the Higgsfield MCP for the catalog
+    shot_duration_s: 5
+    params:                      # passed straight through to generate_video params
+      resolution: "1080p"
+      generate_audio: true
+    use_unlim: false             # false = pay with credits; true = use free-trial unlimited gens
+    max_credits_per_video: 600   # budget guard; seedance_2_5 1080p was 80 credits per 5s shot
+    poll_timeout_s: 1200
+  captions:
+    burn_in: true
+    font: "DejaVu Sans"
+    font_size: 14                # libass units (video height = 288); 14 ≈ 93px on 1080x1920
+  loudness_lufs: -14
+
+llm:
+  # Each task tries its candidates in order and falls back on error / missing key.
+  # Format: "<provider>:<model>". Providers: anthropic, openai, gemini, cli,
+  # or any name declared in compat_providers below.
+  # Model ids change often — check each provider's model list and update here.
+  routes:
+    ideation:  ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+    scripting: ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+    directing: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5"]
+    # A different model family reviewing the script catches more problems.
+    review:    ["openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "anthropic:claude-opus-5-5"]
+    packaging: ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+  effort:
+    ideation: high
+    scripting: high
+    directing: medium
+    review: high
+    packaging: low
+  # OpenAI-compatible endpoints ("any LLM"): OpenRouter, Groq, Together, local Ollama...
+  # Use them in routes as e.g. "openrouter:meta-llama/llama-4-maverick".
+  compat_providers:
+    openrouter:
+      base_url: "https://openrouter.ai/api/v1"
+      api_key_env: "OPENROUTER_API_KEY"
+    ollama:
+      base_url: "http://localhost:11434/v1"
+      api_key_env: null
+  # Coding-agent CLIs, so you can run on a Claude / ChatGPT (Codex) / Gemini subscription
+  # instead of API keys. Use in routes as "cli:claude", "cli:codex", "cli:gemini".
+  # The prompt is sent on stdin.
+  cli_agents:
+    claude: ["claude", "-p"]
+    codex: ["codex", "exec", "--skip-git-repo-check", "-"]
+    gemini: ["gemini", "-p", ""]
+
+review:
+  min_score: 7.0        # critic score (0-10) needed to pass
+  max_revisions: 2      # writer <-> critic rounds before giving up
+
+approval:
+  mode: manual          # manual: stop at "reviewed" until `vw approve <id>`; auto: approve if score >= auto_min_score
+  auto_min_score: 8.5
+
+publish:
+  platforms: [youtube, instagram, tiktok]
+  ai_disclosure: true   # label posts as AI-generated where the platform supports it
+  youtube:
+    privacy: private    # private | unlisted | public — start private until you trust the pipeline
+    category_id: "28"   # 28 = Science & Technology, 22 = People & Blogs, 24 = Entertainment
+  instagram:
+    share_to_feed: true
+  tiktok:
+    mode: draft         # draft: lands in your TikTok inbox to post manually | direct: posts straight away
+    privacy_level: SELF_ONLY   # unaudited TikTok apps can only post SELF_ONLY

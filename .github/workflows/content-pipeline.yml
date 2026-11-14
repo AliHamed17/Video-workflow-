@@ -1,0 +1,73 @@
+# Runs the content pipeline in GitHub Actions.
+# Manual trigger only until you trust the output — uncomment `schedule` to automate.
+# Pipeline state (SQLite + media) is carried between runs with the Actions cache;
+# for production, move to a small server/cron or managed DB + object storage (see docs/ROADMAP.md).
+name: Content pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      ideas:
+        description: "New ideas to pitch"
+        default: "2"
+      until:
+        description: "Stop after stage (reviewed | edited | published)"
+        default: "reviewed"
+  # schedule:
+  #   - cron: "17 13 * * *"   # daily, 13:17 UTC
+
+concurrency:
+  group: content-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      HIGGSFIELD_MCP_TOKEN: ${{ secrets.HIGGSFIELD_MCP_TOKEN }}
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+      TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+      TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+      TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+      TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -e ".[all]"
+      - name: Restore pipeline state
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: pipeline-state-${{ github.run_id }}
+          restore-keys: pipeline-state-
+      - name: Run pipeline
+        run: |
+          CONFIG=config/channel.yaml
+          [ -f "$CONFIG" ] || CONFIG=config/channel.example.yaml
+          vw run --ideas "${{ inputs.ideas || '2' }}" --until "${{ inputs.until || 'reviewed' }}" -c "$CONFIG"
+          vw list
+      - name: Save pipeline state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: pipeline-state-${{ github.run_id }}
+      - name: Upload final videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos-${{ github.run_id }}
+          path: data/items/*/final.mp4
+          if-no-files-found: ignore

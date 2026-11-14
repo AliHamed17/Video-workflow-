@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.token.json
+
+# Runtime data (rendered videos, sqlite state)
+data/*
+!data/.gitkeep
+
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
