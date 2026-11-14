@@ -6,6 +6,10 @@ import pytest
 
 from video_workflow.config import AppConfig
 from video_workflow.models import (
+    Claim,
+    FactCheck,
+    HookOption,
+    HookSet,
     Idea,
     IdeaBatch,
     Packaging,
@@ -14,6 +18,7 @@ from video_workflow.models import (
     Script,
     Shot,
     ShotPrompt,
+    ShotQA,
     SocialMeta,
     YouTubeMeta,
 )
@@ -25,7 +30,8 @@ requires_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffm
 def make_idea(i: int = 0) -> Idea:
     return Idea(title=f"Why octopuses have three hearts #{i}", hook="You have one heart. It has three.",
                 angle="biology as superpower", pillar="animal superpowers",
-                why_it_will_perform="surprising number + visual", fact_check_notes="well documented")
+                why_it_will_perform="surprising number + visual", fact_check_notes="well documented",
+                predicted_score=8.0 - i)
 
 
 def make_script(shots: int = 2, duration: int = 1) -> Script:
@@ -68,6 +74,10 @@ def default_responses(shots: int = 2) -> dict:
         Review: make_review(),
         RenderPlan: make_plan(shots),
         Packaging: make_packaging(),
+        HookSet: HookSet(best_index=0, hooks=[HookOption(text="It has three hearts.", technique="bold claim",
+                                                         strength=8)]),
+        FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
+        ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
     }
 
 
@@ -77,7 +87,8 @@ def config() -> AppConfig:
         "channel": {"name": "Test Channel", "niche": "science", "audience": "curious people",
                     "voice": "punchy", "content_pillars": ["animals"], "visual_style": "cinematic"},
         "video": {"target_duration_s": 4, "generator": "mock",
-                  "higgsfield": {"shot_duration_s": 2, "max_credits_per_video": 500}},
+                  "higgsfield": {"shot_duration_s": 2, "max_credits_per_video": 500,
+                                 "keyframes": False, "draft_preview": False}},
         "llm": {"routes": {t: ["fake:test-model"] for t in
                            ("ideation", "scripting", "directing", "review", "packaging")}},
         "review": {"min_score": 7, "max_revisions": 2},

@@ -39,8 +39,17 @@ video:
       resolution: "1080p"
       generate_audio: true
     use_unlim: false             # false = pay with credits; true = use free-trial unlimited gens
-    max_credits_per_video: 600   # budget guard; seedance_2_5 1080p was 80 credits per 5s shot
+    max_credits_per_video: 600   # budget guard per render phase (prices are preflighted live)
     poll_timeout_s: 1200
+    # --- quality strategy (prices checked Nov 2026: keyframe 2, 480p draft 15, 1080p shot 80 credits) ---
+    keyframes: true              # a still per shot first (sharper, consistent subject), then animate it
+    keyframe_model: nano_banana_pro
+    keyframe_params: {resolution: "2k"}
+    keyframe_video_params: {mode: omni_reference}   # seedance_2_5 takes a start_image in this mode
+    keyframe_role: start_image
+    draft_preview: true          # cheap drafts → you approve the preview → finals rendered from the drafts
+    draft_params: {draft: true}
+    unit_costs: {keyframe: 2, draft: 15, final: 80}  # for estimates shown before you approve
   captions:
     burn_in: true
     mode: auto                   # auto: word-by-word from the narration, else each shot's on_screen_text
@@ -74,7 +83,14 @@ llm:
     # A different model family reviewing the script catches more problems.
     review:    ["openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "anthropic:claude-opus-5-5"]
     packaging: ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+    hooks:     ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+    factcheck: ["openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "anthropic:claude-opus-5-5"]
+    # Visual QA needs a vision-capable API model (CLI agents are skipped for images).
+    visual_qa: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5"]
   effort:
+    hooks: medium
+    factcheck: high
+    visual_qa: medium
     ideation: high
     scripting: high
     directing: medium
@@ -96,6 +112,19 @@ llm:
     claude: ["claude", "-p"]
     codex: ["codex", "exec", "--skip-git-repo-check", "-"]
     gemini: ["gemini", "-p", ""]
+
+content:
+  hook_variants: 5      # hook lab: write 5 openings, keep the strongest (0 = off)
+  fact_check: true      # independent fact-check before the critic; flagged claims force a revision
+  idea_overgenerate: 2  # pitch 2 extra ideas and keep the best by predicted score
+  formats: []           # recurring series, e.g. ["3 facts you didn't know about …", "What if …?"]
+
+quality:
+  visual_qa: true       # a vision model inspects frames of every rendered shot (needs a vision-capable model)
+  visual_min_score: 6.5
+  max_rerenders: 1      # automatic re-render rounds for weak shots (on cheap drafts when draft_preview)
+  block_publish_on_fail: true
+  loudness_tolerance_lu: 2.0
 
 review:
   min_score: 7.0        # critic score (0-10) needed to pass
@@ -138,7 +167,7 @@ trends:
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)
   channels: [log, telegram]
-  events: [needs_approval, awaiting_render, scheduled, published, failed, rejected, digest]
+  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert]
 
 runtime:
   workers: 3                    # items processed in parallel
@@ -147,3 +176,5 @@ runtime:
   max_backlog: 6                # don't pitch more while this many items are unfinished
   stats_every_hours: 6
   digest_hour: 20               # local hour (schedule timezone) for the daily summary
+  stuck_after_hours: 6          # alert when an item sits in a working stage this long
+  daily_credit_budget: 1000     # alert when a day's Higgsfield spend passes this

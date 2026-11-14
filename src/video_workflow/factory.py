@@ -26,16 +26,28 @@ def _s(secret) -> str | None:
     return secret.get_secret_value() if secret is not None else None
 
 
-def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None) -> VideoGenerator:
+def balance_recorder(store: Store):
+    """Remember the latest Higgsfield balance (shown in the dashboard, used by alerts)."""
+    from datetime import UTC, datetime
+
+    def record(credits: float, plan: str | None) -> None:
+        store.kv_set("higgsfield_balance", {"credits": credits, "plan": plan,
+                                            "at": datetime.now(UTC).isoformat()})
+    return record
+
+
+def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None,
+                    store: Store | None = None) -> VideoGenerator:
     name = name or config.video.generator
     if name == "mock":
-        return MockGenerator()
+        return MockGenerator(higgsfield=config.video.higgsfield)
     if name == "handoff":
         return HandoffGenerator(config.video)
     if name == "higgsfield_mcp":
         url, token = secrets.higgsfield_mcp_url, _s(secrets.higgsfield_mcp_token)
         return HiggsfieldMCPGenerator(config.video.higgsfield, config.video.aspect_ratio,
-                                      caller_factory=lambda: MCPToolCaller(url, token))
+                                      caller_factory=lambda: MCPToolCaller(url, token),
+                                      on_balance=balance_recorder(store) if store else None)
     raise ValueError(f"Unknown video generator {name!r}")
 
 
@@ -71,7 +83,7 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
         config=config,
         store=store,
         router=LLMRouter(config.llm, secrets),
-        generator=build_generator(config, secrets, generator),
+        generator=build_generator(config, secrets, generator, store),
         editor=editor,
         publishers=build_publishers(config, secrets, store.data_dir) if with_publishers else {},
         notifier=build_dispatcher(config.notify, secrets, http),

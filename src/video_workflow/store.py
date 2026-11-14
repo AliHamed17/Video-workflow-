@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS kv (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT NOT NULL,
+    item_id     TEXT,
+    step        TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    duration_ms INTEGER,
+    detail      TEXT NOT NULL DEFAULT '',
+    attrs       TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS events_item ON events(item_id);
+CREATE INDEX IF NOT EXISTS events_at ON events(at);
 """
 
 
@@ -143,3 +155,67 @@ class Store:
             conn.execute("INSERT INTO kv (key, value) VALUES (?, ?) "
                          "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                          (key, json.dumps(value, default=str)))
+
+    # ---- events (trace log) ---------------------------------------------------------------
+    def add_event(self, step: str, status: str, item_id: str | None = None, detail: str = "",
+                  duration_ms: int | None = None, attrs: dict | None = None,
+                  at: datetime | None = None) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO events (at, item_id, step, status, duration_ms, detail, attrs) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ((at or datetime.now(UTC)).isoformat(), item_id, step, status, duration_ms,
+                 detail[:2000], json.dumps(attrs or {}, default=str)))
+            return int(cur.lastrowid)
+
+    def events(self, after_id: int = 0, item_id: str | None = None, limit: int = 200,
+               status: str | None = None, step_prefix: str | None = None,
+               since: datetime | None = None, newest_first: bool = True) -> list[dict]:
+        where, args = ["id > ?"], [after_id]
+        if item_id:
+            where.append("item_id = ?")
+            args.append(item_id)
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        if step_prefix:
+            where.append("step LIKE ?")
+            args.append(f"{step_prefix}%")
+        if since:
+            where.append("at >= ?")
+            args.append(since.isoformat())
+        order = "DESC" if newest_first else "ASC"
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT id, at, item_id, step, status, duration_ms, detail, attrs FROM events "
+                f"WHERE {' AND '.join(where)} ORDER BY id {order} LIMIT ?", (*args, limit)).fetchall()
+        return [{"id": r[0], "at": r[1], "item_id": r[2], "step": r[3], "status": r[4],
+                 "duration_ms": r[5], "detail": r[6], "attrs": json.loads(r[7] or "{}")} for r in rows]
+
+    def step_stats(self, since: datetime | None = None) -> list[dict]:
+        """Per step: runs, errors, average and worst duration."""
+        args: tuple = ()
+        where = "WHERE duration_ms IS NOT NULL"
+        if since:
+            where += " AND at >= ?"
+            args = (since.isoformat(),)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT step, COUNT(*), SUM(status = 'error'), AVG(duration_ms), MAX(duration_ms) "
+                f"FROM events {where} GROUP BY step ORDER BY step", args).fetchall()
+        return [{"step": r[0], "runs": r[1], "errors": r[2] or 0, "avg_ms": r[3] or 0, "max_ms": r[4] or 0}
+                for r in rows]
+
+    def last_event_id(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute("SELECT MAX(id) FROM events").fetchone()
+        return int(row[0] or 0)
+
+    def latest_event_per_item(self) -> dict[str, dict]:
+        """The most recent event of every item — "what is it doing right now"."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT e.id, e.at, e.item_id, e.step, e.status, e.detail FROM events e "
+                "JOIN (SELECT item_id, MAX(id) AS mid FROM events WHERE item_id IS NOT NULL GROUP BY item_id) m "
+                "ON e.id = m.mid").fetchall()
+        return {r[2]: {"id": r[0], "at": r[1], "step": r[3], "status": r[4], "detail": r[5]} for r in rows}

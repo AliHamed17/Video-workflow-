@@ -75,7 +75,8 @@ def doctor(live: Annotated[bool, typer.Option("--live", help="Actually connect t
 
     cfg = AppConfig.load(resolve_config_path(config))
     secrets = Secrets()
-    checks = run_checks(cfg, secrets, build_publishers(cfg, secrets, data), live=live)
+    from .store import Store
+    checks = run_checks(cfg, secrets, build_publishers(cfg, secrets, data), live=live, store=Store(data))
     table = Table("check", "status", "detail")
     for c in checks:
         mark = "[green]ok[/]" if c.ok else ("[dim]skipped[/]" if c.ok is None else "[red]FAIL[/]")
@@ -128,11 +129,115 @@ def render(item_id: str, generator: GenOpt = None, config: ConfigOpt = None,
 
 
 @clips_app.command("add")
-def clips_add(item_id: str, shot_index: int, source: str, config: ConfigOpt = None,
-              data: DataOpt = Path("data")) -> None:
+def clips_add(item_id: str, shot_index: int, source: str,
+              job: Annotated[str | None, typer.Option(help="Higgsfield video job id (needed to finalize drafts)")] = None,
+              keyframe_job: Annotated[str | None, typer.Option(help="Higgsfield keyframe job id")] = None,
+              keyframe_url: Annotated[str | None, typer.Option(help="Keyframe image URL")] = None,
+              config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Attach a rendered clip (https URL or local file) to a shot."""
     pipe = _setup(config, data, publishers=False)
-    _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source)])
+    _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url)])
+
+
+@app.command("approve-final")
+def approve_final(item_id: str, config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """After watching the low-res preview: approve the full-resolution render."""
+    pipe = _setup(config, data, publishers=False)
+    _table([pipe.approve_final(pipe.store.get(item_id))])
+
+
+@app.command()
+def retry(item_id: str, config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Resume a failed item at the step where it stopped."""
+    pipe = _setup(config, data, publishers=False)
+    _table([pipe.retry(pipe.store.get(item_id))])
+
+
+@app.command()
+def rerender(item_id: str,
+             shot: Annotated[list[int], typer.Option("--shot", "-s", help="Shot number (1-based), repeatable")],
+             note: Annotated[str, typer.Option(help="Extra prompt guidance for the new take")] = "",
+             config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Render some shots again (e.g. -s 2 -s 4 --note 'closer, sharper focus')."""
+    pipe = _setup(config, data, publishers=False)
+    _table([pipe.rerender(pipe.store.get(item_id), [s - 1 for s in shot], note)])
+
+
+@app.command()
+def logs(item_id: Annotated[str | None, typer.Argument(help="Only this item")] = None,
+         follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep streaming new events")] = False,
+         limit: int = 40, data: DataOpt = Path("data")) -> None:
+    """Step-by-step trace of what the pipeline did (and is doing)."""
+    import time
+
+    from .store import Store
+
+    store = Store(data)
+    if item_id:
+        item_id = store.get(item_id).id
+
+    def show(events):
+        for ev in events:
+            colour = {"ok": "green", "error": "red", "warn": "yellow", "gated": "cyan", "skipped": "dim"}.get(
+                ev["status"], "white")
+            dur = f"{ev['duration_ms'] / 1000:.1f}s" if ev["duration_ms"] is not None else ""
+            console.print(f"[dim]{ev['at'][11:19]}[/] [{colour}]{ev['status']:<7}[/] {ev['step']:<22} "
+                          f"[dim]{ev['item_id'] or '-':<10}[/] {dur:>6}  {ev['detail']}", highlight=False)
+
+    events = list(reversed(store.events(item_id=item_id, limit=limit)))
+    show(events)
+    last = events[-1]["id"] if events else store.last_event_id()
+    while follow:
+        time.sleep(2)
+        new = store.events(after_id=last, item_id=item_id, newest_first=False)
+        show(new)
+        if new:
+            last = new[-1]["id"]
+
+
+@app.command()
+def alerts(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Problems that need attention right now."""
+    from .monitor import scan
+    from .store import Store
+
+    found = scan(Store(data), AppConfig.load(resolve_config_path(config)))
+    if not found:
+        console.print("[green]No alerts. All good.[/]")
+    for a in found:
+        colour = "red" if a.severity == "critical" else "yellow"
+        console.print(f"[{colour}]{a.severity.upper()}[/] {a.title} [dim]{a.item_id or ''}[/]\n    {a.detail}")
+
+
+@app.command()
+def quality(item_id: str, data: DataOpt = Path("data")) -> None:
+    """Show the quality report of an item (technical checks + visual QA per shot)."""
+    from .store import Store
+
+    item = Store(data).get(item_id)
+    if item.quality:
+        table = Table("check", "result", "value", "detail")
+        for c in item.quality.checks:
+            colour = {"pass": "green", "warn": "yellow", "fail": "red"}[c.status]
+            table.add_row(c.name, f"[{colour}]{c.status}[/]", c.value, c.detail)
+        console.print(table)
+        console.print(f"Score {item.quality.score:.0f}/100")
+    for r in item.shot_reviews:
+        console.print(f"Shot {r.shot_index + 1}: {r.qa.score:.1f}/10 {'(re-render)' if r.qa.rerender else ''} "
+                      f"{'; '.join(r.qa.issues)}")
+    if not item.quality and not item.shot_reviews:
+        console.print("No quality data yet.")
+
+
+@app.command("higgsfield-balance")
+def higgsfield_balance(credits: float, plan: Annotated[str | None, typer.Option()] = None,
+                       data: DataOpt = Path("data")) -> None:
+    """Record the Higgsfield balance (the render skill calls this; shown in the dashboard and alerts)."""
+    from .factory import balance_recorder
+    from .store import Store
+
+    balance_recorder(Store(data))(credits, plan)
+    console.print(f"Recorded Higgsfield balance: {credits:.0f} credits ({plan or 'plan ?'})")
 
 
 @app.command()
@@ -304,7 +409,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 10:
+    if passed != len(results) or len(results) < 13:
         raise typer.Exit(1)
 
 

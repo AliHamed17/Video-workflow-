@@ -106,10 +106,12 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
-    def event(start, end, style_name, text, fade=80):
+    def event(start, end, style_name, text, fade=80, pop=False):
         if text.strip() and end - start > 0.05:
+            # pop: words land slightly small, overshoot, settle — the "punchy captions" look
+            anim = "\\fscx88\\fscy88\\t(0,90,\\fscx106\\fscy106)\\t(90,170,\\fscx100\\fscy100)" if pop else ""
             lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},{style_name},,0,0,0,,"
-                         f"{{\\fad({fade},{fade})}}{_ass_text(text)}")
+                         f"{{\\fad({fade},{fade}){anim}}}{_ass_text(text)}")
 
     use_words = captions.mode == "words" or (
         captions.mode == "auto" and any(s.speech for s in shots))
@@ -123,7 +125,7 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
             t, total = shot.start, sum(weights)
             for chunk, weight in zip(chunks, weights, strict=True):
                 span = shot.speech * weight / total
-                event(t, t + span, "Word", chunk, fade=40)
+                event(t, t + span, "Word", chunk, fade=40, pop=True)
                 t += span
         else:
             event(shot.start + 0.05, end - 0.05, "Shot", shot.on_screen_text, fade=120)
@@ -140,9 +142,9 @@ class Editor:
         self.video, self.width, self.height, self.fps = video, width, height, fps
         self.workers = workers
 
-    def _normalize(self, src: Path, dst: Path, max_duration: float) -> float:
+    def _normalize(self, src: Path, dst: Path, max_duration: float, size: tuple[int, int]) -> float:
         info = probe(src)
-        w, h, fps = self.width, self.height, self.fps
+        (w, h), fps = size, self.fps
         vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
               f"fps={fps},setsar=1,format=yuv420p")
         args = ["ffmpeg", "-y", "-i", str(src)]
@@ -173,10 +175,14 @@ class Editor:
         return min(clip.duration / tempo, slot)
 
     def assemble(self, item: ContentItem, out_dir: Path, voiceover: Path | None = None,
-                 music: Path | None = None) -> tuple[Path, Path]:
+                 music: Path | None = None, phase: str = "final") -> tuple[Path, Path]:
+        """Build the cut. A draft-phase cut is a half-resolution preview (fast, for approval)."""
         if item.script is None:
             raise EditorError("Item has no script")
-        by_index = {c.shot_index: c for c in item.clips if c.path}
+        size = (self.width // 2 // 2 * 2, self.height // 2 // 2 * 2) if phase == "draft" else (self.width, self.height)
+        by_index = {c.shot_index: c for c in item.clips if c.path and c.phase == phase}
+        if not by_index:  # older items without phase information
+            by_index = {c.shot_index: c for c in item.clips if c.path}
         shots = item.script.shots
         missing = [s.index for s in shots if s.index not in by_index]
         if missing:
@@ -187,7 +193,7 @@ class Editor:
         segments = [work / f"norm_{s.index:02d}.mp4" for s in shots]
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             durations = list(pool.map(
-                lambda pair: self._normalize(Path(by_index[pair[0].index].path), pair[1], pair[0].duration_s),
+                lambda pair: self._normalize(Path(by_index[pair[0].index].path), pair[1], pair[0].duration_s, size),
                 zip(shots, segments, strict=True)))
 
         (work / "concat.txt").write_text("".join(f"file '{s.name}'\n" for s in segments), "utf-8")
@@ -220,7 +226,7 @@ class Editor:
                 timings.append(ShotTiming(t, dur, shot.on_screen_text, shot.voiceover, sp))
                 t += dur
             (work / "captions.ass").write_text(
-                build_ass(timings, self.video.captions, self.width, self.height), "utf-8")
+                build_ass(timings, self.video.captions, *size), "utf-8")
             vf = "ass=captions.ass"
 
         # Audio mix.
@@ -252,13 +258,20 @@ class Editor:
                      f"loudnorm=I={lufs}:TP=-1.5:LRA=11[a]")
         graph.append(f"[0:v]{vf}[v]")
 
-        final = (out_dir / "final.mp4").resolve()
+        final = (out_dir / ("preview.mp4" if phase == "draft" else "final.mp4")).resolve()
+        # H.264 High, 30 fps, 2 s closed GOPs, BT.709 tags, capped peak bitrate: what the
+        # platforms' own encoders handle best (less re-encode damage after upload).
         args += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-t", f"{total:.3f}",
-                 "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+                 "-c:v", "libx264", "-preset", "medium", "-crf", "18" if phase == "final" else "23",
+                 "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(self.fps), "-g", str(self.fps * 2),
+                 "-bf", "2", "-maxrate", "16M", "-bufsize", "32M",
+                 "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                  "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(final)]
         _run(args, cwd=work)
 
+        # Thumbnail: the most representative frame of the hook shot (not just frame 0).
         thumb = out_dir / "thumbnail.jpg"
-        _run(["ffmpeg", "-y", "-ss", f"{min(0.8, total / 2):.2f}", "-i", str(final), "-frames:v", "1",
-              "-q:v", "2", str(thumb)])
+        span = min(durations[0], total) if durations else total
+        _run(["ffmpeg", "-y", "-ss", "0.3", "-t", f"{max(span - 0.3, 0.5):.2f}", "-i", str(final),
+              "-vf", "thumbnail=30", "-frames:v", "1", "-q:v", "2", str(thumb)])
         return final, thumb

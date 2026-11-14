@@ -147,9 +147,13 @@ def check_notify(config: AppConfig, secrets: Secrets, http: httpx.Client, live: 
     return out
 
 
-def check_higgsfield(config: AppConfig, secrets: Secrets, live: bool) -> Check:
+def check_higgsfield(config: AppConfig, secrets: Secrets, live: bool, on_balance=None,
+                     known_balance: dict | None = None) -> Check:
     if config.video.generator == "handoff":
-        return Check("higgsfield", True, "handoff mode: renders through the Higgsfield connector in Claude Code")
+        detail = "handoff mode: renders through the Higgsfield connector in Claude Code"
+        if known_balance and known_balance.get("credits") is not None:
+            detail += f" · last known balance {known_balance['credits']:.0f} ({known_balance.get('plan')})"
+        return Check("higgsfield", True, detail)
     if config.video.generator == "mock":
         return Check("higgsfield", None, "mock renderer (no Higgsfield)")
     if not secrets.higgsfield_mcp_token:
@@ -158,16 +162,25 @@ def check_higgsfield(config: AppConfig, secrets: Secrets, live: bool) -> Check:
         return Check("higgsfield", True, "token set")
 
     def mcp_check():
-        from .video.higgsfield_mcp import MCPToolCaller
+        from .video.higgsfield_mcp import MCPToolCaller, extract_balance
 
         async def go():
             async with MCPToolCaller(secrets.higgsfield_mcp_url, _s(secrets.higgsfield_mcp_token)) as caller:
-                return await caller.list_tools()
-        tools = asyncio.run(asyncio.wait_for(go(), 30))
-        needed = {"generate_video_batch", "jobs_wait"} - set(tools)
+                tools = await caller.list_tools()
+                balance = extract_balance(await caller.call("balance", {})) if "balance" in tools else (None, None)
+                return tools, balance
+        tools, (credits, plan) = asyncio.run(asyncio.wait_for(go(), 30))
+        needed = {"generate_video_batch", "generate_image_batch", "jobs_wait"} - set(tools)
         if needed:
             raise RuntimeError(f"connected, but tools missing: {needed}")
-        return f"{len(tools)} tools available"
+        if on_balance and credits is not None:
+            on_balance(credits, plan)
+        need = config.video.higgsfield.estimate(
+            max(1, -(-config.video.target_duration_s // config.video.higgsfield.shot_duration_s)))
+        detail = f"{len(tools)} tools · balance {credits:.0f} credits ({plan})" if credits is not None else f"{len(tools)} tools"
+        if credits is not None and credits < need:
+            raise RuntimeError(f"{detail} — one video needs ≈{need:.0f}; top up before rendering")
+        return detail
     return _guard("higgsfield", mcp_check)
 
 
@@ -202,13 +215,22 @@ def check_trends(config: AppConfig, http: httpx.Client, live: bool) -> list[Chec
 
 
 def run_checks(config: AppConfig, secrets: Secrets, publishers: dict, live: bool = False,
-               http: httpx.Client | None = None) -> list[Check]:
+               http: httpx.Client | None = None, store=None) -> list[Check]:
     http = http or net.default_client()
     checks = check_ffmpeg()
     checks += check_llms(config, secrets, live)
-    checks.append(check_higgsfield(config, secrets, live))
+    on_balance = None
+    if store is not None:
+        from .factory import balance_recorder
+        on_balance = balance_recorder(store)
+    checks.append(check_higgsfield(config, secrets, live, on_balance,
+                                   store.kv_get("higgsfield_balance") if store is not None else None))
     checks.append(check_voice(config, secrets, http, live))
     checks += check_publishers(publishers, live)
     checks += check_notify(config, secrets, http, live)
     checks += check_trends(config, http, live)
+    if store is not None:
+        from datetime import UTC, datetime
+        store.kv_set("health_last", {"at": datetime.now(UTC).isoformat(), "live": live,
+                                     "checks": [c.__dict__ for c in checks]})
     return checks

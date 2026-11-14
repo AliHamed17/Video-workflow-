@@ -21,11 +21,11 @@ from .models import ContentItem
 
 log = logging.getLogger(__name__)
 
-Kind = Literal["needs_approval", "awaiting_render", "scheduled", "published", "failed",
-               "rejected", "digest", "info"]
+Kind = Literal["needs_approval", "awaiting_render", "preview_ready", "scheduled", "published",
+               "failed", "rejected", "digest", "alert", "info"]
 
-ICONS = {"needs_approval": "📝", "awaiting_render": "🎬", "scheduled": "⏰", "published": "🚀",
-         "failed": "❌", "rejected": "🗑️", "digest": "📊", "info": "ℹ️"}
+ICONS = {"needs_approval": "📝", "awaiting_render": "🎬", "preview_ready": "👀", "scheduled": "⏰",
+         "published": "🚀", "failed": "❌", "rejected": "🗑️", "digest": "📊", "alert": "🚨", "info": "ℹ️"}
 
 
 class Notice(BaseModel):
@@ -34,14 +34,16 @@ class Notice(BaseModel):
     lines: list[str] = Field(default_factory=list)
     item_id: str | None = None
     links: list[tuple[str, str]] = Field(default_factory=list)  # (label, url)
-    actions: bool = False             # offer Approve / Reject buttons
+    actions: bool = False             # offer buttons
+    action: Literal["approve", "final"] = "approve"  # approve the script, or approve the final render
     image: str | None = None          # local path (thumbnail)
 
     def plain(self) -> str:
         parts = [f"{ICONS.get(self.kind, '')} {self.title}".strip(), *self.lines]
         parts += [f"{label}: {url}" for label, url in self.links]
         if self.actions and self.item_id:
-            parts.append(f"Approve: vw approve {self.item_id}   Reject: vw reject {self.item_id}")
+            verb = "approve-final" if self.action == "final" else "approve"
+            parts.append(f"Approve: vw {verb} {self.item_id}   Reject: vw reject {self.item_id}")
         return "\n".join(parts)
 
 
@@ -90,8 +92,9 @@ class TelegramNotifier:
     def _markup(self, notice: Notice) -> dict | None:
         if not (notice.actions and notice.item_id):
             return None
+        approve = ("🎬 Render final", "final") if notice.action == "final" else ("✅ Approve", "approve")
         return {"inline_keyboard": [[
-            {"text": "✅ Approve", "callback_data": f"approve:{notice.item_id}"},
+            {"text": approve[0], "callback_data": f"{approve[1]}:{notice.item_id}"},
             {"text": "🗑️ Reject", "callback_data": f"reject:{notice.item_id}"},
         ]]}
 
@@ -125,7 +128,8 @@ class SlackNotifier:
             text += "\n" + "\n".join(notice.lines)
         text += "".join(f"\n<{url}|{label}>" for label, url in notice.links)
         if notice.actions and notice.item_id:
-            text += f"\n`vw approve {notice.item_id}` · `vw reject {notice.item_id}`"
+            verb = "approve-final" if notice.action == "final" else "approve"
+            text += f"\n`vw {verb} {notice.item_id}` · `vw reject {notice.item_id}`"
         net.send(self.http, "POST", self.url, json={"text": text}).raise_for_status()
 
 

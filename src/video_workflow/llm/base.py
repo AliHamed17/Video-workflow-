@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import re
+from pathlib import Path
 from typing import Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
@@ -37,9 +40,16 @@ class LLMProvider(Protocol):
         prompt: str,
         schema: type[T],
         effort: Effort = "high",
+        images: list[Path] | None = None,
     ) -> T:
-        """Return an instance of ``schema`` produced by ``model``."""
+        """Return an instance of ``schema`` produced by ``model`` (optionally looking at images)."""
         ...
+
+
+def image_payload(path: Path | str) -> tuple[str, str]:
+    """(media_type, base64 data) for an image file."""
+    media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+    return media_type, base64.b64encode(Path(path).read_bytes()).decode()
 
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)

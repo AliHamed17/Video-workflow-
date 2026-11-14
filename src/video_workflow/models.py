@@ -30,6 +30,7 @@ class Idea(BaseModel):
     pillar: str = Field(description="Which content pillar this belongs to")
     why_it_will_perform: str = Field(description="Retention/shareability reasoning")
     fact_check_notes: str = Field(description="Key claims and how confident we are they are true")
+    predicted_score: float = Field(description="0-10: honest prediction of how well this performs vs. our other ideas")
 
 
 class IdeaBatch(BaseModel):
@@ -74,6 +75,36 @@ class Review(BaseModel):
     revision_instructions: str = Field(description="Exact changes the writer should make ('' if approve)")
 
 
+class HookOption(BaseModel):
+    text: str = Field(description="The opening line, spoken in under 2 seconds")
+    technique: str = Field(description="e.g. curiosity gap, bold claim, direct question, visual shock")
+    strength: float = Field(description="0-10 predicted scroll-stopping power")
+
+
+class HookSet(BaseModel):
+    hooks: list[HookOption]
+    best_index: int = Field(description="0-based index of the strongest hook")
+
+
+class Claim(BaseModel):
+    claim: str
+    verdict: Literal["solid", "uncertain", "wrong"]
+    note: str = Field(description="Why, and the corrected or softened wording if not solid ('' if solid)")
+
+
+class FactCheck(BaseModel):
+    claims: list[Claim]
+    overall: Literal["pass", "fix"]
+
+
+class ShotQA(BaseModel):
+    score: float = Field(description="0-10 overall visual quality and match to the brief")
+    matches_brief: bool
+    issues: list[str] = Field(description="Concrete visible problems: artifacts, warped anatomy, garbled text, wrong subject...")
+    rerender: bool = Field(description="True if this shot should be generated again")
+    prompt_fix: str = Field(description="Extra prompt guidance for a re-render ('' if none)")
+
+
 class YouTubeMeta(BaseModel):
     title: str = Field(description="<=100 chars, curiosity-driven, no ALL CAPS spam")
     description: str
@@ -94,6 +125,33 @@ class Packaging(BaseModel):
 # --------------------------------------------------------------------------------------
 # Pipeline state
 # --------------------------------------------------------------------------------------
+
+
+class QACheck(BaseModel):
+    name: str
+    status: Literal["pass", "warn", "fail"]
+    value: str = ""
+    detail: str = ""
+
+
+class QualityReport(BaseModel):
+    checks: list[QACheck] = Field(default_factory=list)
+    score: float = 0.0           # share of checks passing, 0-100
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def failed(self) -> list[QACheck]:
+        return [c for c in self.checks if c.status == "fail"]
+
+    @property
+    def warnings(self) -> list[QACheck]:
+        return [c for c in self.checks if c.status == "warn"]
+
+
+class ShotReview(BaseModel):
+    shot_index: int
+    qa: ShotQA
+    frames: list[str] = Field(default_factory=list)   # local paths of the sampled frames
 
 
 class Stage(StrEnum):
@@ -117,6 +175,9 @@ class Clip(BaseModel):
     source: str = Field(description="Higgsfield job id, URL or 'mock'")
     url: str | None = None
     path: str | None = None
+    phase: Literal["draft", "final"] = "final"
+    keyframe: str | None = None      # local path of the keyframe still, if one was used
+    keyframe_job: str | None = None  # Higgsfield job id of the keyframe
 
 
 class VoiceClip(BaseModel):
@@ -184,12 +245,18 @@ class ContentItem(BaseModel):
     updated_at: datetime = Field(default_factory=_now)
 
     idea: Idea
+    hook_options: list[HookOption] = Field(default_factory=list)
     script: Script | None = None
+    fact_check: FactCheck | None = None
     review: Review | None = None
     revisions: int = 0
     render_plan: RenderPlan | None = None
     packaging: Packaging | None = None
     clips: list[Clip] = Field(default_factory=list)
+    render_phase: Literal["draft", "final"] = "final"
+    shot_reviews: list[ShotReview] = Field(default_factory=list)
+    rerenders: int = 0
+    quality: QualityReport | None = None
     voice_clips: list[VoiceClip] = Field(default_factory=list)
     music_track: str | None = None
     final_video: str | None = None
@@ -201,6 +268,12 @@ class ContentItem(BaseModel):
     attention: str | None = None   # why a human should look at this item
     history: list[Event] = Field(default_factory=list)
     error: str | None = None
+    failed_stage: Stage | None = None  # where it failed, so `retry` knows where to resume
+
+    @property
+    def awaiting_final_approval(self) -> bool:
+        """A low-res preview is edited and waits for a human before paying for the final render."""
+        return self.stage == Stage.EDITED and self.render_phase == "draft"
 
     def move(self, stage: Stage, note: str = "") -> None:
         self.stage = stage

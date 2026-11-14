@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from ..config import Effort
-from .base import LLMError, LLMRefusal, ProviderUnavailable, T, parse_into, schema_instructions
+from .base import (
+    LLMError,
+    LLMRefusal,
+    ProviderUnavailable,
+    T,
+    image_payload,
+    parse_into,
+    schema_instructions,
+)
 from .usage import report
 
 # OpenAI reasoning effort has no xhigh/max on every model; clamp to "high".
@@ -27,12 +35,19 @@ class OpenAIProvider:
         self._client = client or _client(api_key)
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
-                   effort: Effort = "high") -> T:
+                   effort: Effort = "high", images: list | None = None) -> T:
+        user_input: str | list = prompt
+        if images:
+            parts: list[dict] = [{"type": "input_text", "text": prompt}]
+            for path in images:
+                media_type, data = image_payload(path)
+                parts.append({"type": "input_image", "image_url": f"data:{media_type};base64,{data}"})
+            user_input = [{"role": "user", "content": parts}]
         try:
             response = self._client.responses.parse(
                 model=model,
                 instructions=system,
-                input=prompt,
+                input=user_input,
                 text_format=schema,
                 reasoning={"effort": _EFFORT[effort]},
             )
@@ -55,13 +70,18 @@ class OpenAICompatProvider:
         self._client = client or _client(api_key or "not-needed", base_url)
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
-                   effort: Effort = "high") -> T:
+                   effort: Effort = "high", images: list | None = None) -> T:
+        user: str | list = prompt
+        if images:
+            user = [{"type": "text", "text": prompt}] + [
+                {"type": "image_url", "image_url": {"url": "data:{};base64,{}".format(*image_payload(p))}}
+                for p in images]
         try:
             response = self._client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system + "\n\n" + schema_instructions(schema)},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": user},
                 ],
                 response_format={"type": "json_object"},
             )

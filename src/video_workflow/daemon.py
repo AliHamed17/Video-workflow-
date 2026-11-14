@@ -14,6 +14,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from .monitor import scan
+from .notify import Notice
 from .pipeline import STOP_STAGES, Pipeline
 
 log = logging.getLogger(__name__)
@@ -55,7 +57,34 @@ class Daemon:
         return self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone))
 
     def tick(self) -> dict:
-        report = {"requested": 0, "pitched": 0, "advanced": 0, "metrics": 0, "digest": False}
+        started = self.clock()
+        with self.pipeline.tracer.span("daemon.tick", None) as span:
+            report = self._tick()
+            span.detail = ", ".join(f"{k}={v}" for k, v in report.items())
+        interval = self.config.runtime.daemon_interval_minutes
+        self.store.kv_set("daemon_heartbeat", {
+            "at": started.isoformat(), "report": report, "interval_minutes": interval,
+            "next_at": (started + timedelta(minutes=interval)).isoformat()})
+        return report
+
+    def alert(self) -> int:
+        """Notify new alerts (each one at most every 12 h). Returns how many were sent."""
+        now = self.clock()
+        sent = self.store.kv_get("alerts_sent", {})
+        fresh = 0
+        for a in scan(self.store, self.config, now):
+            last = sent.get(a.key)
+            if last and now - datetime.fromisoformat(last) < timedelta(hours=12):
+                continue
+            self.pipeline.notify(Notice(kind="alert", title=f"{'🔴' if a.severity == 'critical' else '🟠'} {a.title}",
+                                        lines=[a.detail] if a.detail else [], item_id=a.item_id))
+            sent[a.key] = now.isoformat()
+            fresh += 1
+        self.store.kv_set("alerts_sent", sent)
+        return fresh
+
+    def _tick(self) -> dict:
+        report = {"requested": 0, "pitched": 0, "advanced": 0, "metrics": 0, "digest": False, "alerts": 0}
         # 1. Requests queued from Telegram / dashboard.
         requests = self.store.kv_get("pending_requests", [])
         if requests:
@@ -88,6 +117,9 @@ class Daemon:
             self.pipeline.notify(self.pipeline.digest())
             self.store.kv_set("last_digest", today.isoformat())
             report["digest"] = True
+
+        # 6. Alerts.
+        report["alerts"] = self.alert()
         return report
 
     def _bot_loop(self, stop: threading.Event) -> None:

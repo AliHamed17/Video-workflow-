@@ -62,13 +62,37 @@ class ChannelConfig(BaseModel):
     visual_style: str = ""
 
 
+class UnitCosts(BaseModel):
+    """Credits per unit, used for estimates (the headless renderer also preflights live prices)."""
+
+    keyframe: float = 2      # one keyframe still
+    draft: float = 15        # one 480p draft shot
+    final: float = 80        # one full-resolution shot
+
+
 class HiggsfieldConfig(BaseModel):
     model: str = "seedance_2_5"
     shot_duration_s: int = 5
-    params: dict = Field(default_factory=dict)
+    params: dict = Field(default_factory=dict)          # every video request (final resolution etc.)
     use_unlim: bool = False
     max_credits_per_video: float = 600
     poll_timeout_s: int = 1200
+    # Quality strategies
+    keyframes: bool = True        # make a still per shot first, then animate it (sharper, consistent)
+    keyframe_model: str = "nano_banana_pro"
+    keyframe_params: dict = Field(default_factory=lambda: {"resolution": "2k"})
+    keyframe_video_params: dict = Field(default_factory=lambda: {"mode": "omni_reference"})
+    keyframe_role: str = "start_image"
+    draft_preview: bool = True    # render cheap drafts, approve the preview, then finalize full-res
+    draft_params: dict = Field(default_factory=lambda: {"draft": True})
+    unit_costs: UnitCosts = Field(default_factory=UnitCosts)
+
+    def estimate(self, shots: int, phase: str = "all") -> float:
+        """Credits for a video: keyframes + drafts + finals (phase: all | draft | final)."""
+        c = self.unit_costs
+        draft_part = shots * ((c.keyframe if self.keyframes else 0) + (c.draft if self.draft_preview else 0))
+        final_part = shots * c.final
+        return {"draft": draft_part, "final": final_part}.get(phase, draft_part + final_part)
 
 
 class CaptionConfig(BaseModel):
@@ -132,6 +156,21 @@ class ReviewConfig(BaseModel):
     on_exhausted: Literal["human", "reject"] = "human"
 
 
+class QualityConfig(BaseModel):
+    visual_qa: bool = True            # a vision model inspects frames of every rendered shot
+    visual_min_score: float = 6.5     # shots below this (or flagged) are re-rendered
+    max_rerenders: int = 1            # automatic re-render rounds per video
+    block_publish_on_fail: bool = True
+    loudness_tolerance_lu: float = 2.0
+
+
+class ContentConfig(BaseModel):
+    hook_variants: int = 5            # hook lab: generate N openings, keep the strongest (0 = off)
+    fact_check: bool = True           # independent fact-check pass before the critic
+    idea_overgenerate: int = 2        # pitch N extra ideas and keep the best by predicted score
+    formats: list[str] = Field(default_factory=list)  # recurring series formats for the channel
+
+
 class ApprovalConfig(BaseModel):
     mode: Literal["manual", "auto"] = "manual"
     auto_min_score: float = 8.5
@@ -184,7 +223,8 @@ class NotifyConfig(BaseModel):
     channels: list[Literal["telegram", "slack", "discord", "webhook", "log"]] = Field(
         default_factory=lambda: ["log"])
     events: list[str] = Field(default_factory=lambda: [
-        "needs_approval", "awaiting_render", "scheduled", "published", "failed", "rejected", "digest"])
+        "needs_approval", "awaiting_render", "preview_ready", "scheduled", "published", "failed",
+        "rejected", "digest", "alert"])
 
 
 class RuntimeConfig(BaseModel):
@@ -194,6 +234,8 @@ class RuntimeConfig(BaseModel):
     max_backlog: int = 6            # don't pitch more while this many items are unfinished
     stats_every_hours: int = 6
     digest_hour: int = 20           # local hour for the daily summary (schedule timezone)
+    stuck_after_hours: float = 6    # alert when an item sits in a working stage this long
+    daily_credit_budget: float = 1000  # alert when Higgsfield spend in a day passes this
 
 
 class AppConfig(BaseModel):
@@ -206,6 +248,8 @@ class AppConfig(BaseModel):
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    quality: QualityConfig = Field(default_factory=QualityConfig)
+    content: ContentConfig = Field(default_factory=ContentConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> AppConfig:

@@ -1,10 +1,13 @@
 """Headless Higgsfield rendering through the Higgsfield MCP server.
 
-Flow per item: preflight cost (``generate_video`` with ``get_cost``) -> submit every shot
-with ``generate_video_batch`` -> poll ``jobs_wait`` until all jobs are terminal -> download.
+Per item and phase:
+1. Price check (``get_cost``) and balance check (``balance``): stop before spending if the video
+   would exceed ``max_credits_per_video`` or the account balance.
+2. Keyframes (optional): ``generate_image_batch`` → ``jobs_wait`` → one still per shot.
+3. Video: ``generate_video_batch`` (draft, final, or finalize-from-draft) → ``jobs_wait``.
+4. Download clips (and keyframes) next to the item.
 
-The MCP transport is behind ``ToolCaller`` so the orchestration is unit-testable without
-network access (see tests/test_higgsfield.py).
+The MCP transport is behind ``ToolCaller`` so the orchestration is unit-testable offline.
 """
 
 from __future__ import annotations
@@ -21,10 +24,11 @@ import httpx
 
 from ..config import HiggsfieldConfig
 from ..models import Clip, ContentItem, RenderPlan
-from .base import RenderResult, download, full_prompt
+from .base import RenderResult, download, keyframe_params, video_params
 
 DONE = {"completed", "succeeded", "success", "done", "finished"}
 FAILED = {"failed", "error", "canceled", "cancelled", "lookup_failed", "nsfw", "rejected", "timeout"}
+CONTEXT = "Automated short-form video pipeline rendering scripted shots."
 
 
 class HiggsfieldError(RuntimeError):
@@ -32,6 +36,10 @@ class HiggsfieldError(RuntimeError):
 
 
 class BudgetExceeded(HiggsfieldError):
+    pass
+
+
+class InsufficientCredits(HiggsfieldError):
     pass
 
 
@@ -94,7 +102,7 @@ def _walk(obj: Any) -> Iterator[dict]:
 
 
 def extract_jobs(payload: Any) -> dict[int, str]:
-    """{index: job_id} from a generate_video_batch response."""
+    """{index: job_id} from a generate_*_batch response."""
     jobs = {}
     for d in _walk(payload):
         if "index" in d and isinstance(d.get("job_id"), str):
@@ -125,11 +133,8 @@ def extract_states(payload: Any) -> dict[str, dict]:
     states = {}
     for d in _walk(payload):
         if isinstance(d.get("job_id"), str) and "status" in d:
-            states[d["job_id"]] = {
-                "status": str(d["status"]).lower(),
-                "url": _first_url(d),
-                "error": d.get("error"),
-            }
+            states[d["job_id"]] = {"status": str(d["status"]).lower(), "url": _first_url(d),
+                                   "error": d.get("error")}
     return states
 
 
@@ -141,85 +146,132 @@ def extract_credits(payload: Any) -> float | None:
     return None
 
 
+def extract_balance(payload: Any) -> tuple[float | None, str | None]:
+    """(credits, plan) from the balance tool."""
+    for d in _walk(payload):
+        if isinstance(d.get("credits"), (int, float)):
+            return float(d["credits"]), d.get("subscription_plan_type") or d.get("plan")
+    return None, None
+
+
 class HiggsfieldMCPGenerator:
     name = "higgsfield_mcp"
 
     def __init__(self, config: HiggsfieldConfig, aspect_ratio: str,
                  caller_factory: Callable[[], AbstractAsyncContextManager[ToolCaller]],
-                 http: httpx.Client | None = None, poll_interval_s: float = 10.0):
+                 http: httpx.Client | None = None, poll_interval_s: float = 10.0,
+                 on_balance: Callable[[float, str | None], None] | None = None):
         self.config = config
         self.aspect_ratio = aspect_ratio
         self.caller_factory = caller_factory
         self.http = http
         self.poll_interval_s = poll_interval_s
-
-    def _params(self, plan: RenderPlan, index: int, duration: int) -> dict:
-        return {
-            "model": self.config.model,
-            "prompt": full_prompt(plan, index),
-            "aspect_ratio": self.aspect_ratio,
-            "duration": duration,
-            "use_unlim": self.config.use_unlim,
-            **self.config.params,
-        }
+        self.on_balance = on_balance or (lambda credits, plan: None)
 
     def render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:
         return asyncio.run(self._render(item, plan, out_dir))
 
-    async def _render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:
-        context = "Automated short-form video pipeline rendering one scripted shot per request."
+    async def balance(self) -> tuple[float | None, str | None]:
         async with self.caller_factory() as caller:
-            # 1. Budget guard.
-            first = plan.shots[0]
-            preflight = self._params(plan, first.index, first.duration_s) | {"get_cost": True}
-            preflight.pop("use_unlim", None)
-            cost = extract_credits(await caller.call("generate_video", {"params": preflight, "context": context}))
-            estimate = 0.0
-            if cost is not None:
-                estimate = cost * len(plan.shots)
-                if estimate > self.config.max_credits_per_video:
-                    raise BudgetExceeded(
-                        f"Estimated {estimate:.0f} credits > budget {self.config.max_credits_per_video:.0f}"
-                    )
+            return extract_balance(await caller.call("balance", {}))
 
-            # 2. Submit (max 12 per batch).
-            jobs: dict[int, str] = {}
-            for start in range(0, len(plan.shots), 12):
-                chunk = plan.shots[start : start + 12]
-                requests = [{"index": s.index, "params": self._params(plan, s.index, s.duration_s)} for s in chunk]
-                submitted = await caller.call("generate_video_batch", {"requests": requests, "context": context})
-                jobs |= extract_jobs(submitted)
-            missing = [s.index for s in plan.shots if s.index not in jobs]
-            if missing:
-                raise HiggsfieldError(f"No job id returned for shots {missing}; check the Higgsfield dashboard before retrying")
+    # ---- helpers --------------------------------------------------------------------------
+    async def _wait(self, caller: ToolCaller, jobs: dict[int, str]) -> dict[str, dict]:
+        deadline = time.monotonic() + self.config.poll_timeout_s
+        states: dict[str, dict] = {}
+        while True:
+            pending = [(i, j) for i, j in jobs.items() if states.get(j, {}).get("status") not in DONE | FAILED]
+            if not pending:
+                return states
+            if time.monotonic() > deadline:
+                raise HiggsfieldError(f"Timed out waiting for jobs {[j for _, j in pending]}")
+            for start in range(0, len(pending), 12):
+                group = [{"index": i, "job_id": j} for i, j in pending[start : start + 12]]
+                states |= extract_states(await caller.call("jobs_wait", {"jobs": group, "timeout_seconds": 15}))
+            if any(states.get(j, {}).get("status") not in DONE | FAILED for _, j in pending):
+                await asyncio.sleep(self.poll_interval_s)
 
-            # 3. Poll until every job is terminal.
-            deadline = time.monotonic() + self.config.poll_timeout_s
-            states: dict[str, dict] = {}
-            while True:
-                pending = [(i, j) for i, j in jobs.items() if states.get(j, {}).get("status") not in DONE | FAILED]
-                if not pending:
-                    break
-                if time.monotonic() > deadline:
-                    raise HiggsfieldError(f"Timed out waiting for jobs {[j for _, j in pending]}")
-                for start in range(0, len(pending), 12):
-                    group = [{"index": i, "job_id": j} for i, j in pending[start : start + 12]]
-                    states |= extract_states(await caller.call("jobs_wait", {"jobs": group, "timeout_seconds": 15}))
-                still = [j for _, j in pending if states.get(j, {}).get("status") not in DONE | FAILED]
-                if still:
-                    await asyncio.sleep(self.poll_interval_s)
+    async def _batch(self, caller: ToolCaller, tool: str, requests: list[dict]) -> dict[int, str]:
+        jobs: dict[int, str] = {}
+        for start in range(0, len(requests), 12):
+            jobs |= extract_jobs(await caller.call(tool, {"requests": requests[start : start + 12],
+                                                          "context": CONTEXT}))
+        missing = [r["index"] for r in requests if r["index"] not in jobs]
+        if missing:
+            raise HiggsfieldError(f"No job id returned for shots {missing}; check Higgsfield before retrying")
+        return jobs
 
+    @staticmethod
+    def _raise_failures(states: dict[str, dict], what: str) -> None:
         failed = {j: s for j, s in states.items() if s["status"] in FAILED}
         if failed:
-            raise HiggsfieldError(f"Higgsfield jobs failed: {failed}")
+            raise HiggsfieldError(f"Higgsfield {what} failed: {failed}")
+
+    # ---- render ---------------------------------------------------------------------------
+    async def _render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:
+        hf, phase = self.config, item.render_phase
+        drafts = {c.shot_index: c.source for c in item.clips if c.phase == "draft"}
+        use_keyframes = hf.keyframes and not (phase == "final" and drafts)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        async with self.caller_factory() as caller:
+            # 1. Price and balance checks before spending anything.
+            first = plan.shots[0]
+            probe = video_params(hf, self.aspect_ratio, plan, first, phase,
+                                 draft_job=drafts.get(first.index) if phase == "final" else None)
+            probe.pop("medias", None)
+            per_shot = extract_credits(await caller.call("generate_video",
+                                                         {"params": probe | {"get_cost": True}, "context": CONTEXT}))
+            if per_shot is None:
+                per_shot = hf.unit_costs.draft if phase == "draft" else hf.unit_costs.final
+            if use_keyframes:
+                kf = keyframe_params(hf, self.aspect_ratio, plan, first) | {"get_cost": True}
+                per_shot += extract_credits(await caller.call("generate_image", {"params": kf, "context": CONTEXT})) \
+                    or hf.unit_costs.keyframe
+            estimate = per_shot * len(plan.shots)
+            if estimate > hf.max_credits_per_video:
+                raise BudgetExceeded(f"Estimated {estimate:.0f} credits > budget {hf.max_credits_per_video:.0f}")
+            credits, plan_type = extract_balance(await caller.call("balance", {}))
+            if credits is not None:
+                self.on_balance(credits, plan_type)
+                if credits < estimate:
+                    raise InsufficientCredits(
+                        f"Higgsfield balance is {credits:.0f} credits ({plan_type or 'unknown plan'}); "
+                        f"this {phase} render needs ≈{estimate:.0f}. Top up, then retry.")
+
+            # 2. Keyframes.
+            keyframe_jobs: dict[int, str] = {}
+            keyframe_paths: dict[int, Path] = {}
+            if use_keyframes:
+                requests = [{"index": s.index, "params": keyframe_params(hf, self.aspect_ratio, plan, s)
+                             | {"use_unlim": hf.use_unlim}} for s in plan.shots]
+                keyframe_jobs = await self._batch(caller, "generate_image_batch", requests)
+                states = await self._wait(caller, keyframe_jobs)
+                self._raise_failures(states, "keyframes")
+                for index, job in keyframe_jobs.items():
+                    url = states[job]["url"]
+                    if url:
+                        keyframe_paths[index] = download(url, out_dir / f"keyframe_{index:02d}.jpg", self.http)
+
+            # 3. Video shots.
+            requests = [{"index": s.index, "params": video_params(
+                hf, self.aspect_ratio, plan, s, phase, keyframe_job=keyframe_jobs.get(s.index),
+                draft_job=drafts.get(s.index) if phase == "final" else None, use_unlim=hf.use_unlim)}
+                for s in plan.shots]
+            video_jobs = await self._batch(caller, "generate_video_batch", requests)
+            states = await self._wait(caller, video_jobs)
+            self._raise_failures(states, f"{phase} shots")
 
         # 4. Download.
         clips = []
-        for index, job_id in sorted(jobs.items()):
+        for index, job_id in sorted(video_jobs.items()):
             url = states[job_id]["url"]
             if not url:
                 raise HiggsfieldError(f"Job {job_id} finished without a result URL: {states[job_id]}")
-            path = download(url, out_dir / f"shot_{index:02d}.mp4", self.http)
-            clips.append(Clip(shot_index=index, source=job_id, url=url, path=str(path)))
+            path = download(url, out_dir / f"shot_{index:02d}_{phase}.mp4", self.http)
+            clips.append(Clip(shot_index=index, source=job_id, url=url, path=str(path), phase=phase,
+                              keyframe=str(keyframe_paths[index]) if index in keyframe_paths else None,
+                              keyframe_job=keyframe_jobs.get(index)))
         return RenderResult(clips=clips, credits=estimate,
-                            note=f"{len(clips)} clips rendered on {self.config.model}")
+                            note=f"{len(clips)} {phase} shot(s) on {hf.model}"
+                                 + (" from keyframes" if use_keyframes else ""))

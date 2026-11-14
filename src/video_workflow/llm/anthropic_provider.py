@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..config import Effort
-from .base import LLMError, LLMRefusal, ProviderUnavailable, T
+from .base import LLMError, LLMRefusal, ProviderUnavailable, T, image_payload
 from .usage import report
 
 # Server-side refusal fallback: if the model declines, the API re-runs the request on a
@@ -25,15 +25,23 @@ class AnthropicProvider:
         self._client = client
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
-                   effort: Effort = "high") -> T:
+                   effort: Effort = "high", images: list | None = None) -> T:
         import anthropic
 
+        content: str | list = prompt
+        if images:
+            content = []
+            for path in images:
+                media_type, data = image_payload(path)
+                content.append({"type": "image",
+                                "source": {"type": "base64", "media_type": media_type, "data": data}})
+            content.append({"type": "text", "text": prompt})
         try:
             response = self._client.beta.messages.parse(
                 model=model,
                 max_tokens=16000,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
                 output_format=schema,
                 output_config={"effort": effort},
                 betas=[_FALLBACK_BETA],

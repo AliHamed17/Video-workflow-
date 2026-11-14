@@ -20,7 +20,8 @@ from .store import Store
 
 log = logging.getLogger(__name__)
 
-HELP = ("Commands:\n/list — items in progress\n/status <id>\n/approve <id>\n/reject <id>\n"
+HELP = ("Commands:\n/list — items in progress\n/status <id>\n/approve <id>\n/final <id> — render the full-res final\n"
+        "/reject <id>\n/retry <id>\n/alerts\n"
         "/ideas [n] [topic] — pitch new ideas on the next cycle\n/digest — summary now")
 
 
@@ -79,8 +80,13 @@ class TelegramBot:
         text = (message.get("text") or "").strip()
         command, _, rest = text.partition(" ")
         command = command.split("@")[0].lower()
-        if command in ("/approve", "/reject"):
+        if command in ("/approve", "/reject", "/final", "/retry"):
             self.say(self.act(command[1:], rest.strip()))
+        elif command == "/alerts":
+            from .monitor import scan
+            alerts = scan(self.store, self.pipeline.config)
+            self.say("\n".join(f"{'🔴' if a.severity == 'critical' else '🟠'} {a.title} — {a.detail}"
+                               for a in alerts) or "No alerts. All good.")
         elif command == "/list":
             self.say(self.list_text())
         elif command == "/status":
@@ -112,6 +118,14 @@ class TelegramBot:
             if action == "reject":
                 self.pipeline.reject(item, note="rejected via Telegram")
                 return f"🗑️ Rejected {item.id}: {item.idea.title}"
+            if action == "final":
+                self.pipeline.approve_final(item, note="final approved via Telegram")
+                self.on_change()
+                return f"🎬 Final render approved for {item.id}: {item.idea.title}"
+            if action == "retry":
+                self.pipeline.retry(item)
+                self.on_change()
+                return f"🔁 Retrying {item.id} from {item.stage.value}"
         except (KeyError, ValueError) as exc:
             return f"Couldn't {action} {item_id}: {exc}"
         return f"Unknown action {action!r}"

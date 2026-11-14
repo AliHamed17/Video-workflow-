@@ -6,11 +6,16 @@ Nothing here touches the network.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 
 import httpx
 
 from .models import (
+    Claim,
+    FactCheck,
+    HookOption,
+    HookSet,
     Idea,
     IdeaBatch,
     Packaging,
@@ -19,6 +24,7 @@ from .models import (
     Script,
     Shot,
     ShotPrompt,
+    ShotQA,
     SocialMeta,
     YouTubeMeta,
 )
@@ -33,10 +39,12 @@ class ScriptedLLM:
         self.responses = responses
         self.calls: list[tuple[str, str]] = []
 
-    def structured(self, *, model, system, prompt, schema, effort="high"):
+    def structured(self, *, model, system, prompt, schema, effort="high", images=None):
         from .llm.usage import report
 
         self.calls.append((schema.__name__, prompt))
+        if images:
+            self.image_calls = getattr(self, "image_calls", 0) + 1
         value = self.responses[schema]
         if isinstance(value, list):
             value = value.pop(0) if len(value) > 1 else value[0]
@@ -62,9 +70,25 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
     idea = Idea(title="An octopus has three hearts — and one stops when it swims",
                 hook="This animal has three hearts.", angle="biology that sounds fake but isn't",
                 pillar="animal superpowers", why_it_will_perform="number + surprise + visual payoff",
-                fact_check_notes="Three hearts and copper-based blue blood are textbook facts.")
+                fact_check_notes="Three hearts and copper-based blue blood are textbook facts.",
+                predicted_score=8.4)
     return {
-        IdeaBatch: IdeaBatch(ideas=[idea, idea.model_copy(update={"title": "Why the mantis shrimp punch boils water"})]),
+        IdeaBatch: IdeaBatch(ideas=[
+            idea,
+            idea.model_copy(update={"title": "Why the mantis shrimp punch boils water", "predicted_score": 7.9}),
+            idea.model_copy(update={"title": "Clouds weigh as much as elephants", "predicted_score": 6.1}),
+        ]),
+        HookSet: HookSet(best_index=1, hooks=[
+            HookOption(text="This animal has three hearts.", technique="bold claim", strength=7),
+            HookOption(text="One of this animal's three hearts stops when it swims.", technique="curiosity gap",
+                       strength=9),
+            HookOption(text="Why is octopus blood blue?", technique="question", strength=6),
+        ]),
+        FactCheck: FactCheck(overall="pass", claims=[
+            Claim(claim="Octopuses have three hearts", verdict="solid", note=""),
+            Claim(claim="Octopus blood is blue (hemocyanin)", verdict="solid", note=""),
+        ]),
+        ShotQA: ShotQA(score=8.2, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
         Script: Script(title=idea.title, hook=idea.hook,
                        shots=[Shot(index=i, duration_s=duration, visual=v, voiceover=vo, on_screen_text=t)
                               for i, (v, vo, t) in enumerate(picked)],
@@ -151,8 +175,12 @@ class FakePlatforms:
             if req.content:
                 try:
                     self.telegram_messages.append({"method": method, **json.loads(req.content)})
-                except ValueError:
-                    self.telegram_messages.append({"method": method})
+                except ValueError:  # multipart (sendPhoto): pull out the text fields
+                    body = req.content.decode("latin-1")
+                    fields = dict(re.findall(r'name="(\w+)"\r\n\r\n(.*?)\r\n--', body, re.DOTALL))
+                    if "reply_markup" in fields:
+                        fields["reply_markup"] = json.loads(fields["reply_markup"])
+                    self.telegram_messages.append({"method": method, **fields})
             if method == "getMe":
                 return httpx.Response(200, json={"ok": True, "result": {"username": "demo_bot"}})
             return httpx.Response(200, json={"ok": True, "result": []})

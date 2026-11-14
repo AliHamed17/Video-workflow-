@@ -109,9 +109,10 @@ def test_handoff_flow_registers_clips(config, tmp_path):
     item = pipe.render(item)
     assert item.stage == Stage.AWAITING_RENDER
     request = json.loads((pipe.store.item_dir(item.id) / "clips" / "render_request.json").read_text())
-    assert [r["index"] for r in request["requests"]] == [0, 1]
-    assert request["requests"][0]["params"]["aspect_ratio"] == "9:16"
-    assert "teal and orange" in request["requests"][0]["params"]["prompt"]
+    assert [r["index"] for r in request["shots"]] == [0, 1]
+    assert request["shots"][0]["video"]["aspect_ratio"] == "9:16"
+    assert "teal and orange" in request["shots"][0]["video"]["prompt"]
+    assert request["phase"] == "final" and request["shots"][0]["keyframe"] is None
 
     # Simulate the Claude Code skill: render elsewhere, then register each clip.
     rendered = MockGenerator(width=360, height=640).render(item, item.render_plan, tmp_path / "ext")

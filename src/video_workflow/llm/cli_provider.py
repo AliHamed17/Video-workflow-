@@ -22,7 +22,9 @@ class CLIAgentProvider:
         self._run = runner
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
-                   effort: Effort = "high") -> T:
+                   effort: Effort = "high", images: list | None = None) -> T:
+        if images:
+            raise ProviderUnavailable("CLI agents are not used for image inputs")
         # For this provider the "model" part of the route names the CLI: cli:claude, cli:codex ...
         command = self._commands.get(model)
         if not command:

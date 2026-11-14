@@ -20,13 +20,21 @@ class GeminiProvider:
         self._client = client
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
-                   effort: Effort = "high") -> T:
+                   effort: Effort = "high", images: list | None = None) -> T:
+        from pathlib import Path
+
         from google.genai import types
 
+        contents: str | list = prompt
+        if images:
+            import mimetypes
+            contents = [types.Part.from_bytes(data=Path(p).read_bytes(),
+                                              mime_type=mimetypes.guess_type(str(p))[0] or "image/jpeg")
+                        for p in images] + [prompt]
         try:
             response = self._client.models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
                     response_mime_type="application/json",

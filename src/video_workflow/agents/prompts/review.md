@@ -6,6 +6,9 @@ Fact-check notes from the writer: $fact_check
 Script (JSON):
 $script
 
+Independent fact-check of this draft:
+$independent_check
+
 Score honestly (0-10). Check, in order:
 1. Factual accuracy — anything false or misleading (including visuals that misrepresent the
    mechanism or order of events) means "revise" (fixable) or "reject" (the premise is wrong).

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 
 from ..config import Effort, LLMConfig, Secrets
@@ -33,6 +34,15 @@ class LLMRouter:
         self._factories: dict[str, Callable[[], LLMProvider]] = self._default_factories()
         self.calls: list[tuple[str, str, str]] = []  # (task, route, outcome) for observability
         self._lock = threading.Lock()
+        # Called after every attempt: (task, label, outcome, latency_ms, input_tokens, output_tokens, error)
+        self.listeners: list[Callable[..., None]] = []
+
+    def _emit(self, *args) -> None:
+        for listener in self.listeners:
+            try:
+                listener(*args)
+            except Exception:  # observers must never break a call
+                log.debug("router listener failed", exc_info=True)
 
     # ---- provider construction ---------------------------------------------------------
     def _default_factories(self) -> dict[str, Callable[[], LLMProvider]]:
@@ -92,8 +102,12 @@ class LLMRouter:
         return self._providers[name]
 
     # ---- calls -------------------------------------------------------------------------
+    # New tasks inherit a sensible route if the config predates them.
+    FALLBACK_TASK = {"hooks": "scripting", "factcheck": "review", "visual_qa": "review"}
+
     def candidates(self, task: str) -> list[tuple[str, str]]:
-        route = self.config.routes.get(task) or self.config.routes.get("default")
+        route = (self.config.routes.get(task) or self.config.routes.get(self.FALLBACK_TASK.get(task, ""))
+                 or self.config.routes.get("default"))
         if not route:
             raise LLMError(f"No LLM route configured for task {task!r}")
         out = []
@@ -105,27 +119,37 @@ class LLMRouter:
         return out
 
     def structured(self, task: str, *, system: str, prompt: str, schema: type[T],
-                   effort: Effort | None = None) -> T:
+                   effort: Effort | None = None, images: list | None = None) -> T:
         effort = effort or self.config.effort.get(task, "high")
         errors: list[str] = []
         for provider_name, model in self.candidates(task):
             label = f"{provider_name}:{model}"
+            start = time.perf_counter()
             try:
                 provider = self.provider(provider_name)
+                kwargs = {"images": images} if images else {}
                 with usage.call_capture() as tokens:
                     result = provider.structured(model=model, system=system, prompt=prompt,
-                                                 schema=schema, effort=effort)
+                                                 schema=schema, effort=effort, **kwargs)
             except ProviderUnavailable as exc:
                 errors.append(f"{label} unavailable ({exc})")
                 self.calls.append((task, label, "unavailable"))
                 continue
+            except TypeError as exc:
+                if images and "images" in str(exc):
+                    errors.append(f"{label} cannot take images")
+                    self.calls.append((task, label, "unavailable"))
+                    continue
+                raise
             except LLMError as exc:
                 log.warning("LLM %s failed for %s: %s", label, task, exc)
                 errors.append(f"{label} failed ({exc})")
                 self.calls.append((task, label, "error"))
+                self._emit(task, label, "error", int((time.perf_counter() - start) * 1000), 0, 0, str(exc))
                 continue
             self.calls.append((task, label, "ok"))
             usage.record(label, tokens[0], tokens[1])
+            self._emit(task, label, "ok", int((time.perf_counter() - start) * 1000), tokens[0], tokens[1], "")
             log.info("LLM %s served %s (%d in / %d out tokens)", label, task, tokens[0], tokens[1])
             return result
         raise LLMError(f"All LLM candidates failed for {task!r}: " + "; ".join(errors))
