@@ -19,15 +19,17 @@
 
 ```mermaid
 stateDiagram-v2
-    [*] --> idea: TrendScout.pitch
-    idea --> reviewed: write → critique (→ revise ≤ N) → direct → package
+    [*] --> idea: TrendScout.pitch (over-generate, keep best)
+    idea --> reviewed: hook lab → write → fact-check → critique (→ revise ≤ N) → direct → package
     idea --> rejected: critic rejects / never reaches bar
     reviewed --> approved: vw approve (or auto if score ≥ auto_min_score)
     approved --> awaiting_render: handoff generator
     awaiting_render --> rendered: all shots registered (vw clips add)
     approved --> rendered: higgsfield_mcp / mock generator
-    rendered --> edited: ffmpeg editor
-    edited --> published: every configured platform succeeded
+    rendered --> approved: visual QA sends weak shots back (≤ max_rerenders)
+    rendered --> edited: voice · music · captions · technical QA
+    edited --> approved: preview watched → approve final (render_phase=final)
+    edited --> published: final cut passed QA, slot due, every platform succeeded
     edited --> edited: partial publish (only failed platforms are retried)
     idea --> failed: any unexpected error
     approved --> failed
@@ -61,7 +63,9 @@ stage.
 | Trends | `trends.py` | Google Trends RSS, Reddit top posts, any RSS/Atom feed (fail-soft) |
 | Notify | `notify.py`, `telegram_bot.py` | Telegram (Approve/Reject buttons), Slack, Discord, webhook; bot commands from the owner chat only |
 | Ops | `daemon.py`, `dashboard.py`, `health.py` | Always-on loop with file lock; web UI; live connection checks |
-| Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs |
+| Quality | `agents/hook_lab.py`, `agents/fact_checker.py`, `agents/visual_qa.py`, `quality.py` | Hook variants, claim-by-claim fact-check, vision QA of shot frames, technical QA of the cut |
+| Observability | `trace.py`, `monitor.py`, `web/` | Event log of every step (spans with duration/status/detail), alerts, dashboard pages + JSON/Prometheus APIs |
+| Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |
 | Entry | `cli.py`, `factory.py` | `vw` commands; wiring from config |
 
 ## Agent roles
@@ -86,6 +90,15 @@ upscaling, TikTok publishing...) through one MCP server. Using MCP means:
   (`handoff` mode). No extra credentials, and you can step in creatively;
 - for **headless** runs the pipeline is just another MCP client (`higgsfield_mcp` mode);
 - new Higgsfield models show up without code changes: set `video.higgsfield.model`.
+
+## Tracing
+
+`Tracer.span(step, item_id)` wraps every step and records an event (status `ok` / `warn` /
+`error` / `gated` / `skipped`, duration, detail, attributes such as model, tokens, credits).
+The router reports every LLM attempt (model, latency, tokens, errors) through a listener. A
+context variable binds the current item so nested calls are attributed correctly (re-bound
+explicitly inside worker threads). The dashboard, `vw logs`, metrics and alerts all read this
+one log.
 
 ## Feedback loop
 

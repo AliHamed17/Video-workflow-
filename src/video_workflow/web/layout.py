@@ -31,6 +31,7 @@ h2{font-size:15px;margin:22px 0 10px}h3{margin:0 0 8px;font-size:15px}
 .muted,.meta{color:var(--muted);font-size:13px}
 .grid{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:20px}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:6px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .kpi b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.kpi span{color:var(--muted);font-size:12px}
@@ -45,7 +46,7 @@ a.card:hover{border-color:var(--accent);text-decoration:none}
 section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
 .grid>div{min-width:0}table{width:100%;border-collapse:collapse;font-size:13.5px}
 td,th{border-top:1px solid var(--line);padding:6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
-th{color:var(--muted);font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+th{color:var(--muted);font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);white-space:nowrap}
 .s-ok,.s-pass,.s-solid{color:var(--ok);border-color:currentColor}.s-error,.s-fail,.s-wrong{color:var(--bad);border-color:currentColor}
 .s-warn,.s-uncertain{color:var(--warn);border-color:currentColor}.s-gated,.s-skipped{color:var(--info);border-color:currentColor}
@@ -59,8 +60,9 @@ button:hover{border-color:var(--accent)}
 .alert{padding:9px 12px;border-radius:8px;margin-bottom:8px;border:1px solid var(--line);background:var(--card)}
 .alert.critical{border-left:4px solid var(--bad)}.alert.warning{border-left:4px solid var(--warn)}
 .flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
-.node{position:relative;background:var(--card);border:1px solid var(--line);border-top:4px solid var(--muted);border-radius:10px;padding:10px}
+.node{position:relative;display:block;color:var(--ink);background:var(--card);border:1px solid var(--line);border-top:4px solid var(--muted);border-radius:10px;padding:10px}
 .node.ok{border-top-color:var(--ok)}.node.warn{border-top-color:var(--warn)}.node.error{border-top-color:var(--bad)}
+a.node:hover{text-decoration:none;border-color:var(--accent)}
 .node .n{position:absolute;top:8px;right:10px;color:var(--muted);font-size:12px}
 .frames{display:flex;gap:6px;flex-wrap:wrap}.frames img{width:72px;aspect-ratio:9/16;object-fit:cover;border-radius:5px;background:#000}
 .bar{height:10px;background:var(--accent);border-radius:3px;min-width:2px}
@@ -144,6 +146,6 @@ def bars_svg(points: list[tuple[str, float]], height: int = 90, fmt=lambda v: f"
                      f'height="{max(bh, 1):.1f}" rx="2" fill="var(--accent)"><title>{label}: {fmt(v)}</title></rect>')
         if v:
             rects.append(f'<text x="{x + w / 2:.2f}%" y="{height - 19 - bh:.1f}" text-anchor="middle">{fmt(v)}</text>')
-        if i % 2 == 0:
+        if i % 3 == 0 or i == len(points) - 1:
             labels.append(f'<text x="{x + w / 2:.2f}%" y="{height - 3}" text-anchor="middle">{label[5:]}</text>')
     return f'<svg width="100%" height="{height}" role="img">{"".join(rects)}{"".join(labels)}</svg>'

@@ -292,6 +292,8 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         steps = {e["step"] for e in store.events(limit=5000)}
         missing = [s for s in EXPECTED_STEPS if s not in steps]
         assert not missing, f"no trace for: {missing}"
+        orphans = [e for e in store.events(step_prefix="llm.visual_qa", limit=100) if not e["item_id"]]
+        assert not orphans, "visual QA calls must be linked to their video"
         errors = store.events(status="error", limit=50)
         return f"{len(steps)} distinct steps traced, every expected step present, {len(errors)} error event(s)"
 

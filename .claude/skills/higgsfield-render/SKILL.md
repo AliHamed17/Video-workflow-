@@ -1,39 +1,44 @@
 ---
 name: higgsfield-render
-description: Render pipeline items that are waiting in the "awaiting_render" stage by generating every shot with the Higgsfield MCP tools, then register the clips with `vw clips add` so the pipeline can edit and publish them. Use when the user asks to render, generate the videos, or continue the video pipeline.
+description: Render pipeline items waiting in the "awaiting_render" stage with the Higgsfield MCP tools (keyframe stills, then draft or final video shots), check the balance and cost first, and register every result with `vw clips add` so the pipeline can continue. Use when the user asks to render, generate the videos, or continue the video pipeline.
 ---
 
 # Render pending shots with Higgsfield
 
-The Python pipeline (`vw`) writes the scripts and shot prompts; this skill does the
-rendering through the Higgsfield MCP server (configured in `.mcp.json` as `higgsfield`;
-on claude.ai the connector may have a different name — use whichever Higgsfield tools
-are available: `generate_video`, `generate_video_batch`, `jobs_wait`).
+The Python pipeline (`vw`) writes the scripts and shot prompts; this skill renders them through
+the Higgsfield MCP server (declared in `.mcp.json` as `higgsfield`; on claude.ai the connector
+may have another name — use whichever Higgsfield tools are available: `balance`,
+`generate_image`, `generate_video`, `generate_image_batch`, `generate_video_batch`, `jobs_wait`).
 
 ## Steps
 
-1. Find work: `vw list --stage awaiting_render`. For each item id, read the request with
-   `vw render-request <id>` (file: `data/items/<id>/clips/render_request.json`).
-2. **Budget check before spending credits.** Call `generate_video` once with the first
-   request's `params` plus `"get_cost": true` (this submits nothing). Multiply the credits by
-   the number of requests. If the total is above the request's `max_credits`, stop and ask
-   the user before going on.
-3. Submit all shots in one `generate_video_batch` call (max 12 per call): pass each entry of
-   `requests` unchanged as `{index, params}` and add `use_unlim` from the request file to each
-   `params`. Keep the returned job ids.
-4. Poll with `jobs_wait` (≤12 jobs per call, `timeout_seconds: 15`) until `all_terminal` is
-   true. Never resubmit a shot whose submission outcome is unknown — check its job id first.
-5. For each completed job, register its video URL:
-   `vw clips add <id> <index> <result_url>` (the command downloads the file).
-   If a job failed, tell the user which shot and why; offer to retry that shot only
-   (optionally with a softened prompt).
-6. When every shot is registered the item moves to `rendered`. Continue the pipeline with
-   `vw run` (edits the final cut, then publishes to the configured platforms), or
-   `vw run --until edited` if the user wants to review the video before publishing.
+1. **Find work:** `vw list --stage awaiting_render`. For each item: `vw render-request <id>`
+   (file: `data/items/<id>/clips/render_request.json`). It contains `phase` (`draft` = cheap
+   preview, `final` = full resolution), `estimated_credits`, `max_credits`, `steps` and `shots`.
+2. **Balance and cost — before spending anything:**
+   - Call `balance` and record it: `vw higgsfield-balance <credits> --plan <plan>`.
+   - Preflight one shot with `get_cost: true`: `generate_video` with the first shot's `video` params
+     (remove `medias`) and, if the shot has a `keyframe`, `generate_image` with its `keyframe` params.
+     Multiply by the number of shots.
+   - If the total exceeds the balance or `max_credits`, **stop** and tell the user the numbers.
+3. **Keyframes** (only if shots have a `keyframe`): one `generate_image_batch` call with
+   `{index, params: shot.keyframe}` for every shot; `jobs_wait` (≤12 jobs, `timeout_seconds: 15`)
+   until all are terminal. Keep each keyframe's job id and image URL.
+4. **Video shots:** in each shot's `video.medias`, replace `<KEYFRAME_JOB_ID>` with that shot's
+   keyframe job id. One `generate_video_batch` call with `{index, params: shot.video}` for every
+   shot; `jobs_wait` until all are terminal. Never resubmit a shot whose outcome is unknown —
+   look up its job id first.
+5. **Register every finished shot** (the video job id is required to finalize drafts later):
+   `vw clips add <id> <index> <video_url> --job <video_job_id> [--keyframe-job <id> --keyframe-url <url>]`
+   If a job failed, tell the user which shot and why, and offer to retry only that shot.
+6. **Continue:** `vw run --until edited`. A `draft` phase ends with a low-res preview the user
+   approves in the dashboard or Telegram ("Render final"), which queues the `final` phase:
+   run this skill again for it. After the final phase, `vw run` publishes on schedule.
+7. **Report** credits spent, the new balance, and where to watch the result (`vw serve` → item page).
 
 ## Notes
 
-- Shot prompts already contain the channel's style anchor; do not rewrite them unless the
-  user asks or a job was rejected by moderation.
+- Keep prompts as written unless the user asks or a job was rejected by moderation; the visual
+  QA step will ask for re-renders of weak shots with a `prompt_fix` already applied.
 - Vertical output is required: keep `aspect_ratio: "9:16"`.
-- Report credits spent and the final video path (`vw show <id>`) at the end.
+- `use_unlim` is already set in each request; don't change who pays without the user's say-so.

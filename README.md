@@ -5,7 +5,8 @@ it (through MCP), and the finished vertical videos are published to YouTube Shor
 Reels and TikTok, all at the same moment.**
 
 ```bash
-vw selftest     # see every part working together, offline, in ~5 seconds (no keys needed)
+vw selftest     # every part working together, offline, in ~10 seconds (no keys, no credits)
+vw serve        # the monitoring dashboard: follow every video, every step, live
 ```
 
 ## What it does
@@ -14,11 +15,14 @@ vw selftest     # see every part working together, offline, in ~5 seconds (no ke
 |---|---|
 | **Ideas from what's trending** | Google Trends, Reddit and RSS signals, plus your own videos' stats: the trend scout leans into what works |
 | **Any LLM, with fallbacks** | Claude, ChatGPT/GPT, Gemini, OpenRouter/Groq/Ollama, or the Claude Code / Codex / Gemini **CLIs** on a subscription |
-| **Quality gate** | A critic from another model family fact-checks and scores every script, sends it back for revision, and hands borderline ones to you |
-| **Higgsfield via MCP** | Claude Code renders shots with the Higgsfield connector (`handoff`), or the pipeline calls the MCP server itself (`higgsfield_mcp`) with a credit budget guard |
+| **Better scripts** | Ideas over-generated and ranked; a hook lab writes 5 openings and keeps the strongest; an independent fact-checker and a critic from another model family send drafts back until they're right |
+| **Higgsfield via MCP, quality-first** | Keyframe still per shot → animated with image-to-video → cheap 480p draft preview → **you approve** → finals rendered from the drafts. Live price + balance check before any credit is spent |
+| **Visual QA** | A vision model inspects frames of every rendered shot and re-renders weak ones automatically (on cheap drafts) |
+| **Technical QA** | Every cut is checked (resolution, fps, duration, loudness, black/frozen frames, dead air, bitrate, captions, narration pace); failures block publishing |
 | **Finished edit** | 1080x1920, narration (OpenAI / ElevenLabs / free offline flite) fitted to each shot, word-by-word captions with a headline, music ducked under the voice, −14 LUFS |
 | **Synchronized publishing** | Posting slots per timezone; YouTube + Instagram + TikTok go out in parallel; failed platforms retry alone |
-| **You stay in control** | Approve or reject from **Telegram** (buttons), the **web dashboard**, or the CLI; notifications on Telegram/Slack/Discord/webhook |
+| **You stay in control** | Approve scripts and final renders from **Telegram** (buttons), the **web dashboard**, or the CLI; notifications on Telegram/Slack/Discord/webhook |
+| **Monitoring** | Every step, LLM call, render, check and upload is traced: live activity feed, workflow map with per-step health, item timelines, metrics, alerts (stuck items, failures, daemon down, low credits, budget), Prometheus/JSON endpoints, `vw logs -f` |
 | **Learns** | Pulls views/likes/comments back from every platform and feeds the winners into the next ideas |
 | **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
 | **Robust** | Parallel workers, SQLite WAL + per-item locks, HTTP retries with backoff, token/credit cost ledger per video |
@@ -27,16 +31,22 @@ vw selftest     # see every part working together, offline, in ~5 seconds (no ke
 
 ```mermaid
 flowchart LR
-    T[Trends + past stats] --> A[Trend scout]
-    A --> B[Scriptwriter]
-    B --> C{Critic}
+    T[Trends + past stats] --> A[Trend scout<br/>pitch + rank]
+    A --> H[Hook lab]
+    H --> B[Scriptwriter]
+    B --> F[Fact-check]
+    F --> C{Critic}
     C -- revise --> B
-    C -- approve --> D[Director<br/>Higgsfield prompts]
-    D --> E[Packager<br/>titles · captions · tags]
-    E --> G{You approve<br/>Telegram · dashboard · CLI}
-    G --> R[Higgsfield render<br/>via MCP]
-    R --> V[Voice · music · captions<br/>ffmpeg edit]
-    V --> S[Posting slot]
+    C -- approve --> D[Director + Packager]
+    D --> G{You approve<br/>the script}
+    G --> K[Keyframes → drafts<br/>Higgsfield]
+    K --> Q{Visual QA}
+    Q -- weak shot --> K
+    Q --> P[Preview edit<br/>voice · music · captions]
+    P --> G2{You approve<br/>the final}
+    G2 --> R[Final render<br/>from drafts]
+    R --> E[Edit + technical QA]
+    E --> S[Posting slot]
     S --> P1[YouTube Shorts] & P2[Instagram Reels] & P3[TikTok]
     P1 & P2 & P3 --> M[Stats] --> T
 ```
@@ -56,9 +66,10 @@ vw selftest              # proves the whole system works on this machine
 vw init                  # creates config/channel.yaml (your channel brief) and .env (your keys)
 vw doctor --live         # tests every configured connection for real (posts nothing)
 
-vw run --ideas 3         # pitch → script → critique → package; stops for your approval
-vw serve                 # dashboard at http://127.0.0.1:8787 — read, watch, approve
-vw run                   # render → voice → edit → publish (on schedule)
+vw run --ideas 3         # pitch → hooks → script → fact-check → critique → package; stops for you
+vw serve                 # dashboard at http://127.0.0.1:8787 — read, watch, approve, monitor
+vw run                   # keyframes → drafts → visual QA → preview; approve the final; then
+vw run                   # final render → edit → quality gate → publish (on schedule)
 ```
 
 Always-on, with the Telegram bot:
@@ -83,11 +94,14 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 
 | Command | What it does |
 |---|---|
-| `vw selftest [--full-hd]` | Run every component together offline and report each step |
+| `vw selftest [--full-hd]` | Run every component together offline and report each step (13 checks) |
+| `vw logs [id] [-f]` · `vw alerts` · `vw quality <id>` | Step-by-step trace (live with `-f`) · current problems · an item's quality report |
+| `vw approve-final <id>` · `vw retry <id>` · `vw rerender <id> -s 2 --note "..."` | Approve the full-res render · resume a failed item · re-shoot chosen shots |
+| `vw higgsfield-balance <credits> --plan <plan>` | Record the Higgsfield balance (the render skill does this) |
 | `vw init` · `vw doctor [--live]` | Create config files · check (and with `--live`, test) every connection |
 | `vw run [--ideas N] [--until stage]` | Push every item as far as the gates allow (parallel workers) |
 | `vw daemon [--once]` | Always-on loop + Telegram bot |
-| `vw serve` | Web dashboard (board, video player, script, review, approve/reject/publish) |
+| `vw serve` | Monitoring dashboard: board, activity feed, workflow map, metrics, health, self-test, item pages |
 | `vw bot` | Telegram bot only |
 | `vw ideas -n 5 -s "black holes"` · `vw trends` | Pitch ideas · see current trend signals |
 | `vw develop <id>` · `vw approve <id>` · `vw reject <id>` | Step through an item by hand |
@@ -123,7 +137,9 @@ src/video_workflow/
   voice.py       narration engines      schedule.py   posting slots
   notify.py      Telegram/Slack/Discord telegram_bot.py approvals from your phone
   trends.py      trend signals          health.py     live connection checks
-  dashboard.py   web UI                 selftest.py   whole-system check
+  trace.py       step-by-step trace log monitor.py    alerts
+  quality.py     technical video QA     web/          monitoring dashboard
+  selftest.py    whole-system check
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
 docs/            ARCHITECTURE · SETUP · OPERATIONS · HIGGSFIELD · ROADMAP
@@ -133,8 +149,8 @@ Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMIN
 
 ## Status
 
-Phases 0–2 are built and tested: 66 tests, plus `vw selftest` in CI and inside the Docker
-image. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
+Phases 0–3 are built and tested: 75 tests, plus `vw selftest` (13 end-to-end checks) in CI
+and inside the Docker image. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Responsible use

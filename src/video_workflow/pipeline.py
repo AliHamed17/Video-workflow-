@@ -370,14 +370,16 @@ class Pipeline:
 
         def inspect(shot):
             frames = quality.sample_frames(clips[shot.index].path, qa_dir, f"shot_{shot.index:02d}")
-            with self.tracer.span("qa.visual", item.id, shot=shot.index + 1) as span:
+            # Worker threads don't inherit context: re-bind the item for tracing and the cost ledger.
+            with self.tracer.bind(item.id), usage.tracking(item.usage), \
+                    self.tracer.span("qa.visual", item.id, shot=shot.index + 1) as span:
                 qa = self.visual_qa.inspect(shot, prompts[shot.index], frames)
                 span.detail = f"shot {shot.index + 1}: {qa.score:.1f}/10" + (" → re-render" if qa.rerender else "")
                 span.status = "warn" if qa.rerender or qa.score < qc.visual_min_score else "ok"
             return ShotReview(shot_index=shot.index, qa=qa, frames=[str(f) for f in frames])
 
         try:
-            with self.tracer.bind(item.id), ThreadPoolExecutor(max_workers=4) as pool:
+            with ThreadPoolExecutor(max_workers=4) as pool:
                 reviews = list(pool.map(inspect, item.script.shots))
         except LLMError as exc:  # no vision-capable model configured/available
             self.tracer.event("qa.visual", "skipped", item.id, f"visual QA skipped: {str(exc)[:200]}")

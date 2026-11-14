@@ -276,12 +276,13 @@ def render_workflow(pipeline, st: dict) -> str:
     nodes = data.workflow(pipeline)
     cards = []
     for n, node in enumerate(nodes, 1):
-        avg = f"avg {node['avg_s']:.1f}s" if node["avg_s"] is not None else "no runs yet"
+        avg = (f"avg {node['avg_s']:.1f}s" if node["avg_s"] is not None
+               else "instant" if node["runs"] else "not run yet")
         err = (f"<div class=bad>last error: {e(node['last_error']['detail'][:120])}</div>"
                if node["last_error"] else "")
         last = (f"<div class=meta>last: {pill(node['last']['status'], node['last']['status'])} "
                 f"{data._ago(node['last']['at'], datetime.now(UTC))}</div>") if node["last"] else ""
-        waiting = f"<div><b>{node['waiting']}</b> waiting here</div>" if node["waiting"] else ""
+        waiting = f"<div><b>{node['waiting']}</b> item(s) here now</div>" if node["waiting"] else ""
         cards.append(f"<a class='node {node['health']}' href='/activity'><span class=n>{n}</span><b>{e(node['label'])}</b>"
                      f"<div class=meta>{node['runs']} runs · {node['errors']} errors · {node['warnings']} warnings · {avg}</div>"
                      f"{waiting}{last}{err}</a>")
@@ -315,14 +316,14 @@ def render_metrics(pipeline, st: dict) -> str:
     top = "".join(f"<tr><td><a href='/item/{i.id}'>{e(i.idea.title)}</a></td><td class=num>{i.total_views:,}</td></tr>"
                   for i in m["top"])
     body = (f"<h2>Metrics</h2><div class=kpis>{kpi_html}</div>"
-            f"<div class=cards><section><h3>Published per day</h3>{bars_svg(m['per_day'])}</section>"
+            f"<div class=charts><section><h3>Published per day</h3>{bars_svg(m['per_day'])}</section>"
             f"<section><h3>Higgsfield credits per day</h3>{bars_svg(m['credits_day'])}</section></div>"
             f"<section><h3>Step timings (7 days)</h3><table><tr><th>Step</th><th class=num>Runs</th><th class=num>Errors</th>"
             f"<th class=num>Avg</th><th class=num>Max</th></tr>{steps or '<tr><td colspan=5 class=meta>no data</td></tr>'}</table></section>"
             f"<section><h3>LLM models (30 days)</h3><table><tr><th>Model</th><th class=num>Calls</th><th class=num>Errors</th>"
             f"<th class=num>Avg latency</th><th class=num>Tokens in</th><th class=num>Tokens out</th></tr>"
             f"{models or '<tr><td colspan=6 class=meta>no data</td></tr>'}</table></section>"
-            f"<div class=cards><section><h3>Uploads</h3><table><tr><th>Platform</th><th class=num>OK</th><th class=num>Failed</th></tr>"
+            f"<div class=charts><section><h3>Uploads</h3><table><tr><th>Platform</th><th class=num>OK</th><th class=num>Failed</th></tr>"
             f"{platforms or '<tr><td colspan=3 class=meta>none yet</td></tr>'}</table></section>"
             f"<section><h3>Top videos</h3><table>{top or '<tr><td class=meta>no stats yet</td></tr>'}</table></section></div>"
             f"<p class=meta>Machine-readable: <a href='/api/metrics'>/api/metrics</a> (Prometheus) · "

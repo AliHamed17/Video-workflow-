@@ -24,6 +24,15 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] `vw daemon`, `vw serve` dashboard, `vw doctor --live`, `vw selftest`, Docker + compose
 - [x] 66 tests incl. a whole-system end-to-end test; self-test in CI and in the Docker image
 
+## Phase 1.6: Monitoring and quality ✅
+
+- [x] Trace log of every step + `vw logs -f`; live activity feed, workflow map, metrics, health and self-test pages
+- [x] Alerts (stuck, failed, LLM errors, daemon down, low credits, budget, failing checks) with notifications
+- [x] Hook lab, independent fact-check, idea over-generation + ranking
+- [x] Keyframe-first Higgsfield rendering, draft preview → approve → finals from drafts, live price + balance checks
+- [x] Visual QA of every shot with automatic re-renders; technical QA gate on every cut
+- [x] Retry from the failed step, re-render chosen shots; JSON + Prometheus endpoints
+
 ## Phase 1: First real video
 
 - [ ] Write the real channel brief in `config/channel.yaml` (niche, voice, pillars, visual style)
@@ -43,9 +52,8 @@ We build this step by step. Each phase ends with something that works end to end
 
 ## Phase 3: Quality loop before publishing
 
-- [ ] Vision QA: a multimodal model (Claude / Gemini) watches sampled frames of each rendered shot
-      and flags artifacts, garbled text or prompt mismatch → auto re-render that shot
-- [ ] Higgsfield `virality_predictor` on the final cut as a publish gate
+- [x] Vision QA: a multimodal model watches sampled frames of each rendered shot → auto re-render
+- [ ] Higgsfield `virality_predictor` on the final cut as a publish gate (needs the cut uploaded to Higgsfield)
 - [ ] Hook A/B: render 2 opening shots, keep the stronger one
 - [ ] Thumbnail/cover generation (Higgsfield image models) for YouTube/Instagram
 
