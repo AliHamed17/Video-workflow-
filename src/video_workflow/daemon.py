@@ -45,7 +45,10 @@ def single_instance(path):
 
 class Daemon:
     def __init__(self, pipeline: Pipeline, bot=None,
-                 clock: Callable[[], datetime] = lambda: datetime.now(UTC)):
+                 clock: Callable[[], datetime] = lambda: datetime.now(UTC), cloud=None,
+                 cloud_poll_seconds: float = 30):
+        self.cloud = cloud
+        self.cloud_poll_seconds = cloud_poll_seconds
         self.pipeline = pipeline
         self.store = pipeline.store
         self.config = pipeline.config
@@ -120,6 +123,14 @@ class Daemon:
 
         # 6. Alerts.
         report["alerts"] = self.alert()
+
+        # 7. Mirror everything to the cloud control room and apply what was asked there.
+        if self.cloud is not None:
+            try:
+                report["cloud"] = self.cloud.sync()["commands"]
+            except Exception as exc:
+                log.warning("cloud sync failed: %s", exc)
+                report["cloud"] = "failed"
         return report
 
     def _bot_loop(self, stop: threading.Event) -> None:
@@ -130,12 +141,23 @@ class Daemon:
                 log.warning("telegram polling failed: %s", exc)
                 stop.wait(10)
 
+    def _cloud_loop(self, stop: threading.Event) -> None:
+        """Apply cloud-dashboard commands within seconds, not at the next full cycle."""
+        while not stop.wait(self.cloud_poll_seconds):
+            try:
+                if self.cloud.poll():
+                    self.wake.set()
+            except Exception as exc:
+                log.warning("cloud command poll failed: %s", exc)
+
     def run_forever(self, stop: threading.Event | None = None, once: bool = False) -> None:
         stop = stop or threading.Event()
         with single_instance(self.store.data_dir / "daemon.lock"):
             if self.bot is not None:
                 self.bot.on_change = self.wake.set
                 threading.Thread(target=self._bot_loop, args=(stop,), daemon=True, name="telegram").start()
+            if self.cloud is not None and not once:
+                threading.Thread(target=self._cloud_loop, args=(stop,), daemon=True, name="cloud").start()
             interval = self.config.runtime.daemon_interval_minutes * 60
             while not stop.is_set():
                 try:

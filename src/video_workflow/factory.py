@@ -90,3 +90,13 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
         voice=build_voice(config.video.voice, secrets, http),
         http=http,
     )
+
+
+def build_cloud(pipeline, secrets: Secrets | None = None):
+    """CloudSync for this worker, or None when VW_CLOUD_URL / VW_CLOUD_SECRET aren't set."""
+    from .cloud.sync import CloudClient, CloudSync
+
+    secrets = secrets or Secrets()
+    if not (secrets.vw_cloud_url and secrets.vw_cloud_secret):
+        return None
+    return CloudSync(pipeline, CloudClient(secrets.vw_cloud_url, _s(secrets.vw_cloud_secret)))

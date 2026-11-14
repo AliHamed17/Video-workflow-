@@ -78,6 +78,8 @@ def status(pipeline, now: datetime | None = None) -> dict:
         "waiting_for_you": sum(1 for i in items if i.stage == Stage.REVIEWED or i.awaiting_final_approval),
         "last_event": store.last_event_id(),
         "generator": pipeline.generator.name,
+        "sync": ({**sync, "ago": _ago(sync.get("at"), now)} if (sync := store.kv_get("sync")) else None),
+        "cloud": bool(getattr(pipeline, "is_cloud", False)),
     }
 
 

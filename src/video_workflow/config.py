@@ -50,6 +50,13 @@ class Secrets(BaseSettings):
 
     dashboard_token: SecretStr | None = None
 
+    # Cloud control room (Vercel). `vw cloud deploy` fills these in.
+    vw_cloud_url: str | None = None
+    vw_cloud_secret: SecretStr | None = None
+    vercel_token: SecretStr | None = None      # empty in Claude Code cloud sessions (proxy injects it)
+    vercel_team_id: str | None = None
+    vercel_project: str = "video-workflow"
+
 
 class ChannelConfig(BaseModel):
     name: str

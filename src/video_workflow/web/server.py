@@ -144,7 +144,11 @@ def make_handler(pipeline, token: str | None = None):
                     item = store.get(m.group(1))
                     return self._send(200, pages.render_item(pipeline, item, data.status(pipeline), flash).encode())
                 m = re.fullmatch(r"/media/([0-9a-f]+)/([\w./-]+)", path)
-                if m:
+                if m and hasattr(store, "get_media"):
+                    found = store.get_media(m.group(1), m.group(2).rsplit("/", 1)[-1])
+                    if found:
+                        return self._bytes(found[1], found[0])
+                elif m:
                     base = store.item_dir(m.group(1)).resolve()
                     target = (base / m.group(2)).resolve()
                     if target.is_relative_to(base) and target.is_file():
@@ -156,19 +160,20 @@ def make_handler(pipeline, token: str | None = None):
         do_HEAD = do_GET
 
         def _file(self, target: Path):
-            size = target.stat().st_size
             ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            return self._bytes(target.read_bytes(), ctype)
+
+        def _bytes(self, data: bytes, ctype: str):
+            """Serve bytes with HTTP Range support (video seeking on phones needs it)."""
+            size = len(data)
             rng = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
-            with open(target, "rb") as fh:
-                if rng and (rng.group(1) or rng.group(2)):
-                    start = int(rng.group(1)) if rng.group(1) else max(size - int(rng.group(2)), 0)
-                    end = int(rng.group(2)) if rng.group(1) and rng.group(2) else size - 1
-                    end = min(end, size - 1)
-                    fh.seek(start)
-                    body = fh.read(end - start + 1)
-                    return self._send(206, body, ctype, {"Content-Range": f"bytes {start}-{end}/{size}",
-                                                         "Accept-Ranges": "bytes"})
-                return self._send(200, fh.read(), ctype, {"Accept-Ranges": "bytes"})
+            if rng and (rng.group(1) or rng.group(2)):
+                start = int(rng.group(1)) if rng.group(1) else max(size - int(rng.group(2)), 0)
+                end = int(rng.group(2)) if rng.group(1) and rng.group(2) else size - 1
+                end = min(end, size - 1)
+                return self._send(206, data[start : end + 1], ctype,
+                                  {"Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes"})
+            return self._send(200, data, ctype, {"Accept-Ranges": "bytes"})
 
         # ---- POST ---------------------------------------------------------------------
         def _form(self) -> dict:
@@ -183,6 +188,9 @@ def make_handler(pipeline, token: str | None = None):
             if origin and urlparse(origin).netloc != self.headers.get("Host"):
                 return self._send(403, b"Cross-site request refused", "text/plain")
             path, form = urlparse(self.path).path, self._form()
+            cloud = bool(getattr(pipeline, "is_cloud", False))
+            if cloud and path in ("/health/run", "/selftest/run"):
+                return self._redirect(f"{path.rsplit('/', 1)[0]}?flash={quote('This runs on your worker; results sync here.')}")
             if path == "/health/run":
                 live = form.get("live") == "1"
                 _background("health", lambda: run_health(pipeline, live))
@@ -191,6 +199,17 @@ def make_handler(pipeline, token: str | None = None):
                 if not store.kv_get("selftest_running"):
                     _background("selftest", lambda: run_selftest(pipeline))
                 return self._redirect(f"/selftest?flash={quote('Self-test started.')}")
+            if path == "/ideas":
+                count = max(1, min(int(form.get("count", "1") or 1), 10))
+                topic = form.get("topic", "").strip()[:200]
+                if cloud:
+                    store.enqueue("ideas", None, {"count": count, "topic": topic}, source="cloud dashboard")
+                else:
+                    requests = store.kv_get("pending_requests", [])
+                    requests.append({"ideas": count, "seeds": [topic] if topic else []})
+                    store.kv_set("pending_requests", requests)
+                msg = f"{count} idea(s){' about ' + topic if topic else ''} requested — pitched on the next cycle."
+                return self._redirect(f"/?flash={quote(msg)}")
             m = re.fullmatch(r"/item/([0-9a-f]+)/(approve|final|reject|publish|retry|rerender)", path)
             if not m:
                 return self._send(404, b"Not found", "text/plain")
@@ -216,6 +235,8 @@ def make_handler(pipeline, token: str | None = None):
                     item = pipeline.publish(item, force=True)
                     ok = sorted(item.published_platforms())
                     msg = f"Published to {', '.join(ok)}." if ok else "Nothing was published (see Publishing)."
+                if cloud:
+                    msg = f"Sent to your worker: {action}. It applies it at its next sync (about a minute)."
             except Exception as exc:
                 msg = f"Could not {action}: {exc}"
             self._redirect(f"/item/{item_id}?flash={quote(msg[:200])}")

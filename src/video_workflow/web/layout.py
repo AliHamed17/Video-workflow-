@@ -100,6 +100,10 @@ def status_strip(st: dict) -> str:
     if h:
         label = f"Checks {h['ok']} ok · {h['failing']} failing · {h['ago']}"
         parts.append(f'<a href="/health">{chip(label, "bad" if h["failing"] else "ok")}</a>')
+    sync = st.get("sync")
+    if sync:
+        label = (f"Worker synced {sync['ago']}" if st.get("cloud") else f"Cloud sync {sync['ago']}")
+        parts.append(chip(e(label), "ok" if sync["ago"].endswith(("s ago", "m ago")) else "warn"))
     parts.append('<span class="chip muted" id="live">live</span>')
     return f'<div class="strip">{"".join(parts)}</div>'
 

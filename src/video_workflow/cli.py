@@ -26,6 +26,8 @@ app = typer.Typer(help="LLM agents -> Higgsfield -> YouTube Shorts / Instagram R
                   no_args_is_help=True)
 clips_app = typer.Typer(help="Register rendered clips (handoff flow)")
 app.add_typer(clips_app, name="clips")
+cloud_app = typer.Typer(help="Cloud control room on Vercel: deploy it, sync this worker to it")
+app.add_typer(cloud_app, name="cloud")
 console = Console()
 
 ConfigOpt = Annotated[Path | None, typer.Option("--config", "-c", help="Channel YAML")]
@@ -379,10 +381,11 @@ def daemon(once: Annotated[bool, typer.Option("--once", help="Run a single cycle
            generator: GenOpt = None, config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Always-on: ideas to quota → advance everything → publish on schedule → stats → digest (+ Telegram bot)."""
     from .daemon import AlreadyRunning, Daemon
+    from .factory import build_cloud
 
     pipe = _setup(config, data, generator)
     try:
-        Daemon(pipe, bot=_bot(pipe)).run_forever(once=once)
+        Daemon(pipe, bot=_bot(pipe), cloud=build_cloud(pipe)).run_forever(once=once)
     except AlreadyRunning as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
@@ -411,6 +414,52 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     console.print(f"Final video: {final}")
     if passed != len(results) or len(results) < 13:
         raise typer.Exit(1)
+
+
+@cloud_app.command("deploy")
+def cloud_deploy(project: Annotated[str | None, typer.Option(help="Vercel project name")] = None) -> None:
+    """Deploy the dashboard + sync API to Vercel (creates the project and its secrets the first time)."""
+    from .cloud.deploy import Vercel, deploy
+
+    secrets = Secrets()
+    vercel = Vercel(secrets.vercel_token.get_secret_value() if secrets.vercel_token else None,
+                    secrets.vercel_team_id)
+    if not secrets.vercel_team_id:
+        vercel.team_id = vercel.user().get("defaultTeamId")
+    local = {"DASHBOARD_TOKEN": secrets.dashboard_token.get_secret_value() if secrets.dashboard_token else None,
+             "VW_CLOUD_SECRET": secrets.vw_cloud_secret.get_secret_value() if secrets.vw_cloud_secret else None}
+    result = deploy(Path("."), project or secrets.vercel_project, vercel, Path(".env"), local,
+                    on_progress=lambda s: console.print(f"[dim]{s}[/]"))
+    console.print(f"[green]Live:[/] {result['url']}  [dim](this deployment: {result['deployment_url']})[/]")
+    if result["created_secrets"]:
+        console.print(f"Set on Vercel and saved to .env: {', '.join(result['created_secrets'])}. "
+                      "Your dashboard password is DASHBOARD_TOKEN (Vercel → project → Settings → Environment Variables).")
+    console.print("Next: `vw cloud sync` (or run `vw daemon`, which syncs every cycle).")
+
+
+@cloud_app.command("sync")
+def cloud_sync(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Push this worker's state to the cloud dashboard and apply the commands sent from it."""
+    from .factory import build_cloud
+
+    pipe = _setup(config, data)
+    cloud = build_cloud(pipe)
+    if cloud is None:
+        raise typer.BadParameter("Set VW_CLOUD_URL and VW_CLOUD_SECRET (vw cloud deploy writes them to .env)")
+    report = cloud.sync()
+    console.print(f"Synced to {cloud.client.url}: {report}")
+
+
+@cloud_app.command("status")
+def cloud_status() -> None:
+    """Is the cloud app reachable, and what does it have?"""
+    import httpx
+
+    secrets = Secrets()
+    if not secrets.vw_cloud_url:
+        raise typer.BadParameter("VW_CLOUD_URL is not set (run `vw cloud deploy`)")
+    resp = httpx.get(f"{secrets.vw_cloud_url}/healthz", timeout=20)
+    console.print(f"{secrets.vw_cloud_url} → HTTP {resp.status_code} {resp.text[:300]}")
 
 
 @app.command("auth-youtube")

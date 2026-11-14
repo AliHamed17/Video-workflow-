@@ -1,0 +1,13 @@
+# Only the cloud app is deployed (vw cloud deploy uploads an explicit file list; this covers git deploys)
+.venv
+data
+tests
+docs
+music
+config
+.github
+.claude
+*.pyc
+__pycache__
+.env
+.env.*

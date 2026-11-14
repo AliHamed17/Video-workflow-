@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,11 +21,25 @@ COLUMNS = [
 ]
 
 
+# How media paths become URLs. Locally: files in the item folder. The cloud app sets, per
+# request, a resolver backed by its media table (see cloud/app.py).
+MEDIA_RESOLVER: ContextVar = ContextVar("media_resolver", default=None)
+
+
 def _media(item: ContentItem, path: str | None) -> str | None:
-    """URL of a file inside the item's folder, or None if it doesn't exist."""
-    if not path or not Path(path).exists():
+    """URL of one of the item's files (thumbnail, video, keyframe, QA frame), or None."""
+    if not path:
+        return None
+    resolver = MEDIA_RESOLVER.get()
+    if resolver is not None:
+        return resolver(item, path)
+    if not Path(path).exists():
         return None
     return f"/media/{item.id}/{_rel(item, path)}"
+
+
+def _is_cloud(pipeline) -> bool:
+    return bool(getattr(pipeline, "is_cloud", False))
 
 
 def _rel(item: ContentItem, path: str) -> str:
@@ -93,8 +108,14 @@ def render_board(pipeline, st: dict, flash: str = "") -> str:
         members = sorted((i for i in items if match(i)), key=lambda i: i.updated_at, reverse=True)
         cards = "".join(_card(i, now_events, now) for i in members[:40]) or "<div class=meta>—</div>"
         cols.append(f"<div class=col><h4>{title} ({len(members)})</h4>{cards}</div>")
-    body = (_flash(flash) + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>"
-            f"<h2>Pipeline</h2><div class=board>{''.join(cols)}</div>")
+    ideas_form = ("<form method=post action='/ideas' class=actions style='align-items:center'>"
+                  "<b>Request ideas</b><input name=count type=number min=1 max=10 value=2 style='width:4em;"
+                  "font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);"
+                  "color:var(--ink)'><input name=topic placeholder='topic or trend (optional)' style='flex:1;"
+                  "min-width:180px;font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);"
+                  "background:var(--card);color:var(--ink)'><button>✨ Pitch</button></form>")
+    body = (_flash(flash) + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
+            + f"<h2>Pipeline</h2><div class=board>{''.join(cols)}</div>")
     return page(pipeline.config.channel.name, body, st, "/")
 
 
@@ -108,8 +129,7 @@ def _section(title: str, inner: str) -> str:
 
 def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     now = datetime.now(UTC)
-    video_path = item.final_video if item.final_video and Path(item.final_video).exists() else None
-    video_url = _media(item, video_path)
+    video_url = _media(item, item.final_video)
     poster = _media(item, item.thumbnail)
     if video_url:
         label = "Low-res preview" if item.render_phase == "draft" and item.stage == Stage.EDITED else "Final cut"
@@ -144,7 +164,7 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
         left += f"<p class=warn>⚠ {e(item.attention)}</p>"
     if item.error:
         left += f"<p class=bad>✗ {e(item.error)}</p>"
-    keyframes = [c for c in item.clips if c.keyframe and Path(c.keyframe).exists()]
+    keyframes = [c for c in item.clips if c.keyframe and _media(item, c.keyframe)]
     if keyframes:
         left += "<h3>Keyframes</h3><div class=frames>" + "".join(
             f"<img src='{_media(item, c.keyframe)}' title='shot {c.shot_index + 1}'>" for c in keyframes) + "</div>"
@@ -347,13 +367,25 @@ def render_health(pipeline, st: dict, flash: str = "") -> str:
                "<input type=hidden name=live value=1><button class=primary>Test live connections</button></form></div>")
     if running:
         buttons = "<p class=warn>Checks are running…</p>"
+    if _is_cloud(pipeline):
+        buttons = "<p class=meta>Checks run on your worker (<code>vw doctor --live</code>); results sync here.</p>"
     balance = st.get("balance")
     bal = (f"<p>Higgsfield balance: <b>{balance['credits']:.0f} credits</b> ({e(str(balance.get('plan')))}) · "
            f"one {pipeline.config.video.target_duration_s}s video ≈ {st['credits_per_video']:.0f} credits · "
            f"recorded {data._ago(balance.get('at'), datetime.now(UTC))}</p>" if balance else
            "<p class=meta>Higgsfield balance not recorded yet (the render skill or a live check records it).</p>")
+    commands = ""
+    recent = getattr(pipeline.store, "recent_commands", None)
+    if recent:
+        rows_c = "".join(f"<tr><td class=meta>{c['at'][5:16].replace('T', ' ')}</td><td><b>{e(c['action'])}</b></td>"
+                         f"<td>{e(c['item_id'] or '')}</td><td>{e(c['source'])}</td><td>{pill(c['status'], 'ok' if c['status'] == 'done' else 'error' if c['status'] == 'failed' else 'gated')}</td>"
+                         f"<td class=meta>{e(c['result'] or '')}</td></tr>" for c in recent())
+        commands = (f"<h2>Requests sent to the worker</h2><section><table><tr><th>When</th><th>Action</th><th>Item</th>"
+                    f"<th>From</th><th>Status</th><th>Result</th></tr>{rows_c or '<tr><td colspan=6 class=meta>none yet</td></tr>'}"
+                    f"</table></section>")
     body = (_flash(flash) + "<h2>Alerts</h2>" + (alerts_html(st) or "<p class=ok>No alerts. All good.</p>")
-            + f"<h2>Connections</h2><section>{bal}<p class=meta>{when}</p>{buttons}<table>{rows}</table></section>")
+            + f"<h2>Connections</h2><section>{bal}<p class=meta>{when}</p>{buttons}<table>{rows}</table></section>"
+            + commands)
     return page("Health", body, st, "/health", every_ms=4000 if running else 5000)
 
 
@@ -362,6 +394,8 @@ def render_selftest(pipeline, st: dict, flash: str = "") -> str:
     running = pipeline.store.kv_get("selftest_running")
     button = ("<p class=warn>Self-test running…</p>" if running else
               "<form method=post action='/selftest/run'><button class=primary>▶ Run the self-test</button></form>")
+    if _is_cloud(pipeline):
+        button = "<p class=meta>The self-test runs on your worker (<code>vw selftest</code>); its last result syncs here.</p>"
     out = "<p class=meta>Never run from the dashboard. It takes about 10 seconds and uses no keys or credits.</p>"
     if last:
         rows = "".join(f"<tr><td>{pill('pass' if s['ok'] else 'fail', 'pass' if s['ok'] else 'fail')}</td><td><b>{e(s['name'])}</b>"

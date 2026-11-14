@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {"includeFiles": ["src/video_workflow/**"], "maxLambdaSize": "50mb"}
+    }
+  ],
+  "routes": [
+    {"src": "/robots.txt", "dest": "/api/index.py"},
+    {"src": "/(.*)", "dest": "/api/index.py"}
+  ]
+}
