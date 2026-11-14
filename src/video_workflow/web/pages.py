@@ -161,7 +161,9 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     if item.script:
         rows = "".join(f"<tr><td>{s.index + 1}</td><td>{e(s.visual)}</td><td>{e(s.voiceover)}</td>"
                        f"<td><b>{e(s.on_screen_text)}</b></td></tr>" for s in item.script.shots)
-        parts.append(_section("Script", f"<table><tr><th>#</th><th>Visual</th><th>Narration</th><th>On screen</th></tr>"
+        parts.append(_section("Script", "<table><colgroup><col style='width:4%'><col style='width:44%'>"
+                              "<col style='width:32%'><col style='width:20%'></colgroup>"
+                              f"<tr><th>#</th><th>Visual</th><th>Narration</th><th>On screen</th></tr>"
                               f"{rows}</table><p class=meta>CTA: {e(item.script.cta)} · Music: {e(item.script.music_mood)}"
                               f" · Loop: {e(item.script.loop_strategy)}</p>"))
     if item.fact_check:

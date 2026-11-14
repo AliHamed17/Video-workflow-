@@ -134,3 +134,36 @@ def test_sample_frames_and_check_video(config, tmp_path):
         {"channel": {"name": "c", "niche": "n", "audience": "a", "voice": "v"},
          "video": {"target_duration_s": 2, "captions": {"burn_in": False}}}), clip.path, (360, 640))
     assert report.score > 0 and json.loads(report.model_dump_json())["checks"]
+
+
+def test_a_step_can_mark_itself_skipped_before_raising(tmp_path):
+    store = Store(tmp_path)
+    tracer = Tracer(store)
+    with pytest.raises(RuntimeError), tracer.span("qa.visual", "x") as span:
+        span.status, span.detail = "skipped", "no vision model"
+        raise RuntimeError("unavailable")
+    ev = store.events()[0]
+    assert (ev["status"], ev["detail"]) == ("skipped", "no vision model")
+
+
+def test_visual_qa_without_a_vision_model_is_skipped_not_failed(config, tmp_path):
+    import shutil
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    from video_workflow.llm import ProviderUnavailable
+
+    class TextOnly(FakeProvider):
+        def structured(self, *, images=None, **kw):
+            if images:
+                raise ProviderUnavailable("text only")
+            return super().structured(**kw)
+
+    config.quality.visual_qa = True
+    pipe = Pipeline(config=config, store=Store(tmp_path / "data"),
+                    router=LLMRouter(config.llm, providers={"fake": TextOnly(default_responses())}),
+                    generator=MockGenerator(width=360, height=640),
+                    editor=Editor(config.video, width=360, height=640))
+    item = pipe.advance(pipe.approve(pipe.develop(pipe.ideate(1)[0])))
+    assert item.stage == Stage.EDITED
+    visual = pipe.store.events(step_prefix="qa.visual")
+    assert visual and all(e["status"] == "skipped" for e in visual)

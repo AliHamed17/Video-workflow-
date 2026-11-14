@@ -373,7 +373,12 @@ class Pipeline:
             # Worker threads don't inherit context: re-bind the item for tracing and the cost ledger.
             with self.tracer.bind(item.id), usage.tracking(item.usage), \
                     self.tracer.span("qa.visual", item.id, shot=shot.index + 1) as span:
-                qa = self.visual_qa.inspect(shot, prompts[shot.index], frames)
+                try:
+                    qa = self.visual_qa.inspect(shot, prompts[shot.index], frames)
+                except LLMError as exc:
+                    span.status = "skipped"
+                    span.detail = f"shot {shot.index + 1}: no vision-capable model available ({str(exc)[:160]})"
+                    raise
                 span.detail = f"shot {shot.index + 1}: {qa.score:.1f}/10" + (" → re-render" if qa.rerender else "")
                 span.status = "warn" if qa.rerender or qa.score < qc.visual_min_score else "ok"
             return ShotReview(shot_index=shot.index, qa=qa, frames=[str(f) for f in frames])

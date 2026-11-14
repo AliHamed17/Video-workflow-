@@ -11,6 +11,7 @@ import subprocess
 
 from ..config import Effort
 from .base import LLMError, ProviderUnavailable, T, parse_into, schema_instructions
+from .usage import report
 
 
 class CLIAgentProvider:
@@ -42,6 +43,8 @@ class CLIAgentProvider:
                 raise LLMError(f"{model} CLI timed out") from exc
             if result.returncode != 0:
                 raise LLMError(f"{model} CLI exited {result.returncode}: {result.stderr[-500:]}")
+            # CLIs don't report usage: record an estimate (~4 characters per token) for the ledger.
+            report(len(full_prompt) // 4, len(result.stdout) // 4)
             try:
                 return parse_into(schema, result.stdout)
             except LLMError as exc:

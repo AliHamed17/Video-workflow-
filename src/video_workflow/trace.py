@@ -68,10 +68,12 @@ class Tracer:
         try:
             yield span
         except Exception as exc:
-            span.status = "error"
-            tb = traceback.extract_tb(exc.__traceback__)
-            where = f" at {tb[-1].name}:{tb[-1].lineno}" if tb else ""
-            span.detail = f"{type(exc).__name__}: {exc}{where}"[:1500]
+            # A step may mark itself (e.g. "skipped") before re-raising; keep that verdict.
+            if span.status == "ok":
+                span.status = "error"
+                tb = traceback.extract_tb(exc.__traceback__)
+                where = f" at {tb[-1].name}:{tb[-1].lineno}" if tb else ""
+                span.detail = f"{type(exc).__name__}: {exc}{where}"[:1500]
             raise
         finally:
             self.event(span.step, span.status, span.item_id, span.detail,
