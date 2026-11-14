@@ -156,7 +156,7 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
             if path == "/login":
                 form = {k: v[0] for k, v in parse_qs(self._body().decode()).items()}
                 nxt = form.get("next", "/") if form.get("next", "/").startswith("/") else "/"
-                if token and pysecrets.compare_digest(form.get("token", ""), token):
+                if token and pysecrets.compare_digest(form.get("token", "").strip(), token):
                     self.send_response(303)
                     self.send_header("Set-Cookie", f"vw_token={token}; HttpOnly; Secure; SameSite=Lax; Path=/; "
                                                    f"Max-Age={60 * 60 * 24 * 30}")
