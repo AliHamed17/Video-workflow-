@@ -93,10 +93,52 @@ def doctor(live: Annotated[bool, typer.Option("--live", help="Actually connect t
 @app.command()
 def ideas(count: Annotated[int, typer.Option("--count", "-n")] = 3,
           seed: Annotated[list[str] | None, typer.Option("--seed", "-s", help="Topic/trend seed")] = None,
+          from_url: Annotated[str | None, typer.Option("--from-url", help="Base the ideas on this article")] = None,
           config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
-    """Pitch new ideas (creates items in stage 'idea')."""
+    """Pitch new ideas (creates items in stage 'idea'). Without seeds, today's planned theme is used."""
     pipe = _setup(config, data, publishers=False)
-    _table(pipe.ideate(count, seed))
+    _table(pipe.ideate(count, seed, source_url=from_url))
+
+
+@app.command()
+def plan(days: Annotated[int, typer.Option("--days", "-d")] = 7, config: ConfigOpt = None,
+         data: DataOpt = Path("data")) -> None:
+    """Plan the content calendar: a theme, pillar and format for each of the next days."""
+    pipe = _setup(config, data, publishers=False)
+    table = Table("date", "theme", "format", "pillar")
+    today = pipe.todays_plan()
+    for day in pipe.plan(days):
+        if not today or day["date"] >= today["date"]:
+            table.add_row(day["date"], day["theme"], day["format"], day["pillar"])
+    console.print(table)
+
+
+@app.command()
+def localize(item_id: str,
+             language: Annotated[list[str] | None, typer.Option("--lang", "-l", help="e.g. -l es -l ar")] = None,
+             config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Make (or refresh) language versions of an edited video from the same footage."""
+    pipe = _setup(config, data, publishers=False)
+    if language:
+        pipe.config.content.languages = language
+    item = pipe.store.get(item_id)
+    music = Path(item.music_track) if item.music_track else None
+    for v in pipe.localize(item, music):
+        console.print(f"{v.language}: {v.localization.title} → {v.final_video} "
+                      f"(quality {v.quality.score:.0f}/100)" if v.quality else v.language)
+
+
+@app.command()
+def kit(item_id: str, out: Annotated[Path | None, typer.Option(help="Where to write the zip")] = None,
+        data: DataOpt = Path("data")) -> None:
+    """Publish kit: videos (all languages), thumbnail, subtitles, copy per platform, checklist — one zip."""
+    from . import kit as kit_mod
+    from .store import Store
+
+    item = Store(data).get(item_id)
+    target = out or Path(f"publish-kit-{item.id}.zip")
+    target.write_bytes(kit_mod.build(item))
+    console.print(f"Wrote {target}")
 
 
 @app.command()
@@ -417,7 +459,9 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
 
 
 @cloud_app.command("deploy")
-def cloud_deploy(project: Annotated[str | None, typer.Option(help="Vercel project name")] = None) -> None:
+def cloud_deploy(project: Annotated[str | None, typer.Option(help="Vercel project name")] = None,
+                 skip_secrets: Annotated[bool, typer.Option("--skip-secrets", help="Don't touch DASHBOARD_TOKEN / "
+                                                            "VW_CLOUD_SECRET (CI)")] = False) -> None:
     """Deploy the dashboard + sync API to Vercel (creates the project and its secrets the first time)."""
     from .cloud.deploy import Vercel, deploy
 
@@ -429,7 +473,7 @@ def cloud_deploy(project: Annotated[str | None, typer.Option(help="Vercel projec
     local = {"DASHBOARD_TOKEN": secrets.dashboard_token.get_secret_value() if secrets.dashboard_token else None,
              "VW_CLOUD_SECRET": secrets.vw_cloud_secret.get_secret_value() if secrets.vw_cloud_secret else None}
     result = deploy(Path("."), project or secrets.vercel_project, vercel, Path(".env"), local,
-                    on_progress=lambda s: console.print(f"[dim]{s}[/]"))
+                    on_progress=lambda s: console.print(f"[dim]{s}[/]"), manage_secrets=not skip_secrets)
     console.print(f"[green]Live:[/] {result['url']}  [dim](this deployment: {result['deployment_url']})[/]")
     if result["created_secrets"]:
         console.print(f"Set on Vercel and saved to .env: {', '.join(result['created_secrets'])}. "

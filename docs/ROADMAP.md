@@ -33,6 +33,14 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Visual QA of every shot with automatic re-renders; technical QA gate on every cut
 - [x] Retry from the failed step, re-render chosen shots; JSON + Prometheus endpoints
 
+## Phase 1.7: Anywhere, any language ✅
+
+- [x] Cloud control room on **Vercel** + Neon Postgres (live), worker sync + command queue, `vw cloud deploy`
+- [x] Language versions from the same footage (translated narration, captions incl. right-to-left, copy)
+- [x] Content calendar: an LLM plans a theme per day; the daemon pitches from it and keeps it a week ahead
+- [x] Ideas from a source article (`--from-url`), fact-checked against it
+- [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
+
 ## Phase 1: First real video
 
 - [ ] Write the real channel brief in `config/channel.yaml` (niche, voice, pillars, visual style)
@@ -74,8 +82,8 @@ We build this step by step. Each phase ends with something that works end to end
 ## Phase 6: Scale and operations
 
 - [x] Run on a schedule (`vw daemon` / Docker / Actions) with notifications
-- [ ] Postgres + object storage (S3/R2) instead of local SQLite/files
+- [x] Postgres for the cloud dashboard · [ ] object storage (S3/R2/Vercel Blob) for full-quality media
 - [ ] Multiple channels/brands from one install
 - [x] Cost tracking per video (LLM tokens + Higgsfield credits) · [ ] monthly budget caps
-- [x] Web dashboard + Telegram approvals
+- [x] Web dashboard (local + Vercel) + Telegram approvals
 - [ ] Higgsfield Cloud API (API-key auth) as a second headless renderer

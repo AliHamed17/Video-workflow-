@@ -1,0 +1,25 @@
+# Redeploys the cloud control room (dashboard + sync API) to Vercel.
+# Needs the repository secret VERCEL_TOKEN (and VERCEL_TEAM_ID if the project is in a team).
+# Secrets already on the Vercel project (DASHBOARD_TOKEN, VW_CLOUD_SECRET) are left untouched.
+name: Deploy cloud dashboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["src/video_workflow/web/**", "src/video_workflow/cloud/**", "api/**", "vercel.json", "requirements.txt"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+        run: vw cloud deploy --skip-secrets

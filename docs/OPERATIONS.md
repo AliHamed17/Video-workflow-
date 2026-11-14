@@ -9,12 +9,15 @@ vw daemon            # or: docker compose up -d
 Every `runtime.daemon_interval_minutes` (and immediately after you approve something from
 Telegram) the daemon:
 
-1. Handles requests queued from Telegram (`/ideas 2 deep sea animals`).
-2. Tops ideas up to `runtime.ideas_per_day`, never past `runtime.max_backlog` unfinished items.
+1. Handles requests queued from Telegram or the dashboards (`/ideas 2 deep sea animals`, an article URL).
+2. Keeps the content calendar a week ahead (`runtime.auto_plan`), then tops ideas up to
+   `runtime.ideas_per_day` (from today's planned theme), never past `runtime.max_backlog` unfinished items.
 3. Advances every item in parallel (`runtime.workers`): script → critique → package → (your
    approval) → render → voice → edit → schedule → publish.
 4. Refreshes stats every `runtime.stats_every_hours`.
 5. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`).
+6. With `VW_CLOUD_URL` set: pushes everything to the cloud dashboard and applies the commands
+   you clicked there (checked every 30 s).
 
 Only one daemon can run per `data/` directory (file lock). The dashboard, the bot and manual
 `vw` commands can run alongside it: per-item locks in SQLite keep them from colliding.
@@ -56,8 +59,12 @@ last connection check. Pages refresh themselves when something happens.
 | **Workflow** | The automation as a map of 17 steps, each with runs, errors, warnings, average time, items waiting there and the last error; green/amber/red health |
 | **Metrics** | Published per day, credits per day, idea→published time, critic and quality averages, step timings, LLM models (calls, errors, latency, tokens), upload success per platform, top videos |
 | **Health** | All alerts, the Higgsfield balance, connection checks with **Check configuration** / **Test live connections** buttons |
-| **Self-test** | Run the whole system end to end from the browser and watch the 13 checks pass |
-| **Item page** | Video (preview or final), keyframes, idea, hook lab, script, fact-check, critic, **visual QA per shot with frames and a Re-render button**, technical quality report, posting copy, Higgsfield prompts, publishing + stats, cost, a **timeline of every step**, and Approve / Render final / Publish now / Retry / Reject buttons |
+| **Calendar** | Three weeks: the planned theme per day, scheduled ⏰ and published 🚀 videos; **Plan the next 7 days** |
+| **Self-test** | Run the whole system end to end from the browser and watch the 18 checks pass |
+| **Item page** | Video (preview or final), keyframes, idea, hook lab, script, fact-check, critic, **visual QA per shot with frames and a Re-render button**, technical quality report, posting copy with Copy buttons, **language versions**, Higgsfield prompts, publishing + stats, cost, a **timeline of every step**, and Approve / Render final / Publish now / Retry / Reject buttons |
+
+The same dashboard runs in the cloud at https://video-workflow-six.vercel.app, fed by your
+worker: see [CLOUD.md](CLOUD.md).
 
 For Grafana or uptime monitors: `/api/status` (JSON) and `/api/metrics` (Prometheus).
 To reach the dashboard from elsewhere, put it behind HTTPS and set `DASHBOARD_TOKEN` (open
@@ -65,6 +72,20 @@ To reach the dashboard from elsewhere, put it behind HTTPS and set `DASHBOARD_TO
 
 From a terminal: `vw logs -f` streams the same step-by-step trace, `vw alerts` lists problems,
 `vw quality <id>` prints a video's QA report.
+
+## Language versions, calendar, sources, kits
+
+```bash
+vw localize <id> -l es -l ar      # or content.languages: [es, ar] for every video
+vw plan --days 7                  # the content calendar (also from the dashboard)
+vw ideas --from-url https://en.wikipedia.org/wiki/Pistol_shrimp
+vw kit <id> --out kit.zip         # every file + copy + checklist for posting by hand
+```
+
+Versions reuse the rendered footage (no extra Higgsfield credits): the translator rewrites
+narration, captions and posting copy; the editor re-voices and re-captions. flite speaks
+English only, so set `video.voice.provider: openai` or `elevenlabs` for translated narration
+(per-language voices in `video.voice.voices`).
 
 ## Alerts
 

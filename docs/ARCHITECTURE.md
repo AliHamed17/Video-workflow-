@@ -51,7 +51,7 @@ stage.
 | | `llm/openai_provider.py` | OpenAI Responses API structured outputs; Chat Completions JSON mode for compatible endpoints |
 | | `llm/gemini_provider.py` | Gemini with `response_schema` |
 | | `llm/cli_provider.py` | Claude Code / Codex / Gemini CLI over stdin, JSON extracted and validated |
-| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, Scriptwriter, Critic, Director, Packager |
+| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, Scriptwriter, Critic, Director, Packager, Translator, Planner |
 | Render | `video/handoff.py` | Writes `render_request.json` for Claude Code + Higgsfield MCP |
 | | `video/higgsfield_mcp.py` | Headless MCP client: cost preflight → batch submit → poll → download |
 | | `video/mock.py` | Free placeholder clips for testing |
@@ -65,6 +65,8 @@ stage.
 | Ops | `daemon.py`, `dashboard.py`, `health.py` | Always-on loop with file lock; web UI; live connection checks |
 | Quality | `agents/hook_lab.py`, `agents/fact_checker.py`, `agents/visual_qa.py`, `quality.py` | Hook variants, claim-by-claim fact-check, vision QA of shot frames, technical QA of the cut |
 | Observability | `trace.py`, `monitor.py`, `web/` | Event log of every step (spans with duration/status/detail), alerts, dashboard pages + JSON/Prometheus APIs |
+| Cloud | `cloud/app.py`, `cloud/store.py`, `cloud/sync.py`, `cloud/deploy.py`, `api/index.py` | Vercel app over Postgres (same pages, read from synced state); worker push/pull sync with a command queue; REST deployer |
+| Growth | `kit.py`, `sources.py`, `pipeline.localize/plan` | Publish kit zip; ideas from an article; language versions; content calendar |
 | Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |
 | Entry | `cli.py`, `factory.py` | `vw` commands; wiring from config |
 
@@ -134,4 +136,8 @@ data/
   items/<id>/edit/            normalised segments, fitted narration, captions.ass, stitched.mp4
   items/<id>/final.mp4        the published file
   items/<id>/thumbnail.jpg
+  items/<id>/edit_<lang>/     a language version's narration + captions
+  items/<id>/final_<lang>.mp4 · thumbnail_<lang>.jpg
+  items/<id>/source.txt       the article an idea came from
+  items/<id>/cloud/           compact web previews synced to the cloud dashboard
 ```

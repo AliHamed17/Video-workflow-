@@ -70,6 +70,7 @@ a.node:hover{text-decoration:none;border-color:var(--accent)}
 code{font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:5px}
 svg text{fill:var(--muted);font-size:10px}
 button.copy{padding:2px 9px;font-size:12px;margin-left:6px}
+table.copytbl th{white-space:nowrap;width:1%;vertical-align:top;padding-right:14px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 @media (max-width:900px){.cal{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .day{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px;min-height:120px;font-size:13px}

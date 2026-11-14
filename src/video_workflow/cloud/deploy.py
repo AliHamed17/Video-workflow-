@@ -129,12 +129,15 @@ def update_env_file(path: Path, values: dict[str, str]) -> None:
 
 
 def deploy(repo: Path, project_name: str, vercel: Vercel, env_file: Path, local: dict[str, str | None],
-           on_progress: Callable[[str], None] = print) -> dict:
-    """Returns {url, deployment_url, project_id, created_secrets}."""
+           on_progress: Callable[[str], None] = print, manage_secrets: bool = True) -> dict:
+    """Returns {url, deployment_url, project_id, created_secrets}.
+
+    ``manage_secrets=False`` (CI): leave the project's DASHBOARD_TOKEN / VW_CLOUD_SECRET alone.
+    """
     project = vercel.ensure_project(project_name)
     keys = vercel.env_keys(project["id"])
     created = {}
-    for key in ("DASHBOARD_TOKEN", "VW_CLOUD_SECRET"):
+    for key in ("DASHBOARD_TOKEN", "VW_CLOUD_SECRET") if manage_secrets else ():
         value = local.get(key)
         if value:
             vercel.set_env(project["id"], key, value)  # keep Vercel in step with this worker

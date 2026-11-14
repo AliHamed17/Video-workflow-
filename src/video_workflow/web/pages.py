@@ -430,16 +430,19 @@ def copy_table(p) -> str:
     def copy(text: str) -> str:
         return f"<button class=copy data-t='{e(text, quote=True)}'>Copy</button>"
 
+    def tags(hashtags) -> str:
+        return " ".join("#" + h.lstrip("#") for h in hashtags)
+
     yt_tags = ", ".join(p.youtube.tags)
-    ig = f"{p.instagram.caption}\n\n" + " ".join("#" + h for h in p.instagram.hashtags)
-    tt = f"{p.tiktok.caption} " + " ".join("#" + h for h in p.tiktok.hashtags)
-    return (f"<table><tr><th>YouTube</th><td><b>{e(p.youtube.title)}</b>{copy(p.youtube.title)}<br>"
-            f"{e(p.youtube.description)}{copy(p.youtube.description)}<br><span class=meta>{e(yt_tags)}</span>"
-            f"{copy(yt_tags)}</td></tr>"
-            f"<tr><th>Instagram</th><td>{e(p.instagram.caption)}<br><span class=meta>"
-            f"{e(' '.join('#' + h for h in p.instagram.hashtags))}</span>{copy(ig)}</td></tr>"
-            f"<tr><th>TikTok</th><td>{e(p.tiktok.caption)}<br><span class=meta>"
-            f"{e(' '.join('#' + h for h in p.tiktok.hashtags))}</span>{copy(tt)}</td></tr></table>")
+    ig = f"{p.instagram.caption}\n\n" + tags(p.instagram.hashtags)
+    tt = f"{p.tiktok.caption} " + tags(p.tiktok.hashtags)
+    return (f"<table class=copytbl><tr><th>YouTube</th><td dir=auto><b>{e(p.youtube.title)}</b>"
+            f"{copy(p.youtube.title)}<br>{e(p.youtube.description)}{copy(p.youtube.description)}<br>"
+            f"<span class=meta>{e(yt_tags)}</span>{copy(yt_tags)}</td></tr>"
+            f"<tr><th>Instagram</th><td dir=auto>{e(p.instagram.caption)}<br><span class=meta>"
+            f"{e(tags(p.instagram.hashtags))}</span>{copy(ig)}</td></tr>"
+            f"<tr><th>TikTok</th><td dir=auto>{e(p.tiktok.caption)}<br><span class=meta>"
+            f"{e(tags(p.tiktok.hashtags))}</span>{copy(tt)}</td></tr></table>")
 
 
 def render_calendar(pipeline, st: dict, flash: str = "") -> str:

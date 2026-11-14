@@ -5,9 +5,13 @@ it (through MCP), and the finished vertical videos are published to YouTube Shor
 Reels and TikTok, all at the same moment.**
 
 ```bash
-vw selftest     # every part working together, offline, in ~10 seconds (no keys, no credits)
+vw selftest     # every part working together, offline, in ~15 seconds (no keys, no credits)
 vw serve        # the monitoring dashboard: follow every video, every step, live
+vw cloud deploy # the same dashboard on Vercel: watch and approve from your phone, anywhere
 ```
+
+**Live cloud control room:** https://video-workflow-six.vercel.app (password-protected; see
+[docs/CLOUD.md](docs/CLOUD.md)).
 
 ## What it does
 
@@ -25,6 +29,11 @@ vw serve        # the monitoring dashboard: follow every video, every step, live
 | **Monitoring** | Every step, LLM call, render, check and upload is traced: live activity feed, workflow map with per-step health, item timelines, metrics, alerts (stuck items, failures, daemon down, low credits, budget), Prometheus/JSON endpoints, `vw logs -f` |
 | **Learns** | Pulls views/likes/comments back from every platform and feeds the winners into the next ideas |
 | **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
+| **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
+| **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
+| **Content calendar** | An LLM plans a theme per day a week ahead (formats, pillars, timely hooks like anniversaries and meteor showers); the daemon pitches from today's theme and keeps the plan topped up |
+| **Source → shorts** | `vw ideas --from-url <article>`: ideas grounded in a page you trust, and the fact-checker checks against it |
+| **Publish kit** | One zip per video: every language's video, thumbnail, SRT subtitles, copy per platform, script and an upload checklist, for posting by hand anywhere |
 | **Robust** | Parallel workers, SQLite WAL + per-item locks, HTTP retries with backoff, token/credit cost ledger per video |
 
 ## How it works
@@ -94,16 +103,18 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 
 | Command | What it does |
 |---|---|
-| `vw selftest [--full-hd]` | Run every component together offline and report each step (13 checks) |
+| `vw selftest [--full-hd]` | Run every component together offline and report each step (18 checks) |
+| `vw cloud deploy [--skip-secrets]` · `vw cloud sync` · `vw cloud status` | Deploy the cloud dashboard to Vercel · push state + apply cloud commands now · check the connection |
+| `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
 | `vw logs [id] [-f]` · `vw alerts` · `vw quality <id>` | Step-by-step trace (live with `-f`) · current problems · an item's quality report |
 | `vw approve-final <id>` · `vw retry <id>` · `vw rerender <id> -s 2 --note "..."` | Approve the full-res render · resume a failed item · re-shoot chosen shots |
 | `vw higgsfield-balance <credits> --plan <plan>` | Record the Higgsfield balance (the render skill does this) |
 | `vw init` · `vw doctor [--live]` | Create config files · check (and with `--live`, test) every connection |
 | `vw run [--ideas N] [--until stage]` | Push every item as far as the gates allow (parallel workers) |
 | `vw daemon [--once]` | Always-on loop + Telegram bot |
-| `vw serve` | Monitoring dashboard: board, activity feed, workflow map, metrics, health, self-test, item pages |
+| `vw serve` | Monitoring dashboard: board, calendar, activity feed, workflow map, metrics, health, self-test, item pages |
 | `vw bot` | Telegram bot only |
-| `vw ideas -n 5 -s "black holes"` · `vw trends` | Pitch ideas · see current trend signals |
+| `vw ideas -n 5 -s "black holes"` · `vw ideas --from-url <url>` · `vw trends` | Pitch ideas (from a topic or a source article) · see current trend signals |
 | `vw develop <id>` · `vw approve <id>` · `vw reject <id>` | Step through an item by hand |
 | `vw render <id> [-g mock\|handoff\|higgsfield_mcp]` · `vw render-request <id>` · `vw clips add <id> <shot> <url>` | Rendering |
 | `vw edit <id> [--voiceover file]` | Build the final cut |
@@ -129,7 +140,7 @@ through to the next one. Token use is recorded per video and shown in the dashbo
 
 ```
 src/video_workflow/
-  agents/        trend scout, scriptwriter, critic, director, packager (+ prompts/*.md)
+  agents/        trend scout, scriptwriter, critic, director, packager, translator, planner (+ prompts/*.md)
   llm/           provider-neutral LLM layer, router with fallbacks, usage ledger
   video/         renderers (handoff, higgsfield_mcp, mock) and the ffmpeg editor
   publishers/    youtube.py, instagram.py, tiktok.py (publish + stats)
@@ -139,18 +150,21 @@ src/video_workflow/
   trends.py      trend signals          health.py     live connection checks
   trace.py       step-by-step trace log monitor.py    alerts
   quality.py     technical video QA     web/          monitoring dashboard
+  cloud/         Vercel app, Postgres store, worker sync, REST deployer
+  kit.py         publish kit (zip)      sources.py    ideas from an article
   selftest.py    whole-system check
+api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            ARCHITECTURE · SETUP · OPERATIONS · HIGGSFIELD · ROADMAP
+docs/            ARCHITECTURE · SETUP · OPERATIONS · CLOUD · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).
 
 ## Status
 
-Phases 0–3 are built and tested: 75 tests, plus `vw selftest` (13 end-to-end checks) in CI
-and inside the Docker image. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
+Phases 0–3 are built and tested: 85 tests, plus `vw selftest` (18 end-to-end checks) in CI
+and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Responsible use
