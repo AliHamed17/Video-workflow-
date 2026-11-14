@@ -11,7 +11,8 @@ import httpx
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_SCOPES = ("https://www.googleapis.com/auth/youtube.upload "
+                  "https://www.googleapis.com/auth/youtube.readonly")  # upload + read stats
 
 
 def youtube_refresh_token(client_id: str, client_secret: str, port: int = 8765,
@@ -21,7 +22,7 @@ def youtube_refresh_token(client_id: str, client_secret: str, port: int = 8765,
     state = secrets.token_urlsafe(16)
     url = AUTH_URL + "?" + urlencode({
         "client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
-        "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent",
+        "scope": YOUTUBE_SCOPES, "access_type": "offline", "prompt": "consent",
         "state": state,
     })
     captured: dict[str, str] = {}

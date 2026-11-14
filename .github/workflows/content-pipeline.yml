@@ -39,6 +39,11 @@ jobs:
       TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
       TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
       TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,6 +62,8 @@ jobs:
           CONFIG=config/channel.yaml
           [ -f "$CONFIG" ] || CONFIG=config/channel.example.yaml
           vw run --ideas "${{ inputs.ideas || '2' }}" --until "${{ inputs.until || 'reviewed' }}" -c "$CONFIG"
+          vw stats -c "$CONFIG" || true
+          vw digest --send -c "$CONFIG"
           vw list
       - name: Save pipeline state
         if: always()

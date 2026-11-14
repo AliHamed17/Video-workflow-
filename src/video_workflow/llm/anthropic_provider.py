@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..config import Effort
 from .base import LLMError, LLMRefusal, ProviderUnavailable, T
+from .usage import report
 
 # Server-side refusal fallback: if the model declines, the API re-runs the request on a
 # fallback model inside the same call ("default" routes by refusal category).
@@ -45,6 +46,7 @@ class AnthropicProvider:
         except anthropic.AnthropicError as exc:  # e.g. no credentials resolved
             raise LLMError(f"Anthropic client error: {exc}") from exc
 
+        report(getattr(response.usage, "input_tokens", 0), getattr(response.usage, "output_tokens", 0))
         if response.stop_reason == "refusal":
             category = getattr(response.stop_details, "category", None)
             raise LLMRefusal(f"Claude declined (category={category})")

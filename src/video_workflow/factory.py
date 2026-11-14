@@ -6,8 +6,10 @@ import logging
 import shutil
 from pathlib import Path
 
+from . import net
 from .config import AppConfig, Secrets
 from .llm import LLMRouter
+from .notify import build_dispatcher
 from .pipeline import Pipeline
 from .publishers import InstagramPublisher, Publisher, TikTokPublisher, YouTubePublisher
 from .store import Store
@@ -15,6 +17,7 @@ from .video import Editor, VideoGenerator
 from .video.handoff import HandoffGenerator
 from .video.higgsfield_mcp import HiggsfieldMCPGenerator, MCPToolCaller
 from .video.mock import MockGenerator
+from .voice import build_voice
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
                    generator: str | None = None, with_publishers: bool = True) -> Pipeline:
     secrets = secrets or Secrets()
     store = Store(data_dir)
+    http = net.default_client()
     editor = Editor(config.video) if shutil.which("ffmpeg") else None
     return Pipeline(
         config=config,
@@ -70,4 +74,7 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
         generator=build_generator(config, secrets, generator),
         editor=editor,
         publishers=build_publishers(config, secrets, store.data_dir) if with_publishers else {},
+        notifier=build_dispatcher(config.notify, secrets, http),
+        voice=build_voice(config.video.voice, secrets, http),
+        http=http,
     )

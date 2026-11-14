@@ -15,6 +15,7 @@ class RenderResult(BaseModel):
     clips: list[Clip] = Field(default_factory=list)
     pending: bool = False   # True when rendering was handed off and clips arrive later
     note: str = ""
+    credits: float = 0.0    # credits spent (estimate)
 
 
 class VideoGenerator(Protocol):

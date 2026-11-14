@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections.abc import Callable
 
 from ..config import Effort, LLMConfig, Secrets
+from . import usage
 from .base import LLMError, LLMProvider, ProviderUnavailable, T
 
 log = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ class LLMRouter:
         self._providers: dict[str, LLMProvider] = dict(providers or {})
         self._factories: dict[str, Callable[[], LLMProvider]] = self._default_factories()
         self.calls: list[tuple[str, str, str]] = []  # (task, route, outcome) for observability
+        self._lock = threading.Lock()
 
     # ---- provider construction ---------------------------------------------------------
     def _default_factories(self) -> dict[str, Callable[[], LLMProvider]]:
@@ -72,6 +75,10 @@ class LLMRouter:
         return factories
 
     def provider(self, name: str) -> LLMProvider:
+        with self._lock:
+            return self._provider(name)
+
+    def _provider(self, name: str) -> LLMProvider:
         if name not in self._providers:
             factory = self._factories.get(name)
             if factory is None:
@@ -105,8 +112,9 @@ class LLMRouter:
             label = f"{provider_name}:{model}"
             try:
                 provider = self.provider(provider_name)
-                result = provider.structured(model=model, system=system, prompt=prompt,
-                                             schema=schema, effort=effort)
+                with usage.call_capture() as tokens:
+                    result = provider.structured(model=model, system=system, prompt=prompt,
+                                                 schema=schema, effort=effort)
             except ProviderUnavailable as exc:
                 errors.append(f"{label} unavailable ({exc})")
                 self.calls.append((task, label, "unavailable"))
@@ -117,6 +125,7 @@ class LLMRouter:
                 self.calls.append((task, label, "error"))
                 continue
             self.calls.append((task, label, "ok"))
-            log.info("LLM %s served %s", label, task)
+            usage.record(label, tokens[0], tokens[1])
+            log.info("LLM %s served %s (%d in / %d out tokens)", label, task, tokens[0], tokens[1])
             return result
         raise LLMError(f"All LLM candidates failed for {task!r}: " + "; ".join(errors))

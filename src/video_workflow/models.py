@@ -119,6 +119,48 @@ class Clip(BaseModel):
     path: str | None = None
 
 
+class VoiceClip(BaseModel):
+    shot_index: int
+    path: str
+    text_hash: str
+    duration: float
+
+
+class PostMetrics(BaseModel):
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    shares: int | None = None
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ModelUsage(BaseModel):
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class Usage(BaseModel):
+    """What one item cost to make."""
+
+    llm: dict[str, ModelUsage] = Field(default_factory=dict)   # "provider:model" -> usage
+    credits: float = 0.0                                       # Higgsfield credits (estimate)
+
+    def add_llm(self, label: str, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        entry = self.llm.setdefault(label, ModelUsage())
+        entry.calls += 1
+        entry.input_tokens += input_tokens
+        entry.output_tokens += output_tokens
+
+    @property
+    def llm_calls(self) -> int:
+        return sum(u.calls for u in self.llm.values())
+
+    @property
+    def tokens(self) -> int:
+        return sum(u.input_tokens + u.output_tokens for u in self.llm.values())
+
+
 class PublishResult(BaseModel):
     platform: str
     ok: bool
@@ -148,9 +190,15 @@ class ContentItem(BaseModel):
     render_plan: RenderPlan | None = None
     packaging: Packaging | None = None
     clips: list[Clip] = Field(default_factory=list)
+    voice_clips: list[VoiceClip] = Field(default_factory=list)
+    music_track: str | None = None
     final_video: str | None = None
     thumbnail: str | None = None
+    scheduled_for: datetime | None = None
     publishes: list[PublishResult] = Field(default_factory=list)
+    metrics: dict[str, PostMetrics] = Field(default_factory=dict)
+    usage: Usage = Field(default_factory=Usage)
+    attention: str | None = None   # why a human should look at this item
     history: list[Event] = Field(default_factory=list)
     error: str | None = None
 
@@ -161,3 +209,13 @@ class ContentItem(BaseModel):
 
     def published_platforms(self) -> set[str]:
         return {p.platform for p in self.publishes if p.ok}
+
+    def post_id(self, platform: str) -> str | None:
+        for result in reversed(self.publishes):
+            if result.platform == platform and result.ok:
+                return result.post_id
+        return None
+
+    @property
+    def total_views(self) -> int:
+        return sum(m.views or 0 for m in self.metrics.values())

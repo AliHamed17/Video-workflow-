@@ -2,82 +2,103 @@
 
 An automation pipeline for short-form video: **LLM agents write the content, Higgsfield renders
 it (through MCP), and the finished vertical videos are published to YouTube Shorts, Instagram
-Reels and TikTok.**
+Reels and TikTok, all at the same moment.**
 
-- **Any LLM**: Claude, ChatGPT/GPT (OpenAI), Gemini, any OpenAI-compatible endpoint
-  (OpenRouter, Groq, local Ollama...), or the Claude Code / Codex / Gemini **CLIs**, so it can
-  run on a subscription instead of API keys. Each task has its own fallback chain.
-- **Higgsfield through MCP**: either Claude Code renders the shots with the Higgsfield MCP
-  connector (`handoff` mode, works today), or the pipeline calls the MCP server itself
-  (`higgsfield_mcp` mode, fully headless).
-- **Publishing**: YouTube Data API, Instagram Graph API and TikTok Content Posting API,
-  with conservative defaults (private / draft) and AI-content disclosure on.
-- **Quality gates**: a critic agent from a different model family reviews every script,
-  sends it back for revision, and a human approval gate sits before any credits are spent.
+```bash
+vw selftest     # see every part working together, offline, in ~5 seconds (no keys needed)
+```
+
+## What it does
+
+| | |
+|---|---|
+| **Ideas from what's trending** | Google Trends, Reddit and RSS signals, plus your own videos' stats: the trend scout leans into what works |
+| **Any LLM, with fallbacks** | Claude, ChatGPT/GPT, Gemini, OpenRouter/Groq/Ollama, or the Claude Code / Codex / Gemini **CLIs** on a subscription |
+| **Quality gate** | A critic from another model family fact-checks and scores every script, sends it back for revision, and hands borderline ones to you |
+| **Higgsfield via MCP** | Claude Code renders shots with the Higgsfield connector (`handoff`), or the pipeline calls the MCP server itself (`higgsfield_mcp`) with a credit budget guard |
+| **Finished edit** | 1080x1920, narration (OpenAI / ElevenLabs / free offline flite) fitted to each shot, word-by-word captions with a headline, music ducked under the voice, −14 LUFS |
+| **Synchronized publishing** | Posting slots per timezone; YouTube + Instagram + TikTok go out in parallel; failed platforms retry alone |
+| **You stay in control** | Approve or reject from **Telegram** (buttons), the **web dashboard**, or the CLI; notifications on Telegram/Slack/Discord/webhook |
+| **Learns** | Pulls views/likes/comments back from every platform and feeds the winners into the next ideas |
+| **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
+| **Robust** | Parallel workers, SQLite WAL + per-item locks, HTTP retries with backoff, token/credit cost ledger per video |
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[Trend scout<br/>ideas] --> B[Scriptwriter<br/>shot script]
-    B --> C{Critic<br/>score + verdict}
+    T[Trends + past stats] --> A[Trend scout]
+    A --> B[Scriptwriter]
+    B --> C{Critic}
     C -- revise --> B
-    C -- reject --> X[rejected]
     C -- approve --> D[Director<br/>Higgsfield prompts]
-    D --> E[Packager<br/>titles, captions, hashtags]
-    E --> G{Approval gate<br/>human or auto}
-    G --> R[Render<br/>Higgsfield via MCP]
-    R --> V[Editor<br/>ffmpeg 1080x1920,<br/>captions, loudnorm]
-    V --> P1[YouTube Shorts]
-    V --> P2[Instagram Reels]
-    V --> P3[TikTok]
+    D --> E[Packager<br/>titles · captions · tags]
+    E --> G{You approve<br/>Telegram · dashboard · CLI}
+    G --> R[Higgsfield render<br/>via MCP]
+    R --> V[Voice · music · captions<br/>ffmpeg edit]
+    V --> S[Posting slot]
+    S --> P1[YouTube Shorts] & P2[Instagram Reels] & P3[TikTok]
+    P1 & P2 & P3 --> M[Stats] --> T
 ```
 
-Every item moves through stages: `idea → reviewed → approved → (awaiting_render) → rendered →
-edited → published` (or `rejected` / `failed`). Each step is saved to SQLite, so the pipeline
-can stop at any gate and resume later. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Items move through `idea → reviewed → approved → (awaiting_render) → rendered → edited →
+published` (or `rejected` / `failed`). Every step is saved, so the pipeline pauses at any gate
+and resumes later. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
 ```bash
-# Needs Python 3.11+ and ffmpeg
+# Python 3.11+ and ffmpeg
 uv venv && . .venv/bin/activate
 uv pip install -e ".[all,dev]"
 
-vw init        # creates config/channel.yaml (your channel brief) and .env (your keys)
-vw doctor      # shows which LLMs, renderer and platforms are configured
+vw selftest              # proves the whole system works on this machine
+vw init                  # creates config/channel.yaml (your channel brief) and .env (your keys)
+vw doctor --live         # tests every configured connection for real (posts nothing)
 
-# Free dry run: real LLM content, placeholder video clips, nothing published
-vw run --ideas 2 --until edited --generator mock
-vw list
+vw run --ideas 3         # pitch → script → critique → package; stops for your approval
+vw serve                 # dashboard at http://127.0.0.1:8787 — read, watch, approve
+vw run                   # render → voice → edit → publish (on schedule)
 ```
 
-The normal loop with real rendering:
+Always-on, with the Telegram bot:
 
 ```bash
-vw run --ideas 3          # pitch, script, critique, package -> stops at "reviewed"
-vw list                   # read the scripts: vw show <id>
-vw approve <id>           # human gate
-vw run                    # renders (or hands off to Claude Code), edits, publishes
+vw daemon                # or: docker compose up -d   (daemon + dashboard)
 ```
 
 ### Rendering with Higgsfield inside Claude Code (`handoff`, the default)
 
 1. Open this repo in Claude Code. `.mcp.json` registers the Higgsfield MCP server; run `/mcp`
-   once to sign in to your Higgsfield account.
-2. `vw run` parks approved items in `awaiting_render` and writes a render request with every
-   shot prompt.
-3. Ask Claude: *"render the pending videos"*. The `higgsfield-render` skill checks the credit
-   cost, generates all shots in one batch, and registers the clips with `vw clips add`.
-4. `vw run` again to edit and publish.
+   once to sign in.
+2. Approved items wait in `awaiting_render` (you get a notification).
+3. Ask Claude: *"render the pending videos"*. The `higgsfield-render` skill checks the cost,
+   generates all shots in one batch, and registers the clips.
+4. The daemon (or `vw run`) edits and publishes them.
 
-For unattended runs, set `video.generator: higgsfield_mcp` and `HIGGSFIELD_MCP_TOKEN`. The
-pipeline then does the same calls itself, with a credit budget guard (`max_credits_per_video`).
-See [docs/HIGGSFIELD.md](docs/HIGGSFIELD.md).
+For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKEN`. See
+[docs/HIGGSFIELD.md](docs/HIGGSFIELD.md).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `vw selftest [--full-hd]` | Run every component together offline and report each step |
+| `vw init` · `vw doctor [--live]` | Create config files · check (and with `--live`, test) every connection |
+| `vw run [--ideas N] [--until stage]` | Push every item as far as the gates allow (parallel workers) |
+| `vw daemon [--once]` | Always-on loop + Telegram bot |
+| `vw serve` | Web dashboard (board, video player, script, review, approve/reject/publish) |
+| `vw bot` | Telegram bot only |
+| `vw ideas -n 5 -s "black holes"` · `vw trends` | Pitch ideas · see current trend signals |
+| `vw develop <id>` · `vw approve <id>` · `vw reject <id>` | Step through an item by hand |
+| `vw render <id> [-g mock\|handoff\|higgsfield_mcp]` · `vw render-request <id>` · `vw clips add <id> <shot> <url>` | Rendering |
+| `vw edit <id> [--voiceover file]` | Build the final cut |
+| `vw publish <id> [-p youtube] [--now]` | Publish (all platforms in parallel; `--now` skips the slot) |
+| `vw stats` · `vw digest [--send]` | Pull platform stats · summary of what needs you, what's scheduled, views and spend |
+| `vw list` · `vw show <id>` | Inspect items |
+| `vw auth-youtube` | One-time OAuth for YouTube upload + stats |
 
 ## Choosing models
-
-`config/channel.yaml` maps each task to an ordered list of `provider:model` candidates:
 
 ```yaml
 llm:
@@ -87,53 +108,37 @@ llm:
     packaging: ["cli:codex", "openrouter:meta-llama/llama-4-maverick"]
 ```
 
-Providers: `anthropic`, `openai`, `gemini`, `cli` (`cli:claude`, `cli:codex`, `cli:gemini`),
-plus any name you declare under `llm.compat_providers`. A provider with no key is skipped and
-an error falls through to the next candidate.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `vw init` / `vw doctor` | Create config files / check what is configured |
-| `vw ideas -n 5 -s "black holes"` | Pitch ideas (optionally seeded with trends) |
-| `vw develop <id>` | Script → critique → revise → direct → package |
-| `vw approve <id>` / `vw reject <id>` | Human gate |
-| `vw render <id> [-g mock\|handoff\|higgsfield_mcp]` | Render shots |
-| `vw render-request <id>` / `vw clips add <id> <shot> <url\|file>` | Handoff rendering |
-| `vw edit <id> [--voiceover file]` | Build the final 1080x1920 cut with captions |
-| `vw publish <id> [-p youtube -p tiktok]` | Publish (retries only the failed platforms) |
-| `vw run [--ideas N] [--until stage]` | Autopilot as far as the gates allow |
-| `vw list` / `vw show <id>` | Inspect items |
-| `vw auth-youtube` | One-time OAuth to get a YouTube refresh token |
+Each task tries its candidates in order; an unconfigured provider is skipped and an error falls
+through to the next one. Token use is recorded per video and shown in the dashboard.
 
 ## Repository layout
 
 ```
 src/video_workflow/
   agents/        trend scout, scriptwriter, critic, director, packager (+ prompts/*.md)
-  llm/           provider-neutral LLM layer + router with fallbacks
+  llm/           provider-neutral LLM layer, router with fallbacks, usage ledger
   video/         renderers (handoff, higgsfield_mcp, mock) and the ffmpeg editor
-  publishers/    youtube.py, instagram.py, tiktok.py
-  pipeline.py    the stage machine        cli.py   the `vw` command
-config/          channel.example.yaml — the brand bible every agent reads
-.claude/skills/  higgsfield-render — Claude Code renders shots via Higgsfield MCP
-.github/         CI (lint + tests) and a manual/scheduled content-pipeline workflow
-docs/            ARCHITECTURE, SETUP (credentials), HIGGSFIELD, ROADMAP
+  publishers/    youtube.py, instagram.py, tiktok.py (publish + stats)
+  pipeline.py    stage machine          daemon.py     always-on loop
+  voice.py       narration engines      schedule.py   posting slots
+  notify.py      Telegram/Slack/Discord telegram_bot.py approvals from your phone
+  trends.py      trend signals          health.py     live connection checks
+  dashboard.py   web UI                 selftest.py   whole-system check
+config/          channel.example.yaml: the brand bible every agent reads
+.claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
+docs/            ARCHITECTURE · SETUP · OPERATIONS · HIGGSFIELD · ROADMAP
 ```
 
-Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code) and `GEMINI.md`
-(Gemini CLI) share one set of repo instructions.
+Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).
 
-## Status and next steps
+## Status
 
-Phase 0, the foundation, is done: agents, multi-LLM routing, Higgsfield rendering, editing,
-three publishers, CI, and 36 tests that use no network. Next: platform credentials and the
-first real video. The plan is in [docs/ROADMAP.md](docs/ROADMAP.md), and credential setup for
-each platform is in [docs/SETUP.md](docs/SETUP.md).
+Phases 0–2 are built and tested: 66 tests, plus `vw selftest` in CI and inside the Docker
+image. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
+[docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Responsible use
 
 Videos are AI-generated. Keep `publish.ai_disclosure: true`, keep claims factual (the critic
-checks this), don't depict real private people, and follow each platform's rules on
-synthetic media and automated posting.
+checks this), don't depict real private people, use music you have rights to, and follow each
+platform's rules on synthetic media and automated posting.

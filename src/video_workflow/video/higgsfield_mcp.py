@@ -60,6 +60,10 @@ class MCPToolCaller:
         if self._client is not None:
             await self._client.__aexit__(*exc)
 
+    async def list_tools(self) -> list[str]:
+        result = await self._client.list_tools()
+        return [t.name for t in result.tools]
+
     async def call(self, name: str, arguments: dict[str, Any]) -> Any:
         result = await self._client.call_tool(name, arguments)
         is_error = getattr(result, "is_error", None) or getattr(result, "isError", False)
@@ -170,6 +174,7 @@ class HiggsfieldMCPGenerator:
             preflight = self._params(plan, first.index, first.duration_s) | {"get_cost": True}
             preflight.pop("use_unlim", None)
             cost = extract_credits(await caller.call("generate_video", {"params": preflight, "context": context}))
+            estimate = 0.0
             if cost is not None:
                 estimate = cost * len(plan.shots)
                 if estimate > self.config.max_credits_per_video:
@@ -216,4 +221,5 @@ class HiggsfieldMCPGenerator:
                 raise HiggsfieldError(f"Job {job_id} finished without a result URL: {states[job_id]}")
             path = download(url, out_dir / f"shot_{index:02d}.mp4", self.http)
             clips.append(Clip(shot_index=index, source=job_id, url=url, path=str(path)))
-        return RenderResult(clips=clips, note=f"{len(clips)} clips rendered on {self.config.model}")
+        return RenderResult(clips=clips, credits=estimate,
+                            note=f"{len(clips)} clips rendered on {self.config.model}")

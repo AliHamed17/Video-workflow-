@@ -20,3 +20,19 @@ jobs:
         run: ruff check src tests
       - name: Test
         run: pytest
+      - name: Self-test (whole system, offline)
+        run: vw selftest --out selftest-output
+      - name: Upload self-test video
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-video
+          path: selftest-output/data/items/*/final.mp4
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t video-workflow .
+      - name: Self-test inside the image
+        run: docker run --rm video-workflow vw selftest

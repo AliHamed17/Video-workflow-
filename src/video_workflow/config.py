@@ -40,6 +40,16 @@ class Secrets(BaseSettings):
     tiktok_access_token: SecretStr | None = None
     tiktok_refresh_token: SecretStr | None = None
 
+    elevenlabs_api_key: SecretStr | None = None
+
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
+    slack_webhook_url: SecretStr | None = None
+    discord_webhook_url: SecretStr | None = None
+    notify_webhook_url: SecretStr | None = None
+
+    dashboard_token: SecretStr | None = None
+
 
 class ChannelConfig(BaseModel):
     name: str
@@ -63,8 +73,27 @@ class HiggsfieldConfig(BaseModel):
 
 class CaptionConfig(BaseModel):
     burn_in: bool = True
+    # auto: word-by-word captions from the voiceover when there is one, else on_screen_text per shot
+    mode: Literal["auto", "words", "shot_text"] = "auto"
+    words_per_caption: int = 3
+    headline: bool = True          # show the shot's on_screen_text at the top in words mode
     font: str = "DejaVu Sans"
-    font_size: int = 14
+    font_size: int = 80            # pixels on a 1080x1920 frame
+    highlight_color: str = "&H0000E5FF"  # ASS BGR colour for word captions (yellow)
+
+
+class VoiceConfig(BaseModel):
+    provider: Literal["none", "flite", "openai", "elevenlabs"] = "none"
+    voice: str = ""                # openai voice / elevenlabs voice_id / flite voice (slt, kal, awb, rms)
+    model: str = ""                # openai: gpt-4o-mini-tts, elevenlabs: eleven_multilingual_v2
+    instructions: str = ""         # openai only: delivery style
+    max_speedup: float = 1.3       # speed narration up to this factor to fit a shot
+
+
+class MusicConfig(BaseModel):
+    dir: str | None = None         # folder of royalty-free tracks (mp3/wav/m4a/ogg/flac)
+    volume_db: float = -16
+    duck: bool = True              # lower the music under the voiceover
 
 
 class VideoConfig(BaseModel):
@@ -73,6 +102,9 @@ class VideoConfig(BaseModel):
     generator: Literal["handoff", "higgsfield_mcp", "mock"] = "handoff"
     higgsfield: HiggsfieldConfig = Field(default_factory=HiggsfieldConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    music: MusicConfig = Field(default_factory=MusicConfig)
+    clip_audio_volume: float = 0.35  # level of the clips' own audio under narration
     loudness_lufs: float = -14
 
 
@@ -96,6 +128,8 @@ class LLMConfig(BaseModel):
 class ReviewConfig(BaseModel):
     min_score: float = 7.0
     max_revisions: int = 2
+    # When revisions run out: "human" parks the item for you to decide, "reject" kills it.
+    on_exhausted: Literal["human", "reject"] = "human"
 
 
 class ApprovalConfig(BaseModel):
@@ -117,12 +151,49 @@ class TikTokConfig(BaseModel):
     privacy_level: str = "SELF_ONLY"
 
 
+class ScheduleConfig(BaseModel):
+    timezone: str = "UTC"
+    slots: list[str] = Field(default_factory=list)  # ["09:00", "18:30"]; empty = publish immediately
+    max_per_day: int = 2
+
+
 class PublishConfig(BaseModel):
     platforms: list[Platform] = Field(default_factory=lambda: list(ALL_PLATFORMS))
     ai_disclosure: bool = True
+    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
     instagram: InstagramConfig = Field(default_factory=InstagramConfig)
     tiktok: TikTokConfig = Field(default_factory=TikTokConfig)
+
+
+class TrendSourceConfig(BaseModel):
+    type: Literal["google_trends", "reddit", "rss"]
+    geo: str = "US"                                   # google_trends
+    subreddits: list[str] = Field(default_factory=list)  # reddit
+    url: str = ""                                     # rss
+    limit: int = 10
+
+
+class TrendsConfig(BaseModel):
+    enabled: bool = False
+    sources: list[TrendSourceConfig] = Field(default_factory=list)
+    max_items: int = 25
+
+
+class NotifyConfig(BaseModel):
+    channels: list[Literal["telegram", "slack", "discord", "webhook", "log"]] = Field(
+        default_factory=lambda: ["log"])
+    events: list[str] = Field(default_factory=lambda: [
+        "needs_approval", "awaiting_render", "scheduled", "published", "failed", "rejected", "digest"])
+
+
+class RuntimeConfig(BaseModel):
+    workers: int = 3                # items processed in parallel
+    daemon_interval_minutes: int = 15
+    ideas_per_day: int = 2
+    max_backlog: int = 6            # don't pitch more while this many items are unfinished
+    stats_every_hours: int = 6
+    digest_hour: int = 20           # local hour for the daily summary (schedule timezone)
 
 
 class AppConfig(BaseModel):
@@ -132,6 +203,9 @@ class AppConfig(BaseModel):
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
+    trends: TrendsConfig = Field(default_factory=TrendsConfig)
+    notify: NotifyConfig = Field(default_factory=NotifyConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> AppConfig:

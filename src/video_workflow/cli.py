@@ -68,29 +68,23 @@ def init() -> None:
 
 
 @app.command()
-def doctor(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
-    """Show what is configured: LLM providers, renderer, publishers, ffmpeg."""
+def doctor(live: Annotated[bool, typer.Option("--live", help="Actually connect to every service")] = False,
+           config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Check what is configured; --live proves each connection works (nothing is posted or charged)."""
+    from .health import run_checks
+
     cfg = AppConfig.load(resolve_config_path(config))
     secrets = Secrets()
-    table = Table("component", "status")
-    table.add_row("ffmpeg", "ok" if shutil.which("ffmpeg") else "[red]missing[/]")
-    keys = {
-        "anthropic": secrets.anthropic_api_key, "openai": secrets.openai_api_key,
-        "gemini": secrets.gemini_api_key,
-    }
-    for name, key in keys.items():
-        table.add_row(f"llm:{name}", "key set" if key else "[dim]no key[/]")
-    for name in cfg.llm.cli_agents:
-        cmd = cfg.llm.cli_agents[name][0]
-        table.add_row(f"llm:cli:{name}", "installed" if shutil.which(cmd) else "[dim]not installed[/]")
-    gen = cfg.video.generator
-    if gen == "higgsfield_mcp" and not secrets.higgsfield_mcp_token:
-        gen += " [red](HIGGSFIELD_MCP_TOKEN missing)[/]"
-    table.add_row("video generator", gen)
-    pubs = build_publishers(cfg, secrets, data)
-    for platform in cfg.publish.platforms:
-        table.add_row(f"publish:{platform}", "configured" if platform in pubs else "[dim]no credentials[/]")
+    checks = run_checks(cfg, secrets, build_publishers(cfg, secrets, data), live=live)
+    table = Table("check", "status", "detail")
+    for c in checks:
+        mark = "[green]ok[/]" if c.ok else ("[dim]skipped[/]" if c.ok is None else "[red]FAIL[/]")
+        table.add_row(c.name, mark, c.detail)
     console.print(table)
+    if not live:
+        console.print("[dim]Run `vw doctor --live` to test the connections for real.[/]")
+    if any(c.ok is False for c in checks):
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -155,10 +149,13 @@ def edit(item_id: str,
 @app.command()
 def publish(item_id: str,
             platform: Annotated[list[str] | None, typer.Option("--platform", "-p")] = None,
+            now: Annotated[bool, typer.Option("--now", help="Ignore the posting schedule")] = False,
             config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
-    """Publish an edited item to the configured platforms."""
+    """Publish an edited item (all platforms at once). Respects its scheduled slot unless --now."""
     pipe = _setup(config, data)
-    item = pipe.publish(pipe.store.get(item_id), platform)
+    item = pipe.publish(pipe.store.get(item_id), platform, force=now)
+    if item.stage == Stage.EDITED and item.scheduled_for and not now:
+        console.print(f"Scheduled for {item.scheduled_for:%Y-%m-%d %H:%M} UTC — use --now to post immediately.")
     for result in item.publishes:
         mark = "[green]ok[/]" if result.ok else "[red]failed[/]"
         console.print(f"{result.platform}: {mark} {result.url or result.post_id or ''} {result.detail or ''}")
@@ -199,6 +196,116 @@ def render_request(item_id: str, data: DataOpt = Path("data")) -> None:
     if not path.exists():
         raise typer.BadParameter(f"No render request for {item.id} (stage {item.stage.value})")
     console.print_json(json.dumps(json.loads(path.read_text())))
+
+
+@app.command()
+def stats(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Pull views/likes/comments for published videos (feeds the trend scout)."""
+    pipe = _setup(config, data)
+    console.print(f"Updated {pipe.refresh_metrics()} post(s).")
+    table = Table("id", "title", "views", "per platform")
+    for item in sorted((i for i in pipe.store.list() if i.metrics), key=lambda i: -i.total_views):
+        per = ", ".join(f"{k}: {v.views or 0:,}" for k, v in item.metrics.items())
+        table.add_row(item.id, item.idea.title[:50], f"{item.total_views:,}", per)
+    console.print(table)
+
+
+@app.command()
+def trends(config: ConfigOpt = None) -> None:
+    """Show the trend signals the trend scout would see right now."""
+    from . import trends as trend_mod
+
+    cfg = AppConfig.load(resolve_config_path(config))
+    if not cfg.trends.enabled:
+        console.print("Trends are disabled (set trends.enabled: true in the channel config).")
+    for line in trend_mod.collect(cfg.trends):
+        console.print(f"• {line}")
+
+
+@app.command()
+def digest(send: Annotated[bool, typer.Option("--send", help="Also send it to the notify channels")] = False,
+           config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Summary: what is waiting for you, what's scheduled, views and spend."""
+    pipe = _setup(config, data, publishers=False)
+    notice = pipe.digest()
+    console.print(notice.plain())
+    if send:
+        pipe.notify(notice)
+
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8787,
+          behind_proxy: Annotated[bool, typer.Option(
+              "--behind-proxy", help="Allow a non-local bind without a token (e.g. Docker port bound to loopback)")] = False,
+          config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Web dashboard: review scripts, watch videos, approve/reject/publish (set DASHBOARD_TOKEN if exposed)."""
+    from .dashboard import serve as run_server
+
+    pipe = _setup(config, data)
+    token = Secrets().dashboard_token
+    if host not in ("127.0.0.1", "localhost") and token is None and not behind_proxy:
+        raise typer.BadParameter("Set DASHBOARD_TOKEN before exposing the dashboard beyond localhost")
+    run_server(pipe, host, port, token.get_secret_value() if token else None)
+
+
+def _bot(pipe):
+    from .telegram_bot import TelegramBot
+
+    secrets = Secrets()
+    if not (secrets.telegram_bot_token and secrets.telegram_chat_id):
+        return None
+    return TelegramBot(secrets.telegram_bot_token.get_secret_value(), secrets.telegram_chat_id, pipe)
+
+
+@app.command()
+def bot(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Run only the Telegram bot (approve/reject/status from your phone)."""
+    pipe = _setup(config, data)
+    tg = _bot(pipe)
+    if tg is None:
+        raise typer.BadParameter("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
+    console.print("Telegram bot running — Ctrl+C to stop.")
+    while True:
+        tg.poll_once()
+
+
+@app.command()
+def daemon(once: Annotated[bool, typer.Option("--once", help="Run a single cycle and exit")] = False,
+           generator: GenOpt = None, config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Always-on: ideas to quota → advance everything → publish on schedule → stats → digest (+ Telegram bot)."""
+    from .daemon import AlreadyRunning, Daemon
+
+    pipe = _setup(config, data, generator)
+    try:
+        Daemon(pipe, bot=_bot(pipe)).run_forever(once=once)
+    except AlreadyRunning as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    except KeyboardInterrupt:
+        pass
+
+
+@app.command()
+def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs here")] = None,
+             full_hd: Annotated[bool, typer.Option("--full-hd", help="Render 1080x1920 (slower)")] = False,
+             config: ConfigOpt = None) -> None:
+    """Run every component together, offline (scripted LLM, fake platform APIs). No keys needed."""
+    from .selftest import run as run_selftest
+
+    logging.basicConfig(level=logging.WARNING)
+    console.print("[bold]Self-test: the whole pipeline, end to end, offline[/]")
+
+    def show(r):
+        mark = "[green]✓[/]" if r.ok else "[red]✗[/]"
+        console.print(f"{mark} {r.name} [dim]({r.seconds:.1f}s)[/]\n    {r.detail}")
+
+    size = (1080, 1920) if full_hd else (540, 960)
+    results, final = run_selftest(out, resolve_config_path(config), *size, on_step=show)
+    passed = sum(r.ok for r in results)
+    console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
+    console.print(f"Final video: {final}")
+    if passed != len(results) or len(results) < 10:
+        raise typer.Exit(1)
 
 
 @app.command("auth-youtube")

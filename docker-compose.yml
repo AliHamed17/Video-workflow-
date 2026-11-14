@@ -1,0 +1,23 @@
+# docker compose up -d   → the daemon (pipeline + Telegram bot) and the dashboard on http://127.0.0.1:8787
+services:
+  daemon:
+    build: .
+    command: vw daemon
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./music:/app/music        # set video.music.dir: /app/music to use it
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    # Published on the host's loopback only; set DASHBOARD_TOKEN before exposing it anywhere else.
+    command: vw serve --host 0.0.0.0 --port 8787 --behind-proxy
+    env_file: .env
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: unless-stopped

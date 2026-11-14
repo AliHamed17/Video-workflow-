@@ -43,8 +43,23 @@ video:
     poll_timeout_s: 1200
   captions:
     burn_in: true
+    mode: auto                   # auto: word-by-word from the narration, else each shot's on_screen_text
+    words_per_caption: 3
+    headline: true               # keep the shot's on_screen_text at the top while words play
     font: "DejaVu Sans"
-    font_size: 14                # libass units (video height = 288); 14 ≈ 93px on 1080x1920
+    font_size: 80                # pixels on a 1080x1920 frame
+  voice:
+    # none | flite (free, offline, robotic — good for drafts) | openai | elevenlabs
+    provider: flite
+    voice: ""                    # openai: alloy/nova/...; elevenlabs: a voice_id; flite: slt/kal/awb/rms
+    model: ""                    # openai: gpt-4o-mini-tts; elevenlabs: eleven_multilingual_v2
+    instructions: "Energetic, curious science-explainer delivery."   # openai only
+    max_speedup: 1.3
+  music:
+    dir: null                    # folder of royalty-free tracks; file names matching the script's mood win
+    volume_db: -16
+    duck: true                   # music dips under the narration
+  clip_audio_volume: 0.35        # the clips' own sound under narration
   loudness_lufs: -14
 
 llm:
@@ -85,6 +100,7 @@ llm:
 review:
   min_score: 7.0        # critic score (0-10) needed to pass
   max_revisions: 2      # writer <-> critic rounds before giving up
+  on_exhausted: human   # human: park it for you with the critic's notes | reject: drop it
 
 approval:
   mode: manual          # manual: stop at "reviewed" until `vw approve <id>`; auto: approve if score >= auto_min_score
@@ -101,3 +117,33 @@ publish:
   tiktok:
     mode: draft         # draft: lands in your TikTok inbox to post manually | direct: posts straight away
     privacy_level: SELF_ONLY   # unaudited TikTok apps can only post SELF_ONLY
+  schedule:
+    timezone: "UTC"     # e.g. "America/New_York"
+    slots: []           # e.g. ["12:30", "19:00"]; every platform posts at the same slot. [] = immediately
+    max_per_day: 2
+
+trends:
+  enabled: false
+  max_items: 25
+  sources:
+    - type: google_trends
+      geo: US
+      limit: 10
+    - type: reddit
+      subreddits: [science, space, Damnthatsinteresting]
+      limit: 8
+    # - type: rss
+    #   url: "https://www.sciencedaily.com/rss/top/science.xml"
+
+notify:
+  # log | telegram | slack | discord | webhook (credentials in .env)
+  channels: [log, telegram]
+  events: [needs_approval, awaiting_render, scheduled, published, failed, rejected, digest]
+
+runtime:
+  workers: 3                    # items processed in parallel
+  daemon_interval_minutes: 15
+  ideas_per_day: 2
+  max_backlog: 6                # don't pitch more while this many items are unfinished
+  stats_every_hours: 6
+  digest_hour: 20               # local hour (schedule timezone) for the daily summary

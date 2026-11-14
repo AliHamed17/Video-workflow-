@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..config import Effort
 from .base import LLMError, ProviderUnavailable, T, parse_into
+from .usage import report
 
 
 class GeminiProvider:
@@ -34,6 +35,8 @@ class GeminiProvider:
             )
         except Exception as exc:
             raise LLMError(f"Gemini error: {exc}") from exc
+        meta = getattr(response, "usage_metadata", None)
+        report(getattr(meta, "prompt_token_count", 0), getattr(meta, "candidates_token_count", 0))
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, schema):
             return parsed

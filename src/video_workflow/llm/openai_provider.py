@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..config import Effort
 from .base import LLMError, LLMRefusal, ProviderUnavailable, T, parse_into, schema_instructions
+from .usage import report
 
 # OpenAI reasoning effort has no xhigh/max on every model; clamp to "high".
 _EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high", "max": "high"}
@@ -37,6 +38,8 @@ class OpenAIProvider:
             )
         except Exception as exc:  # openai raises many typed errors; all are fallback-worthy here
             raise LLMError(f"OpenAI error: {exc}") from exc
+        u = getattr(response, "usage", None)
+        report(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0))
         parsed = response.output_parsed
         if parsed is None:
             raise LLMRefusal("OpenAI returned no parsed output (refusal or incomplete)")
@@ -64,4 +67,6 @@ class OpenAICompatProvider:
             )
         except Exception as exc:
             raise LLMError(f"{self.name} error: {exc}") from exc
+        u = getattr(response, "usage", None)
+        report(getattr(u, "prompt_tokens", 0), getattr(u, "completion_tokens", 0))
         return parse_into(schema, response.choices[0].message.content or "")

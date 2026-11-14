@@ -26,7 +26,7 @@ class Scriptwriter(Agent):
         prompt = load_prompt("scripting").substitute(
             title=idea.title, hook=idea.hook, angle=idea.angle, fact_check=idea.fact_check_notes,
             target_duration=video.target_duration_s, shot_duration=shot_duration,
-            shot_count=shot_count, revision=revision,
+            shot_count=shot_count, words_per_shot=max(4, int(shot_duration * 2.6)), revision=revision,
         )
         script = self.ask(prompt, Script)
         # Enforce the renderer's fixed shot length regardless of what the model wrote.

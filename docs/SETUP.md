@@ -47,6 +47,7 @@ current model list.
    ```bash
    vw auth-youtube      # opens the browser and prints YOUTUBE_REFRESH_TOKEN=...
    ```
+   It asks for upload and read-only scopes (read-only is what `vw stats` uses).
 4. Add the refresh token to `.env`.
 
 Notes:
@@ -80,7 +81,8 @@ URL. API publishing is rate-limited per account per 24 h.
 ## 6. TikTok
 
 1. developers.tiktok.com → create an app → add **Login Kit** and **Content Posting API**.
-2. Scopes: `video.upload` (send to drafts) and/or `video.publish` (direct post).
+2. Scopes: `video.upload` (send to drafts) and/or `video.publish` (direct post), plus
+   `video.list` for `vw stats`.
 3. Complete the OAuth flow for your account (your redirect URI must be registered on the app)
    to get an access token and refresh token. Fill `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`,
    `TIKTOK_ACCESS_TOKEN`, `TIKTOK_REFRESH_TOKEN`. Access tokens last ~24 h; the publisher
@@ -92,7 +94,34 @@ URL. API publishing is rate-limited per account per 24 h.
 Alternative: Higgsfield's MCP can publish its own hosted renders to TikTok
 (`tiktok_connect` / `tiktok_prepare_publish`), with a review form, from Claude.
 
-## 7. GitHub Actions (optional automation)
+## 7. Narration voices
+
+| `video.voice.provider` | Needs | Notes |
+|---|---|---|
+| `flite` | nothing (built into most ffmpeg builds) | Free, offline, robotic: good for drafts and tests |
+| `openai` | `OPENAI_API_KEY` | `voice: nova` etc., `model: gpt-4o-mini-tts`, `instructions:` sets the delivery |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | `voice:` is an ElevenLabs voice_id (including cloned voices) |
+| `none` | | No narration; the clips' own audio (e.g. Higgsfield `generate_audio`) is used |
+
+## 8. Notifications
+
+`notify.channels` can include `telegram`, `slack`, `discord`, `webhook`, `log`:
+
+- **Telegram** (recommended, also lets you approve from your phone): see OPERATIONS.md →
+  Telegram. Fill `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- **Slack**: create an Incoming Webhook → `SLACK_WEBHOOK_URL`.
+- **Discord**: Channel settings → Integrations → Webhooks → `DISCORD_WEBHOOK_URL`.
+- **Webhook**: any URL that accepts a JSON POST (Zapier, Make, n8n...) → `NOTIFY_WEBHOOK_URL`.
+
+## 9. Docker
+
+```bash
+cp .env.example .env    # fill it in
+docker compose up -d    # daemon + Telegram bot, dashboard on http://127.0.0.1:8787
+docker compose run --rm daemon vw doctor --live
+```
+
+## 10. GitHub Actions (optional automation)
 
 Add the same keys as **repository secrets** (Settings → Secrets and variables → Actions), commit
 your `config/channel.yaml`, and trigger **Content pipeline** from the Actions tab. It is manual

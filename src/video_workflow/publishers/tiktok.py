@@ -15,11 +15,9 @@ import math
 import time
 from pathlib import Path
 
-import httpx
-
 from ..config import TikTokConfig
-from ..models import ContentItem, PublishResult
-from .base import PublishError, check, default_http, hashtags
+from ..models import ContentItem, PostMetrics, PublishResult
+from .base import HTTPPublisher, PublishError, hashtags, to_int
 
 API = "https://open.tiktokapis.com"
 MAX_SINGLE_CHUNK = 64 * 1024 * 1024
@@ -34,17 +32,17 @@ def chunk_plan(size: int) -> tuple[int, int]:
     return CHUNK, math.floor(size / CHUNK)
 
 
-class TikTokPublisher:
+class TikTokPublisher(HTTPPublisher):
     name = "tiktok"
 
     def __init__(self, client_key: str | None, client_secret: str | None, access_token: str | None,
                  refresh_token: str | None, config: TikTokConfig, ai_disclosure: bool = True,
-                 http: httpx.Client | None = None, token_path: Path | None = None,
-                 poll_interval_s: float = 5.0, poll_timeout_s: float = 900.0):
+                 token_path: Path | None = None, poll_interval_s: float = 5.0,
+                 poll_timeout_s: float = 900.0, **kw):
+        super().__init__(**kw)
         self.client_key, self.client_secret = client_key, client_secret
         self.access_token, self.refresh_token = access_token, refresh_token
         self.config, self.ai_disclosure = config, ai_disclosure
-        self.http = http or default_http()
         self.token_path = token_path
         self.poll_interval_s, self.poll_timeout_s = poll_interval_s, poll_timeout_s
         if token_path and token_path.exists():
@@ -56,10 +54,10 @@ class TikTokPublisher:
     def _refresh(self) -> None:
         if not (self.client_key and self.client_secret and self.refresh_token):
             raise PublishError("TikTok token expired and no client key/secret/refresh token to renew it")
-        tok = check(self.http.post(f"{API}/v2/oauth/token/", data={
+        tok = self._send("POST", f"{API}/v2/oauth/token/", "TikTok token refresh", data={
             "client_key": self.client_key, "client_secret": self.client_secret,
             "grant_type": "refresh_token", "refresh_token": self.refresh_token,
-        }), "TikTok token refresh").json()
+        }).json()
         if "access_token" not in tok:
             raise PublishError(f"TikTok token refresh failed: {tok}")
         self.access_token = tok["access_token"]
@@ -68,14 +66,17 @@ class TikTokPublisher:
             self.token_path.write_text(json.dumps(
                 {"access_token": self.access_token, "refresh_token": self.refresh_token}))
 
-    def _api(self, path: str, body: dict) -> dict:
+    def _api(self, path: str, body: dict, *, idempotent: bool = True, params: dict | None = None) -> dict:
+        from .. import net
+
         for attempt in range(2):
             if not self.access_token:
                 self._refresh()
-            resp = self.http.post(f"{API}{path}", json=body, headers={
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json; charset=UTF-8",
-            })
+            resp = net.send(self.http, "POST", f"{API}{path}", json=body, params=params,
+                            idempotent=idempotent, sleep=self.sleep, headers={
+                                "Authorization": f"Bearer {self.access_token}",
+                                "Content-Type": "application/json; charset=UTF-8",
+                            })
             try:
                 payload = resp.json() if resp.content else {}
             except ValueError:
@@ -106,7 +107,7 @@ class TikTokPublisher:
             if options and self.config.privacy_level not in options:
                 raise PublishError(f"privacy_level {self.config.privacy_level} not allowed; options: {options}")
             title = f"{meta.caption.strip()} {hashtags(meta.hashtags)}".strip()[:2200]
-            init = self._api("/v2/post/publish/video/init/", {
+            init = self._api("/v2/post/publish/video/init/", idempotent=False, body={
                 "post_info": {
                     "title": title,
                     "privacy_level": self.config.privacy_level,
@@ -119,16 +120,14 @@ class TikTokPublisher:
                 "source_info": source,
             })
         else:
-            init = self._api("/v2/post/publish/inbox/video/init/", {"source_info": source})
+            init = self._api("/v2/post/publish/inbox/video/init/", {"source_info": source}, idempotent=False)
 
         publish_id, upload_url = init["publish_id"], init["upload_url"]
         for i in range(total):
             start = i * chunk_size
             end = size - 1 if i == total - 1 else start + chunk_size - 1
-            check(self.http.put(upload_url, content=data[start : end + 1], headers={
-                "Content-Type": "video/mp4",
-                "Content-Range": f"bytes {start}-{end}/{size}",
-            }), f"TikTok chunk {i + 1}/{total}")
+            self._send("PUT", upload_url, f"TikTok chunk {i + 1}/{total}", content=data[start : end + 1],
+                       headers={"Content-Type": "video/mp4", "Content-Range": f"bytes {start}-{end}/{size}"})
 
         done_states = {"PUBLISH_COMPLETE", "SEND_TO_USER_INBOX"}
         deadline = time.monotonic() + self.poll_timeout_s
@@ -141,7 +140,7 @@ class TikTokPublisher:
                 raise PublishError(f"TikTok processing failed: {status.get('fail_reason')}")
             if time.monotonic() > deadline:
                 raise PublishError(f"Timed out waiting for TikTok (last status {state})")
-            time.sleep(self.poll_interval_s)
+            self.sleep(self.poll_interval_s)
 
         post_ids = status.get("publicaly_available_post_id") or []  # (sic) TikTok's spelling
         return PublishResult(
@@ -149,3 +148,12 @@ class TikTokPublisher:
             post_id=str(post_ids[0]) if post_ids else publish_id,
             detail=f"mode={self.config.mode} status={state}",
         )
+
+    def fetch_metrics(self, post_id: str) -> PostMetrics:
+        """Needs the video.list scope. Draft uploads have no public video id yet."""
+        data = self._api("/v2/video/query/", {"filters": {"video_ids": [post_id]}},
+                         params={"fields": "id,view_count,like_count,comment_count,share_count"})
+        videos = data.get("videos") or []
+        v = videos[0] if videos else {}
+        return PostMetrics(views=to_int(v.get("view_count")), likes=to_int(v.get("like_count")),
+                           comments=to_int(v.get("comment_count")), shares=to_int(v.get("share_count")))

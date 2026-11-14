@@ -17,6 +17,7 @@ from video_workflow.models import (
     SocialMeta,
     YouTubeMeta,
 )
+from video_workflow.testing import ScriptedLLM
 
 requires_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 
@@ -57,23 +58,7 @@ def make_packaging() -> Packaging:
     )
 
 
-class FakeProvider:
-    """Returns canned objects per schema. A value may be a list (consumed in order) or callable."""
-
-    name = "fake"
-
-    def __init__(self, responses: dict):
-        self.responses = responses
-        self.calls: list[tuple[str, str]] = []
-
-    def structured(self, *, model, system, prompt, schema, effort="high"):
-        self.calls.append((schema.__name__, prompt))
-        value = self.responses[schema]
-        if isinstance(value, list):
-            value = value.pop(0) if len(value) > 1 else value[0]
-        if callable(value) and not isinstance(value, type):
-            value = value(prompt)
-        return value.model_copy(deep=True)
+FakeProvider = ScriptedLLM
 
 
 def default_responses(shots: int = 2) -> dict:
