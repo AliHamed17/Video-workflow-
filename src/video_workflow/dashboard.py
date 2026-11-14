@@ -158,10 +158,13 @@ def render_item(item: ContentItem) -> str:
         parts.append(f"<section><h3>Higgsfield prompts</h3><p class=meta>{e(item.render_plan.style_anchor)}</p>"
                      f"<table>{rows}</table></section>")
     if item.publishes or item.metrics:
-        rows = "".join(
-            f"<tr><td>{e(r.platform)}</td><td class={'ok' if r.ok else 'bad'}>{'ok' if r.ok else 'failed'}</td>"
-            f"<td>{f'<a href={chr(39)}{e(r.url)}{chr(39)}>{e(r.url)}</a>' if r.url else e(r.post_id or '')}"
-            f"<br><span class=meta>{e(r.detail or '')}</span></td></tr>" for r in item.publishes)
+        def publish_row(r) -> str:
+            target = f"<a href='{e(r.url)}'>{e(r.url)}</a>" if r.url else e(r.post_id or "")
+            state = "<td class=ok>ok</td>" if r.ok else "<td class=bad>failed</td>"
+            return (f"<tr><td>{e(r.platform)}</td>{state}<td>{target}"
+                    f"<br><span class=meta>{e(r.detail or '')}</span></td></tr>")
+
+        rows = "".join(publish_row(r) for r in item.publishes)
         stats = "".join(f"<tr><td>{e(k)}</td><td colspan=2>{m.views or 0:,} views · {m.likes or 0:,} likes · "
                         f"{m.comments or 0:,} comments</td></tr>" for k, m in item.metrics.items())
         parts.append(f"<section><h3>Publishing</h3><table>{rows}{stats}</table></section>")
