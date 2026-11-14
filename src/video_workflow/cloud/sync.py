@@ -22,7 +22,7 @@ from ..models import ContentItem
 
 log = logging.getLogger(__name__)
 
-SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last")
+SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan")
 MEDIA_ITEMS = 40              # media is kept for the most recent items
 MAX_UPLOAD = 4_300_000        # stay under Vercel's 4.5 MB request limit
 
@@ -103,6 +103,10 @@ def media_files(item: ContentItem) -> list[tuple[str, Path, str]]:
     for clip in item.clips:
         if clip.keyframe and Path(clip.keyframe).exists():
             out.append((Path(clip.keyframe).name, Path(clip.keyframe), "image/jpeg"))
+    for version in item.versions:
+        for path, ctype in ((version.final_video, "video/mp4"), (version.thumbnail, "image/jpeg")):
+            if path and Path(path).exists():
+                out.append((Path(path).name, Path(path), ctype))
     for review in item.shot_reviews:
         for frame in review.frames:
             if Path(frame).exists():
@@ -130,9 +134,13 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
         if action == "ideas":
             args = cmd.get("args") or {}
             requests = store.kv_get("pending_requests", [])
-            requests.append({"ideas": int(args.get("count", 1)), "seeds": [args["topic"]] if args.get("topic") else []})
+            requests.append({"ideas": int(args.get("count", 1)), "seeds": [args["topic"]] if args.get("topic") else [],
+                             "url": args.get("url") or None})
             store.kv_set("pending_requests", requests)
             return True, f"queued {args.get('count', 1)} idea(s)"
+        if action == "plan":
+            days = pipeline.plan(int((cmd.get("args") or {}).get("days", 7)))
+            return True, f"planned through {days[-1]['date'] if days else '?'}"
         item = store.get(cmd["item_id"])
         if action == "approve":
             pipeline.approve(item, note="approved in the cloud dashboard")

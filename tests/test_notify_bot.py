@@ -130,7 +130,7 @@ def test_telegram_commands_and_offset(config, tmp_path):
     bot = TelegramBot("T", "42", pipe, http=http)
     assert bot.poll_once(timeout=0) == 2
     assert pipe.store.kv_get("telegram_offset") == 12
-    assert pipe.store.kv_get("pending_requests") == [{"ideas": 2, "seeds": ["deep sea animals"]}]
+    assert pipe.store.kv_get("pending_requests") == [{"ideas": 2, "seeds": ["deep sea animals"], "url": None}]
     replies = [json.loads(b)["text"] for _, url, b in log if url.endswith("sendMessage")]
     assert replies[0].startswith("Queued 2 new idea(s) about deep sea animals")
 

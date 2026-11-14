@@ -122,6 +122,31 @@ class Packaging(BaseModel):
     tiktok: SocialMeta
 
 
+class LocalizedShot(BaseModel):
+    index: int
+    voiceover: str = Field(description="Narration in the target language, speakable in the same time as the original")
+    on_screen_text: str = Field(description="Short on-screen headline in the target language")
+
+
+class Localization(BaseModel):
+    language: str = Field(description="BCP-47 code, e.g. es, ar, pt-BR")
+    title: str = Field(description="Video title in the target language")
+    shots: list[LocalizedShot]
+    packaging: Packaging
+
+
+class ContentPlanDay(BaseModel):
+    date: str = Field(description="ISO date YYYY-MM-DD")
+    theme: str = Field(description="The day's topic direction, specific enough to pitch from")
+    pillar: str
+    format: str = Field(description="Story format, e.g. countdown, myth vs fact, what-if, one surprising fact")
+    why: str = Field(description="Why this fits the audience/trends/calendar that day")
+
+
+class ContentPlan(BaseModel):
+    days: list[ContentPlanDay]
+
+
 # --------------------------------------------------------------------------------------
 # Pipeline state
 # --------------------------------------------------------------------------------------
@@ -152,6 +177,17 @@ class ShotReview(BaseModel):
     shot_index: int
     qa: ShotQA
     frames: list[str] = Field(default_factory=list)   # local paths of the sampled frames
+
+
+class Version(BaseModel):
+    """The same video in another language: translated narration, captions and posting copy."""
+
+    language: str
+    localization: Localization
+    voice_clips: list[VoiceClip] = Field(default_factory=list)
+    final_video: str | None = None
+    thumbnail: str | None = None
+    quality: QualityReport | None = None
 
 
 class Stage(StrEnum):
@@ -258,6 +294,8 @@ class ContentItem(BaseModel):
     rerenders: int = 0
     quality: QualityReport | None = None
     voice_clips: list[VoiceClip] = Field(default_factory=list)
+    versions: list[Version] = Field(default_factory=list)
+    source_url: str | None = None      # the article/page the idea was drawn from
     music_track: str | None = None
     final_video: str | None = None
     thumbnail: str | None = None

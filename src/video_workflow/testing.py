@@ -13,11 +13,15 @@ import httpx
 
 from .models import (
     Claim,
+    ContentPlan,
+    ContentPlanDay,
     FactCheck,
     HookOption,
     HookSet,
     Idea,
     IdeaBatch,
+    Localization,
+    LocalizedShot,
     Packaging,
     RenderPlan,
     Review,
@@ -89,6 +93,27 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
             Claim(claim="Octopus blood is blue (hemocyanin)", verdict="solid", note=""),
         ]),
         ShotQA: ShotQA(score=8.2, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
+        Localization: Localization(
+            language="es", title="Un pulpo tiene TRES corazones",
+            shots=[LocalizedShot(index=i, voiceover=vo, on_screen_text=t) for i, (vo, t) in enumerate(
+                [("Un pulpo tiene tres corazones.", "TRES corazones"),
+                 ("Dos bombean sangre a las branquias.", "Dos para las branquias"),
+                 ("Y su sangre es azul.", "Sangre azul"),
+                 ("Al nadar, el corazón principal se detiene.", "Nadar detiene un corazón")][:shots])],
+            packaging=Packaging(
+                youtube=YouTubeMeta(title="Un pulpo tiene TRES corazones 🐙 #Shorts", description="Tres corazones.",
+                                    tags=["pulpo", "ciencia"]),
+                instagram=SocialMeta(caption="Tres corazones. Sangre azul.", hashtags=["pulpo", "ciencia"]),
+                tiktok=SocialMeta(caption="¿3 corazones?! 🐙", hashtags=["pulpo"]))),
+        ContentPlan: ContentPlan(days=[
+            ContentPlanDay(date="2000-01-01", theme=theme, pillar="animal superpowers", format=fmt, why="variety")
+            for theme, fmt in [("Animals with impossible hearts", "one surprising fact"),
+                               ("Light that comes from living things", "myth vs fact"),
+                               ("The loudest sounds in the ocean", "countdown"),
+                               ("What if the Moon disappeared?", "what-if"),
+                               ("Plants that move fast", "one surprising fact"),
+                               ("The coldest place in space", "countdown"),
+                               ("How geckos stick", "myth vs fact")]]),
         Script: Script(title=idea.title, hook=idea.hook,
                        shots=[Shot(index=i, duration_s=duration, visual=v, voiceover=vo, on_screen_text=t)
                               for i, (v, vo, t) in enumerate(picked)],
@@ -184,6 +209,12 @@ class FakePlatforms:
             if method == "getMe":
                 return httpx.Response(200, json={"ok": True, "result": {"username": "demo_bot"}})
             return httpx.Response(200, json={"ok": True, "result": []})
+        # A source article
+        if host == "en.wikipedia.org":
+            return httpx.Response(200, headers={"content-type": "text/html"}, text=(
+                "<html><head><title>Octopus - Wikipedia</title></head><body><p>Octopuses have three hearts: "
+                "two pump blood through the gills and one through the rest of the body.</p><p>Their blood is "
+                "blue because it uses copper-based hemocyanin to carry oxygen.</p></body></html>"))
         # Trends
         if host == "trends.google.com":
             return httpx.Response(200, text="<rss><channel><title>Trends</title><item><title>deep sea creatures"

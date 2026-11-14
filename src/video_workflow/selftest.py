@@ -48,7 +48,8 @@ EXPECTED_STEPS = [
     "develop.direct", "develop.package", "gate.approve", "render.draft", "qa.visual", "qa.rerender",
     "edit.voice", "edit.assemble", "qa.technical", "gate.final", "render.final", "publish.youtube",
     "publish.instagram", "publish.tiktok", "stats.refresh", "daemon.tick", "llm.scripting",
-    "notify.needs_approval", "notify.preview_ready", "notify.published",
+    "notify.needs_approval", "notify.preview_ready", "notify.published", "localize.es", "localize.ar",
+    "plan", "source.fetch", "cloud.sync", "cloud.approve",
 ]
 
 
@@ -88,6 +89,7 @@ def build(workdir: Path, config: AppConfig, width: int, height: int):
     hf.shot_duration_s, hf.keyframes, hf.draft_preview = 3, True, True
     config.quality.visual_qa, config.quality.max_rerenders = True, 1
     config.content.hook_variants, config.content.fact_check, config.content.idea_overgenerate = 3, True, 1
+    config.content.languages = ["es", "ar"]
     config.approval.mode = "manual"
     config.publish.platforms = ["youtube", "instagram", "tiktok"]
     config.publish.schedule.slots = []
@@ -288,6 +290,61 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         assert beat and datetime.fromisoformat(beat["at"]) > datetime.now(UTC) - timedelta(minutes=1)
         return f"cycle ran and recorded a heartbeat: {report}"
 
+    def languages():
+        item = store.get(state["item"].id)
+        got = {v.language: v for v in item.versions}
+        assert set(got) == {"es", "ar"}, list(got)
+        for v in got.values():
+            info = probe(v.final_video)
+            assert (info["width"], info["height"]) == (width, height) and not v.quality.failed
+        return ("Spanish and Arabic versions from the same footage: "
+                + ", ".join(f"{v.language} '{v.localization.title[:32]}' ({v.quality.score:.0f}/100)" for v in got.values()))
+
+    def publish_kit():
+        import io
+        import zipfile
+
+        from . import kit
+        names = zipfile.ZipFile(io.BytesIO(kit.build(store.get(state["item"].id)))).namelist()
+        assert any(n.endswith("_es.mp4") for n in names) and any(n.endswith("CHECKLIST.md") for n in names)
+        return f"{len(names)} files: videos in 3 languages, thumbnail, subtitles, posting copy, script, checklist"
+
+    def calendar():
+        plan = pipe.plan(7)
+        assert len(plan) == 7 and pipe.todays_plan()
+        return f"7 days planned; today: {pipe.todays_plan()['theme']} ({pipe.todays_plan()['format']})"
+
+    def source_ideas():
+        item = pipe.ideate(1, source_url="https://en.wikipedia.org/wiki/Octopus")[0]
+        assert item.source_url and (store.item_dir(item.id) / "source.txt").exists()
+        state["source_item"] = item
+        return f"idea pitched from the article: '{item.idea.title}'"
+
+    def cloud():
+        from .cloud.app import make_cloud_handler
+        from .cloud.sync import CloudClient, CloudSync
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_cloud_handler(
+            db_url=str(workdir / "cloud.sqlite3"), token="pw", secret="sec"))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            sync = CloudSync(pipe, CloudClient(base, "sec"))
+            first = sync.sync()
+            source_item = store.get(state["source_item"].id)
+            pipe.develop(source_item)
+            sync.sync()
+            with httpx.Client(base_url=base, timeout=20, cookies={"vw_token": "pw"}) as web:
+                assert web.get(f"/item/{state['item'].id}").status_code == 200
+                assert web.post(f"/item/{source_item.id}/approve").status_code in (200, 303)
+            applied = sync.poll()
+            assert applied == 1 and store.get(source_item.id).stage == Stage.APPROVED
+        finally:
+            server.shutdown()
+            server.server_close()
+        return (f"worker synced {first['items']} items, {first['events']} events, {first['media']} media files "
+                f"to the cloud app; an approval made in the cloud dashboard was applied on the worker")
+
     def trace():
         steps = {e["step"] for e in store.events(limit=5000)}
         missing = [s for s in EXPECTED_STEPS if s not in steps]
@@ -312,6 +369,11 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Dashboard (all pages + APIs)", dashboard),
         ("Connection checks", health),
         ("Daemon cycle + heartbeat", daemon_tick),
+        ("Language versions (es, ar)", languages),
+        ("Publish kit", publish_kit),
+        ("Content calendar", calendar),
+        ("Ideas from a source article", source_ideas),
+        ("Cloud control room (sync + remote approval)", cloud),
         ("Every step traced", trace),
     ]:
         if not step(name, fn) and name in critical:

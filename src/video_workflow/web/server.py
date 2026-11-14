@@ -59,6 +59,17 @@ def run_selftest(pipeline) -> None:
         store.kv_set("selftest_running", False)
 
 
+def run_plan(pipeline, days: int = 7) -> None:
+    store = pipeline.store
+    store.kv_set("planning_running", True)
+    try:
+        pipeline.plan(days)
+    except Exception:
+        log.exception("planning failed")
+    finally:
+        store.kv_set("planning_running", False)
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -114,6 +125,18 @@ def make_handler(pipeline, token: str | None = None):
                 if path == "/activity":
                     return self._send(200, pages.render_activity(
                         pipeline, data.status(pipeline), q.get("status", [None])[0], q.get("item", [None])[0]).encode())
+                if path == "/calendar":
+                    return self._send(200, pages.render_calendar(pipeline, data.status(pipeline), flash).encode())
+                m = re.fullmatch(r"/item/([0-9a-f]+)/kit", path)
+                if m and not getattr(pipeline, "is_cloud", False):
+                    from .. import kit
+                    item = store.get(m.group(1))
+                    try:
+                        blob = kit.build(item)
+                    except ValueError as exc:
+                        return self._redirect(f"/item/{item.id}?flash={quote(str(exc))}")
+                    return self._send(200, blob, "application/zip", {
+                        "Content-Disposition": f"attachment; filename=publish-kit-{item.id}.zip"})
                 if path == "/workflow":
                     return self._send(200, pages.render_workflow(pipeline, data.status(pipeline)).encode())
                 if path == "/metrics":
@@ -202,14 +225,28 @@ def make_handler(pipeline, token: str | None = None):
             if path == "/ideas":
                 count = max(1, min(int(form.get("count", "1") or 1), 10))
                 topic = form.get("topic", "").strip()[:200]
+                url = form.get("url", "").strip()[:500]
+                if url and not url.startswith(("http://", "https://")):
+                    url = ""
                 if cloud:
-                    store.enqueue("ideas", None, {"count": count, "topic": topic}, source="cloud dashboard")
+                    store.enqueue("ideas", None, {"count": count, "topic": topic, "url": url},
+                                  source="cloud dashboard")
                 else:
                     requests = store.kv_get("pending_requests", [])
-                    requests.append({"ideas": count, "seeds": [topic] if topic else []})
+                    requests.append({"ideas": count, "seeds": [topic] if topic else [], "url": url or None})
                     store.kv_set("pending_requests", requests)
-                msg = f"{count} idea(s){' about ' + topic if topic else ''} requested — pitched on the next cycle."
+                about = f" from {url}" if url else f" about {topic}" if topic else ""
+                msg = f"{count} idea(s){about} requested — pitched on the next cycle."
                 return self._redirect(f"/?flash={quote(msg)}")
+            if path == "/plan":
+                if cloud:
+                    store.enqueue("plan", None, {"days": 7}, source="cloud dashboard")
+                    msg = "Planning requested — your worker plans the next 7 days at its next sync."
+                else:
+                    if not store.kv_get("planning_running"):
+                        _background("plan", lambda: run_plan(pipeline))
+                    msg = "Planning the next 7 days…"
+                return self._redirect(f"/calendar?flash={quote(msg)}")
             m = re.fullmatch(r"/item/([0-9a-f]+)/(approve|final|reject|publish|retry|rerender)", path)
             if not m:
                 return self._send(404, b"Not found", "text/plain")

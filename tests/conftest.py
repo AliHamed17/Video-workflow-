@@ -22,7 +22,7 @@ from video_workflow.models import (
     SocialMeta,
     YouTubeMeta,
 )
-from video_workflow.testing import ScriptedLLM
+from video_workflow.testing import ScriptedLLM, demo_content
 
 requires_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 
@@ -78,6 +78,7 @@ def default_responses(shots: int = 2) -> dict:
                                                          strength=8)]),
         FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
         ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
+        **{k: v for k, v in demo_content(2, 2).items() if k.__name__ in ("Localization", "ContentPlan")},
     }
 
 

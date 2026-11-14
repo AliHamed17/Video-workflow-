@@ -175,10 +175,19 @@ class Editor:
         return min(clip.duration / tempo, slot)
 
     def assemble(self, item: ContentItem, out_dir: Path, voiceover: Path | None = None,
-                 music: Path | None = None, phase: str = "final") -> tuple[Path, Path]:
-        """Build the cut. A draft-phase cut is a half-resolution preview (fast, for approval)."""
+                 music: Path | None = None, phase: str = "final", variant: str | None = None,
+                 texts: list[tuple[str, str]] | None = None,
+                 voice_clips: list[VoiceClip] | None = None) -> tuple[Path, Path]:
+        """Build the cut. A draft-phase cut is a half-resolution preview (fast, for approval).
+
+        ``variant`` (e.g. a language code) builds another version of the *final* cut from the same
+        footage: ``texts`` replaces each shot's (on_screen_text, voiceover) and ``voice_clips`` the
+        narration. The normalised shots of the main cut are reused, so a variant only re-mixes.
+        """
         if item.script is None:
             raise EditorError("Item has no script")
+        if variant and not (out_dir / "edit" / "stitched.mp4").exists():
+            raise EditorError("Build the main final cut before language variants")
         size = (self.width // 2 // 2 * 2, self.height // 2 // 2 * 2) if phase == "draft" else (self.width, self.height)
         by_index = {c.shot_index: c for c in item.clips if c.path and c.phase == phase}
         if not by_index:  # older items without phase information
@@ -188,23 +197,29 @@ class Editor:
         if missing:
             raise EditorError(f"Missing clips for shots {missing}")
 
-        work = out_dir / "edit"
+        shared = out_dir / "edit"                      # normalised shots + stitched cut
+        shared.mkdir(parents=True, exist_ok=True)
+        work = shared if not variant else out_dir / f"edit_{variant}"  # narration, captions, mix
         work.mkdir(parents=True, exist_ok=True)
-        segments = [work / f"norm_{s.index:02d}.mp4" for s in shots]
-        with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            durations = list(pool.map(
-                lambda pair: self._normalize(Path(by_index[pair[0].index].path), pair[1], pair[0].duration_s, size),
-                zip(shots, segments, strict=True)))
-
-        (work / "concat.txt").write_text("".join(f"file '{s.name}'\n" for s in segments), "utf-8")
-        _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "concat.txt",
-              "-c", "copy", "stitched.mp4"], cwd=work)
+        segments = [shared / f"norm_{s.index:02d}.mp4" for s in shots]
+        if variant:
+            durations = [probe(seg)["duration"] for seg in segments]
+        else:
+            with ThreadPoolExecutor(max_workers=self.workers) as pool:
+                durations = list(pool.map(
+                    lambda pair: self._normalize(Path(by_index[pair[0].index].path), pair[1], pair[0].duration_s, size),
+                    zip(shots, segments, strict=True)))
+            (shared / "concat.txt").write_text("".join(f"file '{s.name}'\n" for s in segments), "utf-8")
+            _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "concat.txt",
+                  "-c", "copy", "stitched.mp4"], cwd=shared)
+        stitched = str((shared / "stitched.mp4").resolve())
         total = sum(durations)
+        lines = texts or [(s.on_screen_text, s.voiceover) for s in shots]
 
         # Narration: per-shot clips fitted to their shots, or one supplied file.
         speech: list[float | None] = [None] * len(shots)
         voice_track: Path | None = None
-        voice_by_shot = {v.shot_index: v for v in item.voice_clips}
+        voice_by_shot = {v.shot_index: v for v in (item.voice_clips if voice_clips is None else voice_clips)}
         if voiceover is not None:
             voice_track = Path(voiceover).resolve()
         elif voice_by_shot:
@@ -222,15 +237,15 @@ class Editor:
         vf = "null"
         if self.video.captions.burn_in:
             timings, t = [], 0.0
-            for shot, dur, sp in zip(shots, durations, speech, strict=True):
-                timings.append(ShotTiming(t, dur, shot.on_screen_text, shot.voiceover, sp))
+            for (on_screen, spoken), dur, sp in zip(lines, durations, speech, strict=True):
+                timings.append(ShotTiming(t, dur, on_screen, spoken, sp))
                 t += dur
             (work / "captions.ass").write_text(
                 build_ass(timings, self.video.captions, *size), "utf-8")
             vf = "ass=captions.ass"
 
         # Audio mix.
-        args = ["ffmpeg", "-y", "-i", "stitched.mp4"]
+        args = ["ffmpeg", "-y", "-i", stitched]
         graph, labels, idx = [], ["[amb]"], 1
         has_voice, has_music = voice_track is not None, music is not None
         clip_vol = self.video.clip_audio_volume if has_voice else (0.8 if has_music else 1.0)
@@ -258,7 +273,8 @@ class Editor:
                      f"loudnorm=I={lufs}:TP=-1.5:LRA=11[a]")
         graph.append(f"[0:v]{vf}[v]")
 
-        final = (out_dir / ("preview.mp4" if phase == "draft" else "final.mp4")).resolve()
+        name = f"final_{variant}.mp4" if variant else ("preview.mp4" if phase == "draft" else "final.mp4")
+        final = (out_dir / name).resolve()
         # H.264 High, 30 fps, 2 s closed GOPs, BT.709 tags, capped peak bitrate: what the
         # platforms' own encoders handle best (less re-encode damage after upload).
         args += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-t", f"{total:.3f}",
@@ -270,7 +286,7 @@ class Editor:
         _run(args, cwd=work)
 
         # Thumbnail: the most representative frame of the hook shot (not just frame 0).
-        thumb = out_dir / "thumbnail.jpg"
+        thumb = out_dir / (f"thumbnail_{variant}.jpg" if variant else "thumbnail.jpg")
         span = min(durations[0], total) if durations else total
         _run(["ffmpeg", "-y", "-ss", "0.3", "-t", f"{max(span - 0.3, 0.5):.2f}", "-i", str(final),
               "-vf", "thumbnail=30", "-frames:v", "1", "-q:v", "2", str(thumb)])

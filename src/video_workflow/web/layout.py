@@ -6,8 +6,8 @@ import html
 
 e = html.escape
 
-NAV = [("/", "Board"), ("/activity", "Activity"), ("/workflow", "Workflow"), ("/metrics", "Metrics"),
-       ("/health", "Health"), ("/selftest", "Self-test")]
+NAV = [("/", "Board"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
+       ("/metrics", "Metrics"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """
 :root{--bg:#f5f6f8;--card:#fff;--ink:#14161b;--muted:#5d6472;--line:#e2e5ea;--accent:#4f46e5;
@@ -69,6 +69,13 @@ a.node:hover{text-decoration:none;border-color:var(--accent)}
 .tl{display:grid;grid-template-columns:150px 1fr 70px;gap:8px;align-items:center;font-size:13px;padding:3px 0;border-top:1px solid var(--line)}
 code{font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:5px}
 svg text{fill:var(--muted);font-size:10px}
+button.copy{padding:2px 9px;font-size:12px;margin-left:6px}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+@media (max-width:900px){.cal{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.day{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px;min-height:120px;font-size:13px}
+.day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.day h4{margin:0 0 6px;font-size:12px;color:var(--muted)}
+.day .slot{display:block;margin-top:6px;padding:4px 6px;border-radius:6px;background:var(--chip);color:var(--ink)}
+input.field{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 """
 
 
@@ -108,6 +115,9 @@ def status_strip(st: dict) -> str:
     return f'<div class="strip">{"".join(parts)}</div>'
 
 
+COPY_JS = """<script>document.addEventListener('click',function(e){var b=e.target.closest('button.copy');if(!b)return;
+navigator.clipboard.writeText(b.dataset.t).then(function(){var o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)});});</script>"""
+
 LIVE_JS = """
 <script>
 (function(){
@@ -133,7 +143,7 @@ def page(title: str, body: str, st: dict, active: str = "/", live: str = "reload
             f"<meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<title>{e(title)} · Video workflow</title><style>{CSS}</style></head><body>"
             f"<header><div class=top><a class=brand href='/'>🎬 Video workflow</a><nav>{nav}</nav></div>"
-            f"{status_strip(st)}</header><main>{body}</main>{script}</body></html>")
+            f"{status_strip(st)}</header><main>{body}</main>{script}{COPY_JS}</body></html>")
 
 
 def bars_svg(points: list[tuple[str, float]], height: int = 90, fmt=lambda v: f"{v:.0f}") -> str:

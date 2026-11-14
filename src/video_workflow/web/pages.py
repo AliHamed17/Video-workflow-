@@ -113,7 +113,9 @@ def render_board(pipeline, st: dict, flash: str = "") -> str:
                   "font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);"
                   "color:var(--ink)'><input name=topic placeholder='topic or trend (optional)' style='flex:1;"
                   "min-width:180px;font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);"
-                  "background:var(--card);color:var(--ink)'><button>✨ Pitch</button></form>")
+                  "background:var(--card);color:var(--ink)'><input name=url type=url class=field "
+                  "placeholder='or an article URL to base them on' style='flex:1;min-width:180px'>"
+                  "<button>✨ Pitch</button></form>")
     body = (_flash(flash) + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
             + f"<h2>Pipeline</h2><div class=board>{''.join(cols)}</div>")
     return page(pipeline.config.channel.name, body, st, "/")
@@ -154,6 +156,8 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
         actions.append(form("retry", f"🔁 Retry from {item.failed_stage.value if item.failed_stage else 'start'}", "primary"))
     if item.stage not in (Stage.PUBLISHED, Stage.REJECTED):
         actions.append(form("reject", "🗑 Reject", "danger"))
+    if not _is_cloud(pipeline) and item.final_video and item.render_phase == "final" and _media(item, item.final_video):
+        actions.append(f"<a class=btn href='/item/{item.id}/kit'>⬇ Publish kit</a>")
     ev = pipeline.store.latest_event_per_item().get(item.id)
     now_line = (f"<p class=meta>Now: {pill(ev['status'], ev['status'])} <b>{e(ev['step'])}</b> "
                 f"{data._ago(ev['at'], now)} — {e(ev['detail'][:140])}</p>") if ev else ""
@@ -171,7 +175,9 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
 
     parts = []
     idea = item.idea
-    parts.append(_section("Idea", f"<p><b>Hook:</b> {e(idea.hook)}</p><p><b>Angle:</b> {e(idea.angle)}</p>"
+    source = (f"<p class=meta>Source: <a href='{e(item.source_url)}' rel=noreferrer target=_blank>"
+              f"{e(item.source_url)}</a></p>") if item.source_url else ""
+    parts.append(_section("Idea", source + f"<p><b>Hook:</b> {e(idea.hook)}</p><p><b>Angle:</b> {e(idea.angle)}</p>"
                  f"<p class=meta>Pillar {e(idea.pillar)} · predicted {idea.predicted_score:.1f}/10 · "
                  f"{e(idea.why_it_will_perform)}</p>"))
     if item.hook_options:
@@ -213,14 +219,19 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                        f"<td class=meta>{e(c.detail)}</td></tr>" for c in q.checks)
         parts.append(_section(f"Technical quality — {q.score:.0f}/100", f"<table>{rows}</table>"))
     if item.packaging:
-        p = item.packaging
-        parts.append(_section("Posting copy",
-            f"<table><tr><th>YouTube</th><td><b>{e(p.youtube.title)}</b><br>{e(p.youtube.description)}"
-            f"<br><span class=meta>{e(', '.join(p.youtube.tags))}</span></td></tr>"
-            f"<tr><th>Instagram</th><td>{e(p.instagram.caption)}<br><span class=meta>"
-            f"{e(' '.join('#' + h for h in p.instagram.hashtags))}</span></td></tr>"
-            f"<tr><th>TikTok</th><td>{e(p.tiktok.caption)}<br><span class=meta>"
-            f"{e(' '.join('#' + h for h in p.tiktok.hashtags))}</span></td></tr></table>"))
+        parts.append(_section("Posting copy", copy_table(item.packaging)))
+    if item.versions:
+        blocks = []
+        for v in item.versions:
+            url = _media(item, v.final_video)
+            player = (f"<video controls playsinline preload=none src='{url}' style='max-width:200px'></video>"
+                      if url else "<p class=meta>video on the worker</p>")
+            q = f" · quality {v.quality.score:.0f}/100" if v.quality else ""
+            blocks.append(f"<div class=grid style='grid-template-columns:minmax(150px,210px) 1fr;margin-bottom:12px'>"
+                          f"<div>{player}</div><div><b>{e(v.language)}</b> — {e(v.localization.title)}"
+                          f"<span class=meta>{q} · {len(v.voice_clips)} narration clip(s)</span>"
+                          f"{copy_table(v.localization.packaging)}</div></div>")
+        parts.append(_section(f"Language versions ({len(item.versions)})", "".join(blocks)))
     if item.render_plan:
         rows = "".join(f"<tr><td>{s.index + 1}</td><td>{e(s.prompt)}<br><span class=meta>{e(s.camera)}</span></td></tr>"
                        for s in item.render_plan.shots)
@@ -408,7 +419,64 @@ def render_selftest(pipeline, st: dict, flash: str = "") -> str:
                f"<div class=grid><div>{video}</div><div><table>{rows}</table></div></div>")
     intro = ("<p class=meta>Runs every component together — ideas, hook lab, writing, fact-check, critic, approvals "
              "(Telegram), keyframes, draft render, visual QA, preview, final render, voice, music, captions, quality gate, "
-             "parallel publishing to YouTube/Instagram/TikTok, stats, alerts, dashboard — with a scripted LLM and "
+             "parallel publishing to YouTube/Instagram/TikTok, language versions, publish kit, content calendar, "
+             "ideas from a source, the cloud control room, stats, alerts, dashboard — with a scripted LLM and "
              "simulated platform APIs.</p>")
     body = _flash(flash) + f"<h2>Self-test</h2>{intro}{button}<section>{out}</section>"
     return page("Self-test", body, st, "/selftest", every_ms=2000 if running else 5000)
+
+
+def copy_table(p) -> str:
+    def copy(text: str) -> str:
+        return f"<button class=copy data-t='{e(text, quote=True)}'>Copy</button>"
+
+    yt_tags = ", ".join(p.youtube.tags)
+    ig = f"{p.instagram.caption}\n\n" + " ".join("#" + h for h in p.instagram.hashtags)
+    tt = f"{p.tiktok.caption} " + " ".join("#" + h for h in p.tiktok.hashtags)
+    return (f"<table><tr><th>YouTube</th><td><b>{e(p.youtube.title)}</b>{copy(p.youtube.title)}<br>"
+            f"{e(p.youtube.description)}{copy(p.youtube.description)}<br><span class=meta>{e(yt_tags)}</span>"
+            f"{copy(yt_tags)}</td></tr>"
+            f"<tr><th>Instagram</th><td>{e(p.instagram.caption)}<br><span class=meta>"
+            f"{e(' '.join('#' + h for h in p.instagram.hashtags))}</span>{copy(ig)}</td></tr>"
+            f"<tr><th>TikTok</th><td>{e(p.tiktok.caption)}<br><span class=meta>"
+            f"{e(' '.join('#' + h for h in p.tiktok.hashtags))}</span>{copy(tt)}</td></tr></table>")
+
+
+def render_calendar(pipeline, st: dict, flash: str = "") -> str:
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(pipeline.config.publish.schedule.timezone)
+    today = datetime.now(UTC).astimezone(tz).date()
+    start = today - timedelta(days=today.weekday())          # Monday of this week
+    plan = {d["date"]: d for d in pipeline.store.kv_get("content_plan", [])}
+    items = pipeline.store.list()
+    by_day: dict[str, list[str]] = {}
+    for i in items:
+        when = None
+        if i.stage == Stage.PUBLISHED:
+            when = next((h.at for h in reversed(i.history) if h.stage == Stage.PUBLISHED), None)
+            label = "🚀"
+        elif i.scheduled_for and i.stage == Stage.EDITED:
+            when, label = i.scheduled_for, "⏰"
+        if when:
+            day = when.astimezone(tz).date().isoformat()
+            by_day.setdefault(day, []).append(
+                f"<a class=slot href='/item/{i.id}'>{label} {when.astimezone(tz):%H:%M} {e(i.idea.title[:40])}</a>")
+    cells = []
+    for offset in range(21):
+        day = start + timedelta(days=offset)
+        key = day.isoformat()
+        p = plan.get(key)
+        theme = (f"<b>{e(p['theme'])}</b><div class=meta>{e(p['format'])} · {e(p['pillar'])}</div>") if p else \
+            "<span class=meta>no plan</span>"
+        cells.append(f"<div class='day {'today' if day == today else ''}'><h4>{day:%a %d %b}</h4>{theme}"
+                     f"{''.join(by_day.get(key, []))}</div>")
+    planning = pipeline.store.kv_get("planning_running")
+    button = ("<p class=warn>Planning…</p>" if planning else
+              "<form method=post action='/plan' class=actions><button class=primary>🗓 Plan the next 7 days</button>"
+              "</form>")
+    body = (_flash(flash) + "<h2>Content calendar</h2><p class=meta>Planned themes (the daemon pitches from "
+            "today's theme), scheduled posts ⏰ and published videos 🚀 — three weeks from this Monday.</p>"
+            + button + f"<div class=cal>{''.join(cells)}</div>")
+    return page("Calendar", body, st, "/calendar", every_ms=3000 if planning else 5000)

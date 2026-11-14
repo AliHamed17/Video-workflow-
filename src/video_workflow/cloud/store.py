@@ -17,7 +17,7 @@ from typing import Any
 from ..models import ContentItem, Stage
 from .db import DB
 
-COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas"}
+COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas", "plan"}
 
 
 class CloudStore:

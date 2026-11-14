@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 import shutil
@@ -36,10 +37,12 @@ from .agents import (
     HookLab,
     Packager,
     Scriptwriter,
+    Translator,
     TrendScout,
     VisualQA,
 )
 from .agents.fact_checker import summarize as summarize_fact_check
+from .agents.planner import Planner
 from .config import AppConfig
 from .llm import LLMError, LLMRouter, usage
 from .models import (
@@ -50,6 +53,7 @@ from .models import (
     ShotReview,
     Stage,
     Usage,
+    Version,
     VoiceClip,
 )
 from .notify import Dispatcher, LogNotifier, Notice, needs_approval
@@ -91,6 +95,8 @@ class Pipeline:
         self.director = Director(self.config, self.router)
         self.packager = Packager(self.config, self.router)
         self.visual_qa = VisualQA(self.config, self.router)
+        self.translator = Translator(self.config, self.router)
+        self.planner = Planner(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -125,7 +131,19 @@ class Pipeline:
         return "Cost: " + " · ".join(parts)
 
     # ---- ideas --------------------------------------------------------------------------
-    def ideate(self, count: int = 3, seeds: list[str] | None = None) -> list[ContentItem]:
+    def ideate(self, count: int = 3, seeds: list[str] | None = None,
+               source_url: str | None = None) -> list[ContentItem]:
+        source_text = ""
+        if source_url:
+            from . import sources
+            with self.tracer.span("source.fetch", None, url=source_url) as span:
+                title, source_text = sources.fetch(source_url, self.http)
+                span.detail = f"{title[:80]} · {len(source_text)} characters"
+        if not seeds and not source_url:
+            planned = self.todays_plan()
+            if planned:
+                seeds = [f"Today's planned theme: {planned['theme']} (format: {planned['format']}, "
+                         f"pillar: {planned['pillar']})"]
         with self.tracer.span("ideate", None, count=count) as span:
             with self.tracer.span("trends", None) as tspan:
                 signals = trends.collect(self.config.trends, self.http)
@@ -136,10 +154,13 @@ class Pipeline:
             extra = max(0, self.config.content.idea_overgenerate)
             with usage.tracking(shared):
                 ideas = self.scout.pitch(count + extra, seeds=seeds, avoid_titles=self.store.recent_titles(),
-                                         trends=signals, performance=self.performance_summary(), keep=count)
+                                         trends=signals, performance=self.performance_summary(), keep=count,
+                                         source=source_text)
             items = []
             for idea in ideas:
-                item = ContentItem(channel=self.config.channel.name, idea=idea)
+                item = ContentItem(channel=self.config.channel.name, idea=idea, source_url=source_url)
+                if source_text:
+                    (self.store.item_dir(item.id) / "source.txt").write_text(source_text, "utf-8")
                 for label, u in shared.llm.items():  # split the one ideation call across its ideas
                     entry = item.usage.llm.setdefault(label, type(u)())
                     entry.calls += 1
@@ -191,7 +212,9 @@ class Pipeline:
                 check = None
                 if cc.fact_check:
                     with self.tracer.span("develop.factcheck", item.id, round=round_ + 1) as span:
-                        check = self.fact_checker.check(item.idea, script)
+                        source_file = self.store.item_dir(item.id) / "source.txt"
+                        check = self.fact_checker.check(
+                            item.idea, script, source_file.read_text("utf-8") if source_file.exists() else "")
                         flagged = [c for c in check.claims if c.verdict != "solid"]
                         span.detail = f"{len(check.claims)} claims, {len(flagged)} flagged → {check.overall}"
                         span.status = "ok" if check.overall == "pass" else "warn"
@@ -496,8 +519,83 @@ class Pipeline:
             self.notify(Notice(kind="failed", title=f"Quality gate: {item.idea.title}", item_id=item.id,
                                lines=[item.attention]))
             return item
+        self.localize(item, music)
         self._assign_slot(item)
         return self.store.save(item)
+
+    # ---- languages ----------------------------------------------------------------------
+    def _voice_for(self, item: ContentItem, language: str, texts: list[str]) -> list[VoiceClip]:
+        if self.voice is None or (self.voice.name == "flite" and not language.startswith("en")):
+            return []  # flite only speaks English: the version keeps captions + clip audio + music
+        provider = copy.copy(self.voice)
+        override = self.config.video.voice.voices.get(language)
+        if override and hasattr(provider, "voice"):
+            provider.voice = override
+        out_dir = self.store.item_dir(item.id) / "voice" / language
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        def one(pair) -> VoiceClip | None:
+            index, text = pair
+            if not text.strip():
+                return None
+            path = provider.synthesize(text.strip(), out_dir / f"shot_{index:02d}.{provider.ext}")
+            return VoiceClip(shot_index=index, path=str(path), text_hash=text_hash(provider.name, language, text),
+                             duration=probe(path)["duration"])
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            return [c for c in pool.map(one, enumerate(texts)) if c is not None]
+
+    def localize(self, item: ContentItem, music: Path | None = None) -> list[Version]:
+        """The same video in every extra language: translated narration, captions and posting copy."""
+        languages = [lang for lang in self.config.content.languages
+                     if lang and lang != self.config.channel.language]
+        if not languages or not (item.script and item.packaging and self.editor):
+            return []
+        versions = []
+        for lang in languages:
+            with self.tracer.span(f"localize.{lang}", item.id) as span:
+                try:
+                    loc = self.translator.localize(item.script, item.packaging, lang)
+                    clips = self._voice_for(item, lang, [s.voiceover for s in loc.shots])
+                    final, thumb = self.editor.assemble(
+                        item, self.store.item_dir(item.id), None, music, phase="final", variant=lang,
+                        texts=[(s.on_screen_text, s.voiceover) for s in loc.shots], voice_clips=clips)
+                    variant = item.model_copy(deep=True)
+                    for shot, loc_shot in zip(variant.script.shots, loc.shots, strict=True):
+                        shot.voiceover, shot.on_screen_text = loc_shot.voiceover, loc_shot.on_screen_text
+                    variant.voice_clips = clips
+                    report = quality.check_video(variant, self.config, final, self._final_size(),
+                                                 captions=final.parent / f"edit_{lang}" / "captions.ass")
+                    versions.append(Version(language=lang, localization=loc, voice_clips=clips,
+                                            final_video=str(final), thumbnail=str(thumb), quality=report))
+                    span.detail = (f"{loc.title[:60]} · {len(clips)} narration clip(s) · "
+                                   f"quality {report.score:.0f}/100")
+                except Exception as exc:  # one language failing must not block the video
+                    log.exception("localization %s failed for %s", lang, item.id)
+                    span.status, span.detail = "error", f"{type(exc).__name__}: {exc}"[:500]
+        item.versions = versions
+        self.store.save(item)
+        return versions
+
+    # ---- planning -----------------------------------------------------------------------
+    def plan(self, days: int = 7, start: datetime | None = None) -> list[dict]:
+        """Plan the next `days` days (theme, pillar, format per day); merged into the saved plan."""
+        start_date = (start or self.clock()).astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date()
+        with self.tracer.span("plan", None, days=days) as span:
+            plan = self.planner.plan(start_date, days, trends.collect(self.config.trends, self.http),
+                                     self.performance_summary(), self.store.recent_titles())
+            saved = {d["date"]: d for d in self.store.kv_get("content_plan", [])}
+            for day in plan.days:
+                saved[day.date] = {**day.model_dump(), "items": saved.get(day.date, {}).get("items", [])}
+            keep_from = (start_date - timedelta(days=30)).isoformat()
+            merged = sorted((d for d in saved.values() if d["date"] >= keep_from), key=lambda d: d["date"])
+            self.store.kv_set("content_plan", merged)
+            span.detail = f"{len(plan.days)} days planned from {start_date}"
+        return merged
+
+    def todays_plan(self) -> dict | None:
+        today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
+        return next((d for d in self.store.kv_get("content_plan", []) if d["date"] == today), None)
 
     def _assign_slot(self, item: ContentItem) -> None:
         with self._slot_lock:

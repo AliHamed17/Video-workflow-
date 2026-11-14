@@ -88,12 +88,29 @@ class Daemon:
 
     def _tick(self) -> dict:
         report = {"requested": 0, "pitched": 0, "advanced": 0, "metrics": 0, "digest": False, "alerts": 0}
+        today = self._local_now().date()
         # 1. Requests queued from Telegram / dashboard.
         requests = self.store.kv_get("pending_requests", [])
         if requests:
             self.store.kv_set("pending_requests", [])
             for req in requests:
-                report["requested"] += len(self.pipeline.ideate(int(req.get("ideas", 1)), req.get("seeds") or None))
+                try:
+                    report["requested"] += len(self.pipeline.ideate(
+                        int(req.get("ideas", 1)), req.get("seeds") or None, source_url=req.get("url")))
+                except Exception as exc:  # a bad URL must not stop the cycle
+                    log.warning("idea request failed: %s", exc)
+
+        # Keep the content calendar a few days ahead.
+        if self.config.runtime.auto_plan:
+            ahead = {(today + timedelta(days=d)).isoformat() for d in range(3)}
+            planned = {d["date"] for d in self.store.kv_get("content_plan", [])}
+            if not ahead <= planned and self.store.kv_get("last_plan") != today.isoformat():
+                try:
+                    self.pipeline.plan(7)
+                    report["planned"] = True
+                except Exception as exc:
+                    log.warning("planning failed: %s", exc)
+                self.store.kv_set("last_plan", today.isoformat())
 
         # 2. Daily idea quota, bounded by the unfinished backlog.
         rt = self.config.runtime

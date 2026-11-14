@@ -55,7 +55,7 @@ def stream_info(path: str | Path) -> dict:
 
 
 def check_video(item: ContentItem, config: AppConfig, path: str | Path, expected: tuple[int, int],
-                preview: bool = False) -> QualityReport:
+                preview: bool = False, captions: Path | None = None) -> QualityReport:
     info, a = stream_info(path), analyze(path)
     checks: list[QACheck] = []
 
@@ -97,7 +97,7 @@ def check_video(item: ContentItem, config: AppConfig, path: str | Path, expected
     add("File size", info["size"] <= MAX_BYTES, f"{info['size'] / 1e6:.1f} MB", "≤ 1 GB")
 
     if config.video.captions.burn_in:
-        ass = Path(path).parent / "edit" / "captions.ass"
+        ass = captions or Path(path).parent / "edit" / "captions.ass"
         lines = ass.read_text("utf-8").count("\nDialogue:") if ass.exists() else 0
         add("Captions burned in", lines > 0, f"{lines} caption events", warn_only=True)
 

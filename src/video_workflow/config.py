@@ -119,6 +119,7 @@ class VoiceConfig(BaseModel):
     model: str = ""                # openai: gpt-4o-mini-tts, elevenlabs: eleven_multilingual_v2
     instructions: str = ""         # openai only: delivery style
     max_speedup: float = 1.3       # speed narration up to this factor to fit a shot
+    voices: dict[str, str] = Field(default_factory=dict)  # per-language voice, e.g. {"es": "nova"}
 
 
 class MusicConfig(BaseModel):
@@ -172,6 +173,7 @@ class QualityConfig(BaseModel):
 
 
 class ContentConfig(BaseModel):
+    languages: list[str] = Field(default_factory=list)  # extra language versions, e.g. ["es", "ar"]
     hook_variants: int = 5            # hook lab: generate N openings, keep the strongest (0 = off)
     fact_check: bool = True           # independent fact-check pass before the critic
     idea_overgenerate: int = 2        # pitch N extra ideas and keep the best by predicted score
@@ -241,6 +243,7 @@ class RuntimeConfig(BaseModel):
     max_backlog: int = 6            # don't pitch more while this many items are unfinished
     stats_every_hours: int = 6
     digest_hour: int = 20           # local hour for the daily summary (schedule timezone)
+    auto_plan: bool = True          # the daemon keeps the content calendar a week ahead
     stuck_after_hours: float = 6    # alert when an item sits in a working stage this long
     daily_credit_budget: float = 1000  # alert when Higgsfield spend in a day passes this
 

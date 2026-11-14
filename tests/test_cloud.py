@@ -68,7 +68,7 @@ def test_worker_sync_dashboard_and_commands(config, tmp_path, cloud):
         assert sync.poll() == 3
         assert pipe.store.get(waiting.id).stage == Stage.APPROVED
         assert pipe.store.get(edited.id).stage == Stage.REJECTED
-        assert pipe.store.kv_get("pending_requests") == [{"ideas": 2, "seeds": ["deep sea"]}]
+        assert pipe.store.kv_get("pending_requests") == [{"ideas": 2, "seeds": ["deep sea"], "url": None}]
         health = web.get("/health").text
         assert "Requests sent to the worker" in health and health.count(">done<") == 3
         sync.sync()

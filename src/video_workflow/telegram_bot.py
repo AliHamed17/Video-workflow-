@@ -21,8 +21,8 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 HELP = ("Commands:\n/list — items in progress\n/status <id>\n/approve <id>\n/final <id> — render the full-res final\n"
-        "/reject <id>\n/retry <id>\n/alerts\n"
-        "/ideas [n] [topic] — pitch new ideas on the next cycle\n/digest — summary now")
+        "/reject <id>\n/retry <id>\n/alerts\n/plan — the content calendar\n"
+        "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n/digest — summary now")
 
 
 class TelegramBot:
@@ -96,11 +96,20 @@ class TelegramBot:
             count, topic = 1, rest.strip()
             if parts and parts[0].isdigit():
                 count, topic = int(parts[0]), (parts[1] if len(parts) > 1 else "")
+            url = topic if topic.startswith(("http://", "https://")) else None
+            if url:
+                topic = ""
             requests = self.store.kv_get("pending_requests", [])
-            requests.append({"ideas": min(count, 10), "seeds": [topic] if topic.strip() else []})
+            requests.append({"ideas": min(count, 10), "seeds": [topic] if topic.strip() else [], "url": url})
             self.store.kv_set("pending_requests", requests)
             self.on_change()
-            self.say(f"Queued {min(count, 10)} new idea(s){' about ' + topic if topic.strip() else ''}.")
+            about = f" from {url}" if url else f" about {topic}" if topic.strip() else ""
+            self.say(f"Queued {min(count, 10)} new idea(s){about}.")
+        elif command == "/plan":
+            plan = self.pipeline.todays_plan()
+            upcoming = [d for d in self.store.kv_get("content_plan", []) if plan is None or d["date"] >= plan["date"]][:7]
+            self.say("\n".join(f"{d['date']}: {d['theme']} ({d['format']})" for d in upcoming)
+                     or "No plan yet — open the Calendar in the dashboard and press 'Plan the next 7 days'.")
         elif command == "/digest":
             self.say(self.pipeline.digest().plain())
         else:

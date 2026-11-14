@@ -8,10 +8,13 @@ class FactChecker(Agent):
     role = "science fact-checker: nothing false or misleading gets published"
     task = "factcheck"
 
-    def check(self, idea: Idea, script: Script) -> FactCheck:
+    def check(self, idea: Idea, script: Script, source: str = "") -> FactCheck:
         prompt = load_prompt("factcheck").substitute(
             title=idea.title, angle=idea.angle, fact_check=idea.fact_check_notes,
             script=script.model_dump_json(indent=2))
+        if source:
+            prompt += ("\n\nThe idea came from this source; a claim it doesn't support is at best "
+                       "'uncertain':\n" + source[:4000])
         return self.ask(prompt, FactCheck)
 
 
