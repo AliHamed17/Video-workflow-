@@ -1,0 +1,230 @@
+# This channel's live configuration (the autopilot reads it). Template: channel.example.yaml.
+# No secrets here — credentials live in .env / the cloud environment's settings.
+# Everything the agents write is steered by this file — it is the "brand bible".
+
+channel:
+  name: "Mind Blown Daily"
+  niche: "mind-blowing science and nature facts, explained visually"
+  audience: "curious 18-34 year olds scrolling short-form video on their phone"
+  language: "en"
+  voice: >-
+    Punchy, curious and warm. Second person. Short sentences. Every claim must be
+    true and checkable — surprising, never misleading clickbait.
+  content_pillars:
+    - "space and astronomy"
+    - "the human body"
+    - "animal superpowers"
+    - "physics you can see"
+  banned_topics:
+    - "medical advice"
+    - "politics"
+    - "real, identifiable private people"
+  visual_style: >-
+    Cinematic, high-contrast, vibrant teal-and-orange grade, macro detail,
+    smooth dolly and orbit camera moves, volumetric light, photoreal.
+
+video:
+  target_duration_s: 20          # 4 shots × 5 s ≈ 330 credits per video at 1080p (keyframe + final)
+  aspect_ratio: "9:16"
+  # Which renderer turns shot prompts into clips:
+  #   handoff        -> writes a render request; Claude Code renders it with the Higgsfield MCP
+  #                     connector (see .claude/skills/higgsfield-render). Works today, no extra keys.
+  #   higgsfield_mcp -> headless: this program calls the Higgsfield MCP server itself
+  #                     (needs HIGGSFIELD_MCP_TOKEN).
+  #   mock           -> local ffmpeg placeholder clips, for testing the pipeline for free.
+  generator: "handoff"
+  higgsfield:
+    model: "seedance_2_5"        # see `models_explore` in the Higgsfield MCP for the catalog
+    shot_duration_s: 5
+    params:                      # passed straight through to generate_video params
+      resolution: "1080p"
+      generate_audio: true
+    use_unlim: false             # false = pay with credits; true = use free-trial unlimited gens
+    max_credits_per_video: 600   # budget guard per render phase (prices are preflighted live)
+    poll_timeout_s: 1200
+    # --- quality strategy (prices checked Nov 2026: keyframe 2, 480p draft 15, 1080p shot 80 credits) ---
+    keyframes: true              # a still per shot first (sharper, consistent subject), then animate it
+    keyframe_model: nano_banana_pro
+    keyframe_params: {resolution: "2k"}
+    keyframe_video_params: {mode: omni_reference}   # seedance_2_5 takes a start_image in this mode
+    keyframe_role: start_image
+    draft_preview: false         # autopilot in a Claude session: one render pass (no vision model to judge drafts)
+    draft_params: {draft: true}
+    unit_costs: {keyframe: 2, draft: 15, final: 80}  # for estimates shown before you approve
+  captions:
+    burn_in: true
+    mode: auto                   # auto: word-by-word from the narration, else each shot's on_screen_text
+    words_per_caption: 3
+    headline: true               # keep the shot's on_screen_text at the top while words play
+    font: "DejaVu Sans"
+    font_size: 80                # pixels on a 1080x1920 frame
+  voice:
+    # none | flite (free, offline, robotic — good for drafts) | openai | elevenlabs
+    provider: flite
+    voice: ""                    # openai: alloy/nova/...; elevenlabs: a voice_id; flite: slt/kal/awb/rms
+    model: ""                    # openai: gpt-4o-mini-tts; elevenlabs: eleven_multilingual_v2
+    instructions: "Energetic, curious science-explainer delivery."   # openai only
+    max_speedup: 1.3
+    voices: {}                   # per-language voice, e.g. {es: nova, ar: onyx}
+  music:
+    dir: null                    # folder of royalty-free tracks; file names matching the script's mood win
+    volume_db: -16
+    duck: true                   # music dips under the narration
+  clip_audio_volume: 0.35        # the clips' own sound under narration
+  loudness_lufs: -14
+
+llm:
+  # Each task tries its candidates in order and falls back on error / missing key.
+  # Format: "<provider>:<model>". Providers: anthropic, openai, gemini, cli,
+  # or any name declared in compat_providers below.
+  # Model ids change often — check each provider's model list and update here.
+  routes:
+    ideation:  ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "cli:claude"]
+    scripting: ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "cli:claude"]
+    directing: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5", "cli:claude"]
+    # A different model family reviewing the script catches more problems.
+    review:    ["openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "anthropic:claude-opus-5-5", "cli:claude"]
+    packaging: ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "cli:claude"]
+    hooks:     ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "cli:claude"]
+    factcheck: ["openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "anthropic:claude-opus-5-5", "cli:claude"]
+    # Visual QA needs a vision-capable API model (CLI agents are skipped for images).
+    visual_qa: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5", "cli:claude"]
+    translate: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5", "cli:claude"]
+    planning:  ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview", "cli:claude"]
+    viral:     ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5", "cli:claude"]
+  effort:
+    hooks: medium
+    factcheck: high
+    visual_qa: medium
+    ideation: high
+    scripting: high
+    directing: medium
+    review: high
+    packaging: low
+    viral: high
+  # OpenAI-compatible endpoints ("any LLM"): OpenRouter, Groq, Together, local Ollama...
+  # Use them in routes as e.g. "openrouter:meta-llama/llama-4-maverick".
+  compat_providers:
+    openrouter:
+      base_url: "https://openrouter.ai/api/v1"
+      api_key_env: "OPENROUTER_API_KEY"
+    ollama:
+      base_url: "http://localhost:11434/v1"
+      api_key_env: null
+  # Coding-agent CLIs, so you can run on a Claude / ChatGPT (Codex) / Gemini subscription
+  # instead of API keys. Use in routes as "cli:claude", "cli:codex", "cli:gemini".
+  # The prompt is sent on stdin.
+  cli_agents:
+    claude: ["claude", "-p"]
+    codex: ["codex", "exec", "--skip-git-repo-check", "-"]
+    gemini: ["gemini", "-p", ""]
+
+content:
+  languages: []         # extra language versions from the same footage, e.g. [es, ar, pt-BR]
+                        # (translated narration + captions + posting copy; needs a multilingual voice:
+                        #  openai or elevenlabs — flite speaks English only, so versions keep captions + music)
+  hook_variants: 5      # hook lab: write 5 openings, keep the strongest (0 = off)
+  fact_check: true      # independent fact-check before the critic; flagged claims force a revision
+  idea_overgenerate: 2  # pitch 2 extra ideas and keep the best by predicted score
+  formats: []           # recurring series, e.g. ["3 facts you didn't know about …", "What if …?"]
+
+quality:
+  visual_qa: true       # a vision model inspects frames of every rendered shot (needs a vision-capable model)
+  visual_min_score: 6.5
+  max_rerenders: 1      # automatic re-render rounds for weak shots (on cheap drafts when draft_preview)
+  block_publish_on_fail: true
+  loudness_tolerance_lu: 2.0
+
+review:
+  min_score: 7.0        # critic score (0-10) needed to pass
+  max_revisions: 2      # writer <-> critic rounds before giving up
+  on_exhausted: human   # human: park it for you with the critic's notes | reject: drop it
+
+approval:
+  mode: manual          # manual: stop at "reviewed" until `vw approve <id>`; auto: approve if score >= auto_min_score
+  auto_min_score: 8.5
+
+autopilot:
+  # Fully automatic days: today's viral formats → our videos → rendered → QA → published, no clicks.
+  # Quality gates stay on; anything that fails them waits for you and another idea is tried.
+  enabled: true
+  videos_per_day: 1
+  max_attempts_per_day: 3     # ideas tried per day (some fail the critic or QA)
+  source: viral               # viral remixes (falls back to the content calendar) | calendar
+  min_script_score: 7.5       # critic score to approve a script without you (fact-check must pass too)
+  approve_finals: true        # render the final automatically when the preview passes QA
+  min_visual_score: 7.0
+  max_credits_per_day: 400    # hard stop: no render starts past this daily Higgsfield spend
+
+publish:
+  platforms: [youtube, instagram, tiktok]
+  ai_disclosure: true   # label posts as AI-generated where the platform supports it
+  youtube:
+    privacy: public     # YouTube keeps API uploads private until the Google project passes its audit
+    category_id: "28"   # 28 = Science & Technology, 22 = People & Blogs, 24 = Entertainment
+  instagram:
+    share_to_feed: true
+  tiktok:
+    mode: draft         # until the TikTok app passes its audit: lands in your TikTok inbox (1 tap to post)
+    privacy_level: SELF_ONLY   # unaudited TikTok apps can only post SELF_ONLY
+  schedule:
+    timezone: "UTC"     # e.g. "America/New_York"
+    slots: []           # e.g. ["12:30", "19:00"]; every platform posts at the same slot. [] = immediately
+    max_per_day: 2
+
+trends:
+  enabled: false
+  max_items: 25
+  sources:
+    - type: google_trends
+      geo: US
+      limit: 10
+    - type: reddit
+      subreddits: [science, space, Damnthatsinteresting]
+      limit: 8
+    # - type: rss
+    #   url: "https://www.sciencedaily.com/rss/top/science.xml"
+
+viral:
+  # Every day: find the best-performing AI-generated shorts, learn WHY they work (hook, format,
+  # visual mechanic, motion) and pitch our own ORIGINAL versions — same format, new content.
+  enabled: true
+  sources: [youtube, reddit, tiktok, instagram]   # youtube needs YOUTUBE_API_KEY; tiktok/instagram need
+                                                  # APIFY_TOKEN (instagram can use your Graph credentials)
+  daily_remixes: 1          # our versions per day (they go through the normal script → approve → render flow)
+  hour: 7                   # local hour (publish.schedule.timezone) for the daily scout
+  lookback_days: 7
+  min_views: 50000
+  max_duration_s: 180
+  require_ai: true          # only videos with AI-generation signals (tags, tools named, AI communities)
+  stay_in_niche: false      # true: adapt every concept to the channel's niche
+  closeness: close          # format: borrow the formula for our own subject | close: same genre, setting,
+                            # beats, style and motion, like a new episode — with our own characters and script
+  analyze_top: 8
+  youtube:
+    queries: ["AI generated video", "veo 3", "kling ai", "ai animation shorts", "ai asmr"]
+    region: ""              # e.g. US
+  reddit:
+    subreddits: [aivideo]
+  tiktok:
+    actor: clockworks~tiktok-scraper
+    hashtags: [aivideo, veo3, aigenerated, aiart]
+  instagram:
+    actor: apify~instagram-hashtag-scraper
+    hashtags: [aivideo, aiart, veo3]
+
+notify:
+  # log | telegram | slack | discord | webhook (credentials in .env)
+  channels: [log, telegram]
+  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert, viral]
+
+runtime:
+  workers: 3                    # items processed in parallel
+  daemon_interval_minutes: 15
+  ideas_per_day: 2
+  max_backlog: 6                # don't pitch more while this many items are unfinished
+  stats_every_hours: 6
+  digest_hour: 20               # local hour (schedule timezone) for the daily summary
+  auto_plan: true               # keep the content calendar a week ahead (theme per day)
+  stuck_after_hours: 6          # alert when an item sits in a working stage this long
+  daily_credit_budget: 1000     # alert when a day's Higgsfield spend passes this

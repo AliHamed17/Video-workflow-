@@ -134,9 +134,28 @@ class Daemon:
                     log.warning("planning failed: %s", exc)
                 self.store.kv_set("last_plan", today.isoformat())
 
+        # Autopilot: today's videos are started (viral remixes first) and pushed all the way to publishing.
+        ap = self.config.autopilot
+        if ap.enabled:
+            if self.pipeline.autopilot_active and self._local_now().hour >= self.config.viral.hour:
+                first_today = self.store.kv_get("last_viral") != today.isoformat()
+                try:
+                    fill = self.pipeline.autopilot_fill()
+                    report["autopilot"] = fill.get("pitched", 0)
+                    if first_today and ap.source == "viral" and self.store.kv_get("last_viral") == today.isoformat():
+                        made = [i for i in self.store.list() if i.inspiration
+                                and i.created_at.astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date()
+                                == today]
+                        self.pipeline.notify(viral_notice(self.store.kv_get("viral_last") or {}, made))
+                except Exception as exc:
+                    log.warning("autopilot fill failed: %s", exc)
+                    report["autopilot"] = "failed"
+            else:
+                report["autopilot"] = "paused" if self.store.kv_get("autopilot_paused") else "waiting"
         # Daily viral scout: today's best AI shorts → our own versions of the strongest formats.
         vc = self.config.viral
-        if vc.enabled and self._local_now().hour >= vc.hour and self.store.kv_get("last_viral") != today.isoformat():
+        if (not ap.enabled and vc.enabled and self._local_now().hour >= vc.hour
+                and self.store.kv_get("last_viral") != today.isoformat()):
             self.store.kv_set("last_viral", today.isoformat())
             try:
                 unfinished = sum(1 for i in self.store.list() if i.stage not in STOP_STAGES)
@@ -156,7 +175,7 @@ class Daemon:
         made_today = sum(1 for i in items if i.created_at.astimezone(tz).date() == today)
         unfinished = sum(1 for i in items if i.stage not in STOP_STAGES)
         need = min(rt.ideas_per_day - made_today, rt.max_backlog - unfinished)
-        if need > 0:
+        if need > 0 and not ap.enabled:  # the autopilot sets its own daily target
             report["pitched"] = len(self.pipeline.ideate(need))
 
         # 3. Move everything forward (publishes whatever is due).

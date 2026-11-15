@@ -190,6 +190,23 @@ class ApprovalConfig(BaseModel):
     auto_min_score: float = 8.5
 
 
+class AutopilotConfig(BaseModel):
+    """Fully automatic days: ideas → script → render → QA → publish, with no clicks.
+
+    The quality gates stay on (critic, fact-check, visual + technical QA): anything that fails
+    them waits for a human and the autopilot tries another idea instead. Spending is capped.
+    """
+
+    enabled: bool = False
+    videos_per_day: int = 1            # new videos to produce each day
+    max_attempts_per_day: int = 3      # ideas tried per day (some fail the critic or QA)
+    source: Literal["viral", "calendar"] = "viral"   # viral remixes first, or the content calendar
+    min_script_score: float = 7.5      # critic score to approve a script without you (fact-check must pass)
+    approve_finals: bool = True        # after a preview passes QA, pay for the final render automatically
+    min_visual_score: float = 7.0      # average visual-QA score the preview needs (when visual QA ran)
+    max_credits_per_day: float = 500   # hard stop: no render starts past this daily Higgsfield spend
+
+
 class YouTubeConfig(BaseModel):
     privacy: Literal["private", "unlisted", "public"] = "private"
     category_id: str = "28"
@@ -265,6 +282,10 @@ class ViralConfig(BaseModel):
     max_duration_s: int = 180        # shorts only
     require_ai: bool = True          # keep only videos with AI-generation signals
     stay_in_niche: bool = False      # true: adapt every concept to the channel's niche
+    # format: borrow the formula (hook, structure, motion) for our own subject.
+    # close: stay as near as possible — same genre, setting, beats, style and motion, like a new
+    #        episode of the same show — with our own characters and script (never reused content).
+    closeness: Literal["format", "close"] = "format"
     analyze_top: int = 8             # how many top videos the analyst studies per run
     youtube: ViralYouTubeConfig = Field(default_factory=ViralYouTubeConfig)
     reddit: ViralRedditConfig = Field(default_factory=ViralRedditConfig)
@@ -300,6 +321,7 @@ class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
+    autopilot: AutopilotConfig = Field(default_factory=AutopilotConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     viral: ViralConfig = Field(default_factory=ViralConfig)

@@ -17,7 +17,8 @@ from typing import Any
 from ..models import ContentItem, Stage
 from .db import DB
 
-COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas", "plan", "viral"}
+COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas", "plan", "viral",
+                   "autopilot"}
 
 
 class CloudStore:
@@ -52,11 +53,10 @@ class CloudStore:
             "ON CONFLICT (id) DO UPDATE SET stage = excluded.stage, updated_at = excluded.updated_at, "
             "data = excluded.data",
             [(i["id"], i["stage"], i["created_at"], i["updated_at"], json.dumps(i)) for i in items])
-        if snapshot.get("item_ids") is not None:  # drop items the worker no longer has
-            keep = set(snapshot["item_ids"])
-            for (item_id,) in self.db.all("SELECT id FROM vw_items"):
-                if item_id not in keep:
-                    self.db.execute("DELETE FROM vw_items WHERE id = ?", (item_id,))
+        # Only items the worker explicitly removed are dropped: a brand-new worker (fresh machine,
+        # scheduled run) that doesn't know the older items must never wipe them.
+        for item_id in snapshot.get("deleted_ids") or []:
+            self.db.execute("DELETE FROM vw_items WHERE id = ?", (item_id,))
         events = snapshot.get("events", [])
         self.db.executemany(
             "INSERT INTO vw_events (id, at, item_id, step, status, duration_ms, detail, attrs) "
@@ -118,6 +118,22 @@ class CloudStore:
         return [{"step": r[0], "runs": int(r[1]), "errors": int(r[2] or 0), "avg_ms": float(r[3] or 0),
                  "max_ms": float(r[4] or 0)} for r in rows]
 
+    def export(self, kv_keys: tuple[str, ...], since: str, item_limit: int = 120) -> dict:
+        """What a fresh worker needs to continue: unfinished items + recent ones, state, recent events."""
+        rows = self.db.all("SELECT data FROM vw_items ORDER BY updated_at DESC")
+        items = [json.loads(r[0]) for r in rows]
+        open_ = [i for i in items if i["stage"] not in ("published", "rejected", "failed")]
+        done = [i for i in items if i["stage"] in ("published", "rejected", "failed")]
+        events = self.db.all("SELECT id, at, item_id, step, status, duration_ms, detail, attrs FROM vw_events "
+                             "WHERE at >= ? ORDER BY id LIMIT 5000", (since,))
+        return {
+            "items": open_ + done[: max(item_limit - len(open_), 0)],
+            "kv": {k: v for k in kv_keys if (v := self.kv_get(k)) is not None},
+            "events": [{"id": int(r[0]), "at": r[1], "item_id": r[2], "step": r[3], "status": r[4],
+                        "duration_ms": r[5], "detail": r[6], "attrs": json.loads(r[7] or "{}")} for r in events],
+            "last_event_id": self.last_event_id(),
+        }
+
     def last_event_id(self) -> int:
         row = self.db.one("SELECT MAX(id) FROM vw_events")
         return int(row[0] or 0) if row else 0
@@ -155,6 +171,9 @@ class CloudStore:
         if self._media_index is None:
             self._media_index = {(r[0], r[1]) for r in self.db.all("SELECT item_id, name FROM vw_media")}
         return (item_id, name) in self._media_index
+
+    def item_ids(self) -> set[str]:
+        return {r[0] for r in self.db.all("SELECT id FROM vw_items")}
 
     def prune_media(self, keep_items: set[str]) -> int:
         removed = 0

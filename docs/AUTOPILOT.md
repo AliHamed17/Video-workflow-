@@ -1,0 +1,108 @@
+# Autopilot: a new video every day, made and posted without clicks
+
+```mermaid
+flowchart LR
+    S[Scout today's most-watched<br/>AI shorts] --> A[Analyse why they work<br/>format · hook · motion]
+    A --> I[Our version<br/>very close format, our content]
+    I --> W[Script → fact-check → critic]
+    W -->|passes| R[Higgsfield render<br/>keyframes → 1080p shots]
+    W -->|fails| H[(waits for you;<br/>another idea is tried)]
+    R --> Q[Edit + visual / technical QA]
+    Q -->|passes| P[YouTube Shorts · Instagram Reels · TikTok]
+    Q -->|fails| H
+    P --> D[Dashboard + Telegram report]
+```
+
+Turn it on in `config/channel.yaml` (`autopilot.enabled: true`, already on for this channel).
+
+## Safety rails (all on by default)
+
+| Rail | What it does |
+|---|---|
+| Quality gates | Critic score ≥ `min_script_score` **and** a clean fact-check before any credit is spent; technical QA (and visual QA when a vision model is set) before posting. Anything that fails waits for you; the autopilot tries another idea (`max_attempts_per_day`) |
+| Spend cap | No render starts if today's Higgsfield spend + its estimate passes `max_credits_per_day`, or if the balance can't cover it. No script is even written that day |
+| Stop button | ⏸ **Pause everything** on the dashboard (local or cloud), `/pause` on Telegram, or `vw autopilot pause`. While paused nothing new is made, rendered **or posted**. `/resume` to continue |
+| Originality | Remixes keep the format and energy, never the original's footage, audio, characters, names or script, and skip videos built on real people, brands or copyrighted characters. Platforms bury re-uploads and near-copies (YouTube "reused content", TikTok/Instagram "unoriginal content"), so this also protects the account |
+| AI labels | `ai_disclosure: true` labels every post as AI-generated where the platform supports it |
+
+## What you need to set up (once)
+
+Create the accounts, then put each value where your worker runs (see "Where it runs").
+
+### 1. Higgsfield credits
+A 20-second video (4 shots: keyframe + 1080p shot each) costs about **330 credits**. A video a
+day is ~10,000 credits a month. Top up or pick a plan in Higgsfield; the autopilot reads the
+balance before every render.
+
+### 2. YouTube (channel + upload access)
+1. Create the YouTube channel with your Google account.
+2. console.cloud.google.com → new project → enable **YouTube Data API v3**.
+3. OAuth consent screen: External, add your Google account as a test user. Credentials →
+   **OAuth client ID → Desktop app**. Note the client id and secret.
+4. On a computer with this repo: put `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` in `.env`,
+   run `vw auth-youtube`, approve in the browser → it prints `YOUTUBE_REFRESH_TOKEN`.
+5. Same project → Credentials → **API key** (restrict to YouTube Data API v3) → `YOUTUBE_API_KEY`
+   (this one is for finding viral videos).
+6. **Limit:** uploads from an unaudited project are forced to *private*. Apply for the
+   **YouTube API Services audit** (Google's "Audit and Quota Extension" form) right away; until it's
+   approved, publish each private video from YouTube Studio with one click.
+
+### 3. Instagram (fully automatic from day one)
+1. Switch the Instagram account to **Professional** (Creator or Business) and link it to a
+   Facebook Page.
+2. developers.facebook.com → Create app (type Business) → add **Instagram** → *API setup with
+   Facebook login*. Add yourself as admin of the app (development mode is enough for your own account).
+3. Graph API Explorer → your app → permissions `instagram_basic`, `instagram_content_publish`,
+   `pages_show_list`, `pages_read_engagement` → generate a token → exchange it for a long-lived one →
+   `GET /me/accounts` gives the **Page access token** (it does not expire) and
+   `GET /<page-id>?fields=instagram_business_account` gives the IG user id.
+4. Values: `INSTAGRAM_ACCESS_TOKEN` (the Page token), `INSTAGRAM_USER_ID`,
+   `INSTAGRAM_GRAPH_HOST=graph.facebook.com`.
+   (With *Instagram Login* instead, set `INSTAGRAM_GRAPH_HOST=graph.instagram.com`; that token lasts
+   60 days and the worker refreshes it every week by itself.)
+
+### 4. TikTok
+1. developers.tiktok.com → create an app → products **Login Kit** + **Content Posting API**,
+   scopes `video.upload`, `video.publish`, `video.list`.
+2. Run the OAuth flow once for your account (redirect URI registered on the app) → access +
+   refresh tokens. Values: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_ACCESS_TOKEN`,
+   `TIKTOK_REFRESH_TOKEN`. The worker refreshes and rotates them (carried between machines in the
+   encrypted cloud vault).
+3. **Limit:** until TikTok audits the app, API posts can only be private, so this channel uses
+   `tiktok.mode: draft`: each video lands in your TikTok inbox and you tap *Post* (10 seconds).
+   Apply for the audit; after approval set `mode: direct` and `privacy_level: PUBLIC_TO_EVERYONE`.
+
+### 5. Optional
+`APIFY_TOKEN` (TikTok/Instagram trend discovery, paid per run), `TELEGRAM_BOT_TOKEN` +
+`TELEGRAM_CHAT_ID` (reports and the `/pause` button on your phone), `OPENAI_API_KEY` /
+`ELEVENLABS_API_KEY` (natural narration), `ANTHROPIC_API_KEY` (visual QA of every shot).
+
+## Where it runs
+
+**A. A daily Claude session (no server needed).** A scheduled Claude Code session starts every
+day in this repo's cloud environment and follows `.claude/skills/autopilot/SKILL.md`: restore
+state from the cloud dashboard → scout → write → render with your Higgsfield connector →
+publish → sync. Put the values above in the environment's settings (session title bar →
+environment → Edit → environment variables), plus `VW_CLOUD_URL` and `VW_CLOUD_SECRET` (Vercel →
+project → Settings → Environment Variables). Without `YOUTUBE_API_KEY` the session finds viral
+videos with a web search instead.
+
+**B. Your own always-on computer or server.** `vw daemon` (or `docker compose up -d`) runs the
+same autopilot every 15 minutes. Headless rendering needs `HIGGSFIELD_MCP_TOKEN`
+(`video.generator: higgsfield_mcp`); with the default `handoff` renderer it stops at
+"ready to render" for Claude.
+
+**C. GitHub Actions** (`vw autopilot run --restore` on a schedule) works the same way as B when
+API keys (`ANTHROPIC_API_KEY`, `HIGGSFIELD_MCP_TOKEN`, platform credentials) are repository secrets.
+
+All three share one memory through the cloud dashboard (`vw cloud restore` / `sync`), so you can
+move between them without repeating videos or losing today's spend.
+
+## Everyday use
+
+```bash
+vw autopilot status      # on/paused, today's spend, what's waiting for you
+vw autopilot run         # one full cycle now
+vw autopilot pause       # stop everything (also: dashboard button, Telegram /pause)
+vw autopilot resume
+```

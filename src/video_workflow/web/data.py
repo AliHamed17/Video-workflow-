@@ -80,6 +80,8 @@ def status(pipeline, now: datetime | None = None) -> dict:
         "generator": pipeline.generator.name,
         "sync": ({**sync, "ago": _ago(sync.get("at"), now)} if (sync := store.kv_get("sync")) else None),
         "cloud": bool(getattr(pipeline, "is_cloud", False)),
+        "autopilot": {"enabled": cfg.autopilot.enabled, "paused": store.kv_get("autopilot_paused"),
+                      "per_day": cfg.autopilot.videos_per_day, "cap": cfg.autopilot.max_credits_per_day},
     }
 
 

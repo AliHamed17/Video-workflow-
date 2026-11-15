@@ -132,6 +132,24 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                 if not self._worker_ok():
                     return self._deny_worker()
                 return self._json({"commands": store.pending_commands()})
+            if path == "/api/cloud/export":
+                if not self._worker_ok():
+                    return self._deny_worker()
+                from datetime import UTC, datetime, timedelta
+
+                from .sync import RESTORE_KV
+                since = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+                body = json.dumps(store.export(RESTORE_KV, since), default=str).encode()
+                if "gzip" in self.headers.get("Accept-Encoding", ""):  # stay under Vercel's 4.5 MB response cap
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Encoding", "gzip")
+                    payload = gzip.compress(body)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return None
+                return self._send(200, body, "application/json")
             if path == "/login":
                 nxt = parse_qs(url.query).get("next", ["/"])[0]
                 return self._send(200, LOGIN.format(css=CSS, next=escape(nxt, quote=True), error="").encode())
@@ -170,8 +188,8 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                     return self._deny_worker()
                 snapshot = json.loads(self._body())
                 report = store.ingest(snapshot)
-                if snapshot.get("item_ids") is not None:
-                    report["media_pruned"] = store.prune_media(set(snapshot["item_ids"]))
+                if snapshot.get("deleted_ids"):
+                    report["media_pruned"] = store.prune_media(store.item_ids())
                 report["media"] = store.media_shas()
                 report["commands"] = store.pending_commands()
                 return self._json(report)

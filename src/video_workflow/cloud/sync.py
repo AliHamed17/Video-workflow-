@@ -23,7 +23,10 @@ from ..models import ContentItem
 log = logging.getLogger(__name__)
 
 SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan",
-           "viral_last", "viral_running")
+           "viral_last", "viral_running", "autopilot_paused")
+# What a fresh worker needs to pick up where the last one stopped (`vw cloud restore`).
+RESTORE_KV = ("content_plan", "viral_last", "viral_used", "last_viral", "last_plan", "last_digest", "last_stats",
+              "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault")
 MEDIA_ITEMS = 40              # media is kept for the most recent items
 MAX_UPLOAD = 4_300_000        # stay under Vercel's 4.5 MB request limit
 
@@ -62,6 +65,11 @@ class CloudClient:
                             headers=self._headers())
             self._check(resp, "ack")
 
+    def export(self) -> dict:
+        resp = net.send(self.http, "GET", f"{self.url}/api/cloud/export",
+                        headers=self._headers(**{"Accept-Encoding": "gzip"}))
+        return self._check(resp, "export").json()
+
     def put_media(self, item_id: str, name: str, content_type: str, sha: str, data: bytes) -> None:
         resp = net.send(self.http, "PUT", f"{self.url}/api/cloud/media/{item_id}/{name}",
                         params={"type": content_type, "sha": sha}, content=data,
@@ -71,16 +79,18 @@ class CloudClient:
 
 def build_snapshot(store, config, after_event_id: int = 0, item_limit: int = 150) -> dict:
     items = sorted(store.list(), key=lambda i: i.updated_at, reverse=True)
-    kv = {key: store.kv_get(key) for key in SYNC_KV if store.kv_get(key) is not None}
+    kv = {key: value for key in dict.fromkeys(SYNC_KV + RESTORE_KV) if (value := store.kv_get(key)) is not None}
     if "selftest_last" in kv:
         kv["selftest_last"] = {**kv["selftest_last"], "video": None}
     kv["config"] = config.model_dump(mode="json")
     events = list(reversed(store.events(after_id=after_event_id, limit=2000)))
+    current = {i.id for i in items}
+    pushed = set(store.kv_get("cloud_pushed_ids", []))
     return {
         "worker": "vw",
         "generated_at": datetime.now(UTC).isoformat(),
         "items": [i.model_dump(mode="json") for i in items[:item_limit]],
-        "item_ids": [i.id for i in items],
+        "deleted_ids": sorted(pushed - current),   # only what this worker itself removed
         "events": events,
         "kv": kv,
     }
@@ -148,6 +158,10 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
             run_viral(pipeline, args)
             last = store.kv_get("viral_last") or {}
             return True, f"viral {args['op']} done · {len(last.get('videos', []))} videos listed"
+        if action == "autopilot":
+            paused = bool((cmd.get("args") or {}).get("paused"))
+            pipeline.set_autopilot_paused(paused, by="cloud dashboard")
+            return True, "autopilot paused" if paused else "autopilot resumed"
         if action == "plan":
             days = pipeline.plan(int((cmd.get("args") or {}).get("days", 7)))
             return True, f"planned through {days[-1]['date'] if days else '?'}"
@@ -171,6 +185,53 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
         return True, f"{action} applied to {item.id}"
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
+
+
+TOKEN_FILES = ("tiktok.token.json", "instagram.token.json")  # tokens the publishers rotate themselves
+
+
+def _vault_key(secret: str) -> bytes:
+    return hashlib.sha256(b"video-workflow token vault v1|" + secret.encode()).digest()
+
+
+def seal_tokens(data_dir: Path, secret: str) -> dict | None:
+    """Encrypt rotated platform tokens so a fresh machine can continue with them.
+
+    The cloud only ever stores ciphertext; the key comes from VW_CLOUD_SECRET, which the
+    Vercel app checks but never uses for this.
+    """
+    files = {n: (data_dir / n).read_text() for n in TOKEN_FILES if (data_dir / n).exists()}
+    if not files:
+        return None
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        log.warning("cryptography is not installed: rotated tokens are not carried to other machines")
+        return None
+    import base64
+    import os
+
+    nonce = os.urandom(12)
+    sealed = AESGCM(_vault_key(secret)).encrypt(nonce, json.dumps(files).encode(), b"tokens")
+    return {"v": 1, "nonce": base64.b64encode(nonce).decode(), "data": base64.b64encode(sealed).decode()}
+
+
+def open_tokens(vault: dict, data_dir: Path, secret: str) -> list[str]:
+    """Write the vault's token files that this machine doesn't have yet. Returns their names."""
+    import base64
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    files = json.loads(AESGCM(_vault_key(secret)).decrypt(
+        base64.b64decode(vault["nonce"]), base64.b64decode(vault["data"]), b"tokens"))
+    written = []
+    for name, content in files.items():
+        path = data_dir / Path(name).name
+        if name in TOKEN_FILES and not path.exists():
+            path.write_text(content)
+            path.chmod(0o600)
+            written.append(name)
+    return written
 
 
 class CloudSync:
@@ -200,16 +261,87 @@ class CloudSync:
         with self.pipeline.tracer.span("cloud.sync", None) as span:
             last = self.store.kv_get("cloud_last_event", 0)
             snapshot = build_snapshot(self.store, self.pipeline.config, last)
+            vault = seal_tokens(self.store.data_dir, self.client.secret)
+            if vault:
+                snapshot["kv"]["token_vault"] = vault
             resp = self.client.sync(snapshot)
-            if snapshot["events"]:
-                self.store.kv_set("cloud_last_event", snapshot["events"][-1]["id"])
+            self._pushed(snapshot)
             uploaded = self._upload_media(resp.get("media", {}))
             applied = self.apply(resp.get("commands", []))
+            if applied:  # push the effect of the commands right away (e.g. the pause state)
+                again = build_snapshot(self.store, self.pipeline.config, self.store.kv_get("cloud_last_event", 0))
+                self.client.sync(again)
+                self._pushed(again)
             self.store.kv_set("sync", {"at": datetime.now(UTC).isoformat(), "url": self.client.url})
             span.detail = (f"{len(snapshot['items'])} items, {len(snapshot['events'])} events, "
                            f"{uploaded} media, {len(applied)} command(s)")
         return {"items": len(snapshot["items"]), "events": len(snapshot["events"]), "media": uploaded,
                 "commands": len(applied)}
+
+    def _pushed(self, snapshot: dict) -> None:
+        if snapshot["events"]:
+            self.store.kv_set("cloud_last_event", snapshot["events"][-1]["id"])
+        pushed = set(self.store.kv_get("cloud_pushed_ids", [])) - set(snapshot["deleted_ids"])
+        self.store.kv_set("cloud_pushed_ids", sorted(pushed | {i["id"] for i in snapshot["items"]}))
+
+    def restore(self) -> dict:
+        """Continue on a fresh machine: pull open + recent items, state and today's trace from the cloud.
+
+        Items this machine already has are kept as they are. Clips are fetched again from their
+        Higgsfield URLs; an unfinished video whose files can't be recovered is flagged for you.
+        """
+        from ..models import ContentItem, Stage
+        from ..video.base import download
+
+        with self.pipeline.tracer.span("cloud.restore", None) as span:
+            data = self.client.export()
+            local = {i.id for i in self.store.list()}
+            restored, refetched, flagged = 0, 0, 0
+            for raw in data.get("items", []):
+                if raw["id"] in local:
+                    continue
+                item = ContentItem.model_validate(raw)
+                folder = self.store.item_dir(item.id)
+                for clip in item.clips:
+                    clip.path = str(folder / "clips" / Path(clip.path).name) if clip.path else clip.path
+                    if clip.path and not Path(clip.path).exists() and clip.url:
+                        try:
+                            download(clip.url, Path(clip.path), self.pipeline.http)
+                            refetched += 1
+                        except Exception as exc:
+                            log.warning("could not re-fetch %s shot %d: %s", item.id, clip.shot_index, exc)
+                for attr in ("final_video", "thumbnail"):
+                    value = getattr(item, attr)
+                    if value and not Path(value).exists():
+                        setattr(item, attr, None)
+                missing = [c for c in item.clips if c.path and not Path(c.path).exists()]
+                if item.stage in (Stage.RENDERED, Stage.EDITED) and (missing or not item.final_video):
+                    if not missing:
+                        item.stage = Stage.RENDERED   # clips are back: edit again on this machine
+                    else:
+                        item.attention = (f"Restored on a new machine without {len(missing)} clip file(s); "
+                                          "re-render those shots or retry.")
+                        flagged += 1
+                self.store.save(item)
+                restored += 1
+            kv = dict(data.get("kv") or {})
+            tokens: list[str] = []
+            if kv.get("token_vault"):
+                try:
+                    tokens = open_tokens(kv.pop("token_vault"), self.store.data_dir, self.client.secret)
+                except Exception as exc:  # wrong secret / tampered data: keep going without them
+                    log.warning("could not open the token vault: %s", exc)
+            for key, value in kv.items():
+                if self.store.kv_get(key) is None:
+                    self.store.kv_set(key, value)
+            self.store.import_events(data.get("events", []), int(data.get("last_event_id") or 0))
+            self.store.kv_set("cloud_last_event", int(data.get("last_event_id") or 0))
+            self.store.kv_set("cloud_pushed_ids", sorted(set(self.store.kv_get("cloud_pushed_ids", []))
+                                                         | {i["id"] for i in data.get("items", [])}))
+            report = {"items": restored, "clips_refetched": refetched, "flagged": flagged,
+                      "events": len(data.get("events", [])), "state": sorted(kv), "tokens": tokens}
+            span.detail = f"{restored} items, {refetched} clips re-fetched, {flagged} flagged"
+        return report
 
     def _upload_media(self, remote: dict[str, str]) -> int:
         uploaded = 0

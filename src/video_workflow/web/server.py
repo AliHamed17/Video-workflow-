@@ -259,6 +259,17 @@ def make_handler(pipeline, token: str | None = None):
                 about = f" from {url}" if url else f" about {topic}" if topic else ""
                 msg = f"{count} idea(s){about} requested — pitched on the next cycle."
                 return self._redirect(f"/?flash={quote(msg)}")
+            if path in ("/autopilot/pause", "/autopilot/resume"):
+                paused = path.endswith("pause")
+                if cloud:
+                    store.enqueue("autopilot", None, {"paused": paused}, source="cloud dashboard")
+                    store.kv_set("autopilot_paused", {"at": datetime.now(UTC).isoformat(), "by": "cloud dashboard"}
+                                 if paused else None)  # shown at once; the worker confirms at its next sync
+                    msg = "Sent to your worker." + (" Nothing new will be made or posted." if paused else "")
+                else:
+                    pipeline.set_autopilot_paused(paused, by="dashboard")
+                    msg = "Autopilot paused — nothing new is made, rendered or posted." if paused else "Autopilot resumed."
+                return self._redirect(f"/?flash={quote(msg)}")
             if path in ("/viral/scout", "/viral/remix", "/viral/add"):
                 op = path.rsplit("/", 1)[1]
                 args: dict = {"op": op}

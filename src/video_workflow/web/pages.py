@@ -116,7 +116,20 @@ def render_board(pipeline, st: dict, flash: str = "") -> str:
                   "background:var(--card);color:var(--ink)'><input name=url type=url class=field "
                   "placeholder='or an article URL to base them on' style='flex:1;min-width:180px'>"
                   "<button>✨ Pitch</button></form>")
-    body = (_flash(flash) + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
+    ap = st.get("autopilot") or {}
+    autopilot = ""
+    if ap.get("enabled"):
+        if ap.get("paused"):
+            autopilot = ("<div class='flash' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
+                         f"<b>⏸ Autopilot paused</b><span class=meta>since {e(ap['paused']['at'][:16])} by "
+                         f"{e(ap['paused']['by'])} — nothing new is made, rendered or posted.</span>"
+                         "<form method=post action='/autopilot/resume'><button class=primary>▶ Resume</button></form></div>")
+        else:
+            autopilot = ("<div class=actions style='align-items:center'><span class=pill>🤖 Autopilot on</span>"
+                         f"<span class=meta>{ap['per_day']} video(s) a day, made and posted without clicks · "
+                         f"spend cap {ap['cap']:.0f} credits/day</span>"
+                         "<form method=post action='/autopilot/pause'><button>⏸ Pause everything</button></form></div>")
+    body = (_flash(flash) + autopilot + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
             + f"<h2>Pipeline</h2><div class=board>{''.join(cols)}</div>")
     return page(pipeline.config.channel.name, body, st, "/")
 

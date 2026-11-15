@@ -25,6 +25,7 @@ gemini = ["google-genai>=1.0"]
 mcp = ["mcp>=2.0"]
 cloud = ["psycopg[binary]>=3.2"]
 all = [
+  "cryptography>=42",   # encrypts rotated platform tokens carried between machines (cloud vault)
   "anthropic>=2.8",
   "openai>=1.66",
   "google-genai>=1.0",

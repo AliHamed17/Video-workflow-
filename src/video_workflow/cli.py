@@ -28,6 +28,8 @@ clips_app = typer.Typer(help="Register rendered clips (handoff flow)")
 app.add_typer(clips_app, name="clips")
 cloud_app = typer.Typer(help="Cloud control room on Vercel: deploy it, sync this worker to it")
 app.add_typer(cloud_app, name="cloud")
+autopilot_app = typer.Typer(help="Fully automatic production: viral formats → videos → published, no clicks")
+app.add_typer(autopilot_app, name="autopilot")
 console = Console()
 
 ConfigOpt = Annotated[Path | None, typer.Option("--config", "-c", help="Channel YAML")]
@@ -502,7 +504,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 18:
+    if passed != len(results) or len(results) < 20:
         raise typer.Exit(1)
 
 
@@ -542,6 +544,18 @@ def cloud_sync(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     console.print(f"Synced to {cloud.client.url}: {report}")
 
 
+@cloud_app.command("restore")
+def cloud_restore(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Continue on this machine: pull open items, state, today's spend and rotated tokens from the cloud."""
+    from .factory import build_cloud
+
+    pipe = _setup(config, data)
+    cloud = build_cloud(pipe)
+    if cloud is None:
+        raise typer.BadParameter("Set VW_CLOUD_URL and VW_CLOUD_SECRET")
+    console.print(f"Restored from {cloud.client.url}: {cloud.restore()}")
+
+
 @cloud_app.command("status")
 def cloud_status() -> None:
     """Is the cloud app reachable, and what does it have?"""
@@ -552,6 +566,59 @@ def cloud_status() -> None:
         raise typer.BadParameter("VW_CLOUD_URL is not set (run `vw cloud deploy`)")
     resp = httpx.get(f"{secrets.vw_cloud_url}/healthz", timeout=20)
     console.print(f"{secrets.vw_cloud_url} → HTTP {resp.status_code} {resp.text[:300]}")
+
+
+@autopilot_app.command("run")
+def autopilot_run(config: ConfigOpt = None, data: DataOpt = Path("data"),
+                  restore: Annotated[bool, typer.Option("--restore", help="First pull state from the cloud "
+                                                        "dashboard (for fresh machines / scheduled runs)")] = False,
+                  force: Annotated[bool, typer.Option("--force", help="Run even if autopilot.enabled is false")] = False
+                  ) -> None:
+    """One full automatic cycle: today's ideas → script → render → QA → publish (then sync the cloud)."""
+    from .factory import build_cloud
+
+    pipe = _setup(config, data)
+    if force:
+        pipe.config.autopilot.enabled = True
+    cloud = build_cloud(pipe)
+    if restore and cloud is not None:
+        console.print(f"Restored from the cloud: {cloud.restore()}")
+    if not pipe.config.autopilot.enabled:
+        raise typer.BadParameter("autopilot.enabled is false in the channel config (or pass --force)")
+    report = pipe.autopilot_day()
+    console.print(f"Autopilot: {report}")
+    _table(sorted(pipe.store.list(), key=lambda i: i.updated_at, reverse=True)[:10])
+    if cloud is not None:
+        console.print(f"Synced to the cloud: {cloud.sync()}")
+
+
+@autopilot_app.command("status")
+def autopilot_status(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Is the autopilot on, what has it done today, and what is it waiting for?"""
+    pipe = _setup(config, data, publishers=False)
+    ap = pipe.config.autopilot
+    paused = pipe.store.kv_get("autopilot_paused")
+    state = "OFF (autopilot.enabled: false)" if not ap.enabled else (
+        f"PAUSED since {paused['at'][:16]} by {paused['by']}" if paused else "ON")
+    console.print(f"Autopilot: [bold]{state}[/] · {ap.videos_per_day}/day from {ap.source} · "
+                  f"cap {ap.max_credits_per_day:.0f} credits/day (spent today {pipe.credits_spent_today():.0f})")
+    held = [i for i in pipe.store.list() if i.attention and i.stage.value not in ("published", "rejected", "failed")]
+    for item in held:
+        console.print(f"  ⏸ {item.id} {item.idea.title[:50]} — {item.attention}")
+
+
+@autopilot_app.command("pause")
+def autopilot_pause(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Stop starting new videos and renders (publishing of finished videos also waits)."""
+    _setup(config, data, publishers=False).set_autopilot_paused(True, by="cli")
+    console.print("Autopilot paused. `vw autopilot resume` to continue.")
+
+
+@autopilot_app.command("resume")
+def autopilot_resume(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Continue automatic production."""
+    _setup(config, data, publishers=False).set_autopilot_paused(False, by="cli")
+    console.print("Autopilot resumed.")
 
 
 @app.command("auth-youtube")

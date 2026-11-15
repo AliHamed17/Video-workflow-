@@ -143,6 +143,18 @@ approval:
   mode: manual          # manual: stop at "reviewed" until `vw approve <id>`; auto: approve if score >= auto_min_score
   auto_min_score: 8.5
 
+autopilot:
+  # Fully automatic days: today's viral formats → our videos → rendered → QA → published, no clicks.
+  # Quality gates stay on; anything that fails them waits for you and another idea is tried.
+  enabled: false
+  videos_per_day: 1
+  max_attempts_per_day: 3     # ideas tried per day (some fail the critic or QA)
+  source: viral               # viral remixes (falls back to the content calendar) | calendar
+  min_script_score: 7.5       # critic score to approve a script without you (fact-check must pass too)
+  approve_finals: true        # render the final automatically when the preview passes QA
+  min_visual_score: 7.0
+  max_credits_per_day: 500    # hard stop: no render starts past this daily Higgsfield spend
+
 publish:
   platforms: [youtube, instagram, tiktok]
   ai_disclosure: true   # label posts as AI-generated where the platform supports it
@@ -185,6 +197,8 @@ viral:
   max_duration_s: 180
   require_ai: true          # only videos with AI-generation signals (tags, tools named, AI communities)
   stay_in_niche: false      # true: adapt every concept to the channel's niche
+  closeness: format         # format: borrow the formula for our own subject | close: same genre, setting,
+                            # beats, style and motion, like a new episode — with our own characters and script
   analyze_top: 8
   youtube:
     queries: ["AI generated video", "veo 3", "kling ai", "ai animation shorts", "ai asmr"]

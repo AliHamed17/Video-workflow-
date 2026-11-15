@@ -5,6 +5,7 @@ it (through MCP), and the finished vertical videos are published to YouTube Shor
 Reels and TikTok, all at the same moment.**
 
 ```bash
+vw autopilot run # today's video: viral format → script → Higgsfield → QA → posted
 vw selftest     # every part working together, offline, in ~15 seconds (no keys, no credits)
 vw serve        # the monitoring dashboard: follow every video, every step, live
 vw cloud deploy # the same dashboard on Vercel: watch and approve from your phone, anywhere
@@ -29,6 +30,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Monitoring** | Every step, LLM call, render, check and upload is traced: live activity feed, workflow map with per-step health, item timelines, metrics, alerts (stuck items, failures, daemon down, low credits, budget), Prometheus/JSON endpoints, `vw logs -f` |
 | **Learns** | Pulls views/likes/comments back from every platform and feeds the winners into the next ideas |
 | **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
+| **Autopilot** | A new video every day with no clicks: viral format → our version → script → Higgsfield → QA → posted to all three platforms. Quality gates stay on, spending is capped, and one ⏸ button (dashboard, Telegram, CLI) stops everything ([docs/AUTOPILOT.md](docs/AUTOPILOT.md)) |
 | **Viral scout** | Every day: the best-performing AI-generated shorts (YouTube, TikTok, Reels, Reddit, or links you paste), why each works (hook, format, visual, motion), and our own **original** version of the strongest formats, straight into the pipeline ([docs/VIRAL.md](docs/VIRAL.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
@@ -104,8 +106,10 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 
 | Command | What it does |
 |---|---|
-| `vw selftest [--full-hd]` | Run every component together offline and report each step (19 checks) |
+| `vw selftest [--full-hd]` | Run every component together offline and report each step (20 checks) |
 | `vw cloud deploy [--skip-secrets]` · `vw cloud sync` · `vw cloud status` | Deploy the cloud dashboard to Vercel · push state + apply cloud commands now · check the connection |
+| `vw autopilot run\|status\|pause\|resume` | Fully automatic daily production and its stop button |
+| `vw cloud restore` | Continue on a fresh machine (state, today's spend, rotated tokens) |
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
 | `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
 | `vw logs [id] [-f]` · `vw alerts` · `vw quality <id>` | Step-by-step trace (live with `-f`) · current problems · an item's quality report |
@@ -159,14 +163,14 @@ src/video_workflow/
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
+docs/            AUTOPILOT · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).
 
 ## Status
 
-Phases 0–3 are built and tested: 94 tests, plus `vw selftest` (19 end-to-end checks) in CI
+Phases 0–3 are built and tested: 101 tests, plus `vw selftest` (20 end-to-end checks) in CI
 and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
+import math
 import shutil
 import threading
 from collections.abc import Callable, Iterable
@@ -71,6 +72,7 @@ STOP_STAGES = {Stage.PUBLISHED, Stage.REJECTED, Stage.FAILED}
 ORDER = [Stage.IDEA, Stage.REVIEWED, Stage.APPROVED, Stage.AWAITING_RENDER,
          Stage.RENDERED, Stage.EDITED, Stage.PUBLISHED]
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
+BUDGET_HOLDS = ("Daily credit cap reached", "Not enough Higgsfield credits")
 
 
 @dataclass
@@ -266,6 +268,9 @@ class Pipeline:
         auto = self.config.approval
         if auto.mode == "auto" and item.attention is None and item.review.score >= auto.auto_min_score:
             return self.approve(item, note="auto-approved")
+        if (self.autopilot_active and item.attention is None
+                and item.review.score >= self.config.autopilot.min_script_score):
+            return self.approve(item, note=f"autopilot: critic {item.review.score:.1f}/10, fact-check passed")
         notice = needs_approval(item)
         notice.lines.insert(2, self._balance_line(len(item.render_plan.shots)))
         self.notify(notice)
@@ -333,6 +338,17 @@ class Pipeline:
         plan = self._missing_plan(item)
         if not plan.shots:
             return self._maybe_complete_render(item)
+        blocked = self._budget_block(item, plan) if self.autopilot_active else None
+        if not blocked and item.attention and item.attention.startswith(BUDGET_HOLDS):
+            item.attention = None  # the cap reset / credits were topped up
+        if blocked:
+            if item.attention != blocked:
+                item.attention = blocked
+                self.store.save(item)
+                self.tracer.event("autopilot.budget", "warn", item.id, blocked)
+                self.notify(Notice(kind="alert", title=f"Autopilot paused a render: {item.idea.title}",
+                                   lines=[blocked], item_id=item.id))
+            return item
         with self.tracer.span(f"render.{item.render_phase}", item.id, generator=self.generator.name,
                               shots=len(plan.shots)) as span:
             result = self.generator.render(item, plan, self.store.item_dir(item.id) / "clips")
@@ -511,6 +527,15 @@ class Pipeline:
 
         if phase == "draft":
             hf = self.config.video.higgsfield
+            ok, why = self._preview_passes(item)
+            if self.autopilot_active and self.config.autopilot.approve_finals and ok:
+                self.notify(Notice(kind="info", title=f"Preview passed QA: {item.idea.title}", item_id=item.id,
+                                   image=item.thumbnail,
+                                   lines=[why, f"Autopilot renders the final (≈{hf.estimate(len(item.script.shots), 'final'):.0f} credits)."]))
+                return self.approve_final(item, note=f"autopilot: {why}")
+            if self.autopilot_active and self.config.autopilot.approve_finals:
+                item.attention = f"Autopilot held the preview for you: {why}"
+                self.store.save(item)
             self.notify(Notice(
                 kind="preview_ready", title=f"Preview ready: {item.idea.title}", item_id=item.id,
                 image=item.thumbnail, actions=True, action="final",
@@ -681,11 +706,12 @@ class Pipeline:
         with self.tracer.span("viral.analyze", None, videos=len(pool)) as span, usage.tracking(shared):
             try:
                 analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche,
-                                                      thumbs or None)
+                                                      thumbs or None, cfg.closeness)
             except LLMError:
                 if not thumbs:
                     raise
-                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche)
+                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche,
+                                                      closeness=cfg.closeness)
             concepts = [c for c in analysis.concepts
                         if 0 <= c.source_index < len(pool) and c.replicable and c.is_ai_generated]
             concepts.sort(key=lambda c: c.our_version.predicted_score, reverse=True)
@@ -722,6 +748,117 @@ class Pipeline:
         self.store.kv_set("viral_used", sorted(used)[-1000:])
         self.store.kv_set("viral_last", report)
         return items
+
+    # ---- autopilot ------------------------------------------------------------------------
+    @property
+    def autopilot_active(self) -> bool:
+        return self.config.autopilot.enabled and not self.store.kv_get("autopilot_paused")
+
+    def set_autopilot_paused(self, paused: bool, by: str = "you") -> None:
+        self.store.kv_set("autopilot_paused", {"at": self.clock().isoformat(), "by": by} if paused else None)
+        self.tracer.event("autopilot.pause" if paused else "autopilot.resume", "ok", detail=f"by {by}")
+
+    def credits_spent_today(self) -> float:
+        today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
+        tz = ZoneInfo(self.config.publish.schedule.timezone)
+        total = 0.0
+        for e in self.store.events(step_prefix="render", limit=2000):
+            try:
+                day = datetime.fromisoformat(e["at"]).astimezone(tz).date().isoformat()
+            except (TypeError, ValueError):
+                continue
+            if day == today:
+                total += e["attrs"].get("credits", 0) or 0
+        return total
+
+    def _render_estimate(self, phase: str, shots: int) -> float:
+        hf = self.config.video.higgsfield
+        estimate = hf.estimate(shots, phase)
+        if hf.keyframes and (phase == "draft" or not hf.draft_preview):  # keyframes come with the first pass
+            estimate += shots * hf.unit_costs.keyframe
+        return estimate
+
+    def _budget_block(self, item: ContentItem, plan: RenderPlan) -> str | None:
+        """Why the autopilot must not start this render (daily cap or balance), else None."""
+        estimate = self._render_estimate(item.render_phase, len(plan.shots))
+        spent = self.credits_spent_today()
+        cap = self.config.autopilot.max_credits_per_day
+        if spent + estimate > cap:
+            return (f"Daily credit cap reached: {spent:.0f} spent today + ≈{estimate:.0f} for this "
+                    f"{item.render_phase} render > {cap:.0f} (autopilot.max_credits_per_day). It renders tomorrow.")
+        balance = self.store.kv_get("higgsfield_balance") or {}
+        if balance.get("credits") is not None and balance["credits"] < estimate:
+            return (f"Not enough Higgsfield credits: balance {balance['credits']:.0f}, this "
+                    f"{item.render_phase} render needs ≈{estimate:.0f}. Top up and it continues.")
+        return None
+
+    def _preview_passes(self, item: ContentItem) -> tuple[bool, str]:
+        """Is the low-res preview good enough to pay for the final without a human?"""
+        if item.attention:
+            return False, item.attention
+        if item.quality and item.quality.failed:
+            return False, "technical QA failed: " + ", ".join(c.name for c in item.quality.failed)
+        if item.shot_reviews:
+            avg = sum(r.qa.score for r in item.shot_reviews) / len(item.shot_reviews)
+            if avg < self.config.autopilot.min_visual_score:
+                return False, f"visual QA average {avg:.1f} < {self.config.autopilot.min_visual_score:.1f}"
+            return True, f"visual QA {avg:.1f}/10, technical QA {item.quality.score:.0f}/100"
+        return True, f"technical QA {item.quality.score:.0f}/100 (no visual QA model)"
+
+    def autopilot_fill(self) -> dict:
+        """Start today's videos: viral remixes (or calendar ideas) until the daily target is met."""
+        ap = self.config.autopilot
+        report = {"active": self.autopilot_active, "pitched": 0, "good_today": 0, "attempts_today": 0}
+        if not self.autopilot_active:
+            return report
+        tz = ZoneInfo(self.config.publish.schedule.timezone)
+        today = self.clock().astimezone(tz).date()
+        made = [i for i in self.store.list() if i.created_at.astimezone(tz).date() == today]
+        good = [i for i in made if i.stage not in (Stage.REJECTED, Stage.FAILED) and i.attention is None]
+        report["good_today"], report["attempts_today"] = len(good), len(made)
+        need = min(ap.videos_per_day - len(good), ap.max_attempts_per_day - len(made))
+        if need <= 0:
+            return report
+        # Don't write scripts that can't be rendered: check today's cap and the balance first.
+        hf = self.config.video.higgsfield
+        shots = max(1, math.ceil(self.config.video.target_duration_s / hf.shot_duration_s))
+        first = self._render_estimate("draft" if hf.draft_preview else "final", shots)
+        spent, cap = self.credits_spent_today(), ap.max_credits_per_day
+        balance = (self.store.kv_get("higgsfield_balance") or {}).get("credits")
+        held = [i for i in self.store.list() if i.attention and i.attention.startswith(BUDGET_HOLDS)
+                and i.stage not in STOP_STAGES]
+        if spent + first > cap or (balance is not None and balance < first) or held:
+            report["skipped"] = (f"budget: spent {spent:.0f}/{cap:.0f} today, balance "
+                                 f"{'?' if balance is None else f'{balance:.0f}'}, a new video needs ≈{first:.0f} to start"
+                                 + (f", {len(held)} video(s) already waiting for credits" if held else ""))
+            self.tracer.event("autopilot.fill", "skipped", detail=report["skipped"])
+            return report
+        with self.tracer.span("autopilot.fill", None, need=need) as span:
+            items: list[ContentItem] = []
+            if ap.source == "viral":
+                try:
+                    rescout = self.store.kv_get("last_viral") != today.isoformat()
+                    items = self.viral_remix(need, rescout=rescout)
+                    if rescout:
+                        self.store.kv_set("last_viral", today.isoformat())
+                except Exception as exc:  # no sources / analyst down: fall back to the calendar
+                    log.warning("autopilot viral remix failed: %s", exc)
+            if len(items) < need:
+                items += self.ideate(need - len(items))
+            report["pitched"] = len(items)
+            span.detail = (f"{len(items)} new idea(s) for today ({len(good)} good of {len(made)} tried so far; "
+                           f"target {ap.videos_per_day})")
+        return report
+
+    def autopilot_day(self) -> dict:
+        """One full automatic cycle: fill today's ideas, then push everything as far as it goes."""
+        report = self.autopilot_fill()
+        if report["active"]:
+            moved = self.run()
+            report["published"] = sum(1 for i in moved if i.stage == Stage.PUBLISHED)
+            report["waiting"] = sum(1 for i in moved if i.stage == Stage.AWAITING_RENDER)
+            report["held"] = sum(1 for i in moved if i.attention and i.stage not in STOP_STAGES)
+        return report
 
     def _assign_slot(self, item: ContentItem) -> None:
         with self._slot_lock:
@@ -879,6 +1016,8 @@ class Pipeline:
                 elif item.stage == Stage.EDITED:
                     if item.awaiting_final_approval or not self.publishers:
                         break
+                    if self.config.autopilot.enabled and not self.autopilot_active:
+                        break  # autopilot paused: the stop button also holds posting
                     item = self.publish(item)
             except Exception as exc:
                 log.exception("item %s failed at %s", item.id, before)

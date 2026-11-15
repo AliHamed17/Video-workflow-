@@ -168,6 +168,23 @@ class Store:
                  detail[:2000], json.dumps(attrs or {}, default=str)))
             return int(cur.lastrowid)
 
+    def import_events(self, events: list[dict], next_id_after: int = 0) -> int:
+        """Bring in events from another worker (keeping their ids) and make new ids continue after
+        `next_id_after`, so this worker's events never collide with ones the cloud already has."""
+        with self._conn() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO events (id, at, item_id, step, status, duration_ms, detail, attrs) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(e["id"], e["at"], e.get("item_id"), e["step"], e["status"], e.get("duration_ms"),
+                  e.get("detail") or "", json.dumps(e.get("attrs") or {}, default=str)) for e in events])
+            current = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()
+            floor = max(next_id_after, max((e["id"] for e in events), default=0))
+            if current is None:
+                conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ?)", (floor,))
+            elif current[0] < floor:
+                conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'events'", (floor,))
+        return len(events)
+
     def events(self, after_id: int = 0, item_id: str | None = None, limit: int = 200,
                status: str | None = None, step_prefix: str | None = None,
                since: datetime | None = None, newest_first: bool = True) -> list[dict]:

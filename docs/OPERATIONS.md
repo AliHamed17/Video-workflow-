@@ -2,6 +2,9 @@
 
 ## The daily loop
 
+With the autopilot on ([AUTOPILOT.md](AUTOPILOT.md)) there is nothing to approve: the loop below
+runs without clicks, inside the spend cap, and the ⏸ button / `/pause` stops it.
+
 ```bash
 vw daemon            # or: docker compose up -d
 ```
@@ -46,7 +49,8 @@ Only one daemon can run per `data/` directory (file lock). The dashboard, the bo
 3. Add `telegram` to `notify.channels`. `vw doctor --live` should show `@your_bot`.
 
 The bot obeys only that chat. Commands: `/list`, `/status <id>`, `/approve <id>`,
-`/final <id>`, `/reject <id>`, `/retry <id>`, `/alerts`, `/ideas [n] [topic]`, `/digest`.
+`/final <id>`, `/reject <id>`, `/retry <id>`, `/alerts`, `/ideas [n] [topic]`, `/digest`,
+`/pause`, `/resume` (the autopilot's stop button).
 
 ## Monitoring dashboard
 

@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 
 HELP = ("Commands:\n/list — items in progress\n/status <id>\n/approve <id>\n/final <id> — render the full-res final\n"
         "/reject <id>\n/retry <id>\n/alerts\n/plan — the content calendar\n"
-        "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n/digest — summary now")
+        "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n/digest — summary now\n"
+        "/pause · /resume — stop or restart the autopilot (nothing new is made or posted while paused)")
 
 
 class TelegramBot:
@@ -112,6 +113,13 @@ class TelegramBot:
                      or "No plan yet — open the Calendar in the dashboard and press 'Plan the next 7 days'.")
         elif command == "/digest":
             self.say(self.pipeline.digest().plain())
+        elif command in ("/pause", "/resume"):
+            if not self.pipeline.config.autopilot.enabled:
+                self.say("The autopilot is off (autopilot.enabled: false in the channel config).")
+            else:
+                self.pipeline.set_autopilot_paused(command == "/pause", by="telegram")
+                self.say("⏸ Autopilot paused: no new videos, renders or posts until /resume."
+                         if command == "/pause" else "▶️ Autopilot resumed.")
         else:
             self.say(HELP)
 

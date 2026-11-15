@@ -100,6 +100,10 @@ def status_strip(st: dict) -> str:
     d = st["daemon"]
     daemon_state = {"running": "ok", "stopped": "bad"}.get(d["state"], "")
     parts = [chip(f"Daemon {e(d['state'])} · last tick {e(d['last'])}", daemon_state)]
+    ap = st.get("autopilot") or {}
+    if ap.get("enabled"):
+        label = "Autopilot paused" if ap.get("paused") else f"Autopilot on · {ap['per_day']}/day"
+        parts.insert(0, f'<a href="/">{chip(label, "warn" if ap.get("paused") else "ok")}</a>')
     bal = st.get("balance")
     if bal and bal.get("credits") is not None:
         enough = st["videos_affordable"] and st["videos_affordable"] >= 1

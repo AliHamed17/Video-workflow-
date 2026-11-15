@@ -34,11 +34,18 @@ class ViralAnalyst(Agent):
     task = "viral"
 
     def analyze(self, videos: list[dict], count: int, stay_in_niche: bool,
-                thumbnails: list[tuple[int, Path]] | None = None) -> ViralAnalysis:
+                thumbnails: list[tuple[int, Path]] | None = None, closeness: str = "format") -> ViralAnalysis:
         rule = ("Adapt every concept to OUR channel's niche and content pillars."
                 if stay_in_niche else
                 "You may keep a concept's own subject matter when it is stronger than our niche — "
                 "the channel is testing viral formats — but stay within our voice and never touch banned topics.")
+        if closeness == "close":
+            rule += ("\nSTAY CLOSE: our version should feel like a new episode of the same show — the same "
+                     "genre, the same kind of subject and setting, the same beats, pacing, camera moves and "
+                     "visual style. What must be new: the characters (original designs and names), the "
+                     "script and jokes, the specific situations and facts. Never reuse the original's footage, "
+                     "audio, characters, names, catchphrases, logos or on-screen text; platforms bury "
+                     "re-uploads and near-copies as unoriginal content.")
         prompt = load_prompt("viral").substitute(
             videos="\n".join(describe(i, v) for i, v in enumerate(videos)),
             niche_rule=rule, count=count)

@@ -62,7 +62,8 @@ def build_publishers(config: AppConfig, secrets: Secrets, data_dir: Path) -> dic
     if "instagram" in wanted and secrets.instagram_access_token and secrets.instagram_user_id:
         pubs["instagram"] = InstagramPublisher(
             _s(secrets.instagram_access_token), secrets.instagram_user_id, pc.instagram,
-            secrets.instagram_graph_host, secrets.instagram_graph_version)
+            secrets.instagram_graph_host, secrets.instagram_graph_version,
+            token_path=data_dir / "instagram.token.json")
     if "tiktok" in wanted and (secrets.tiktok_access_token or secrets.tiktok_refresh_token):
         pubs["tiktok"] = TikTokPublisher(
             secrets.tiktok_client_key, _s(secrets.tiktok_client_secret),

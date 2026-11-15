@@ -41,6 +41,14 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 1.9: Autopilot ✅
+
+- [x] Daily production with no clicks: viral remix → script → render → QA → publish
+- [x] Spend cap + balance check before every render, pause/resume everywhere (also holds posting)
+- [x] Fresh machines continue where the last stopped (`vw cloud restore`, encrypted token vault)
+- [x] Instagram token auto-refresh; CLI agents retry a silent crash
+- [ ] YouTube API audit + TikTok app audit → public posting on both without a tap
+
 ## Phase 1.8: Learn from what's viral ✅
 
 - [x] Daily viral scout: YouTube Data API, Reddit, TikTok/Instagram (Apify or Graph), links you paste

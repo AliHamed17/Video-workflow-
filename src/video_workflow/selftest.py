@@ -92,6 +92,7 @@ def build(workdir: Path, config: AppConfig, width: int, height: int):
     config.content.hook_variants, config.content.fact_check, config.content.idea_overgenerate = 3, True, 1
     config.content.languages = ["es", "ar"]
     config.approval.mode = "manual"
+    config.autopilot.enabled = False   # the autopilot step switches it on in its own sandbox
     config.publish.platforms = ["youtube", "instagram", "tiktok"]
     config.publish.schedule.slots = []
     config.publish.tiktok.mode = "direct"
@@ -143,7 +144,8 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         raise RuntimeError("selftest needs ffmpeg")
     workdir = Path(workdir or tempfile.mkdtemp(prefix="vw-selftest-"))
     workdir.mkdir(parents=True, exist_ok=True)
-    pipe, platforms, memory = build(workdir, config or AppConfig.load(config_path), width, height)
+    cfg = config or AppConfig.load(config_path)
+    pipe, platforms, memory = build(workdir, cfg, width, height)
     store = pipe.store
     results: list[StepResult] = []
     state: dict = {}
@@ -338,6 +340,21 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
                 f"'{top['title'][:40]}' {short(top.get('views'))} views → our version '{item.idea.title[:48]}' "
                 f"(format: {item.inspiration.format}) scripted + directed")
 
+    def autopilot():
+        auto, _, _ = build(workdir / "autopilot", cfg, width, height)
+        auto.config.content.languages = []
+        auto.config.viral.enabled = True
+        auto.secrets = Secrets(_env_file=None, youtube_api_key=SecretStr("selftest"))
+        auto.config.autopilot.enabled, auto.config.autopilot.max_credits_per_day = True, 5000
+        report = auto.autopilot_day()
+        done = [i for i in auto.store.list() if i.stage == Stage.PUBLISHED]
+        assert report.get("published") == 1 and done, report
+        assert done[0].published_platforms() == {"youtube", "instagram", "tiktok"}
+        auto.set_autopilot_paused(True, by="selftest")
+        assert not auto.autopilot_active
+        return (f"viral remix '{done[0].idea.title[:40]}' scripted, approved, drafted, QA'd, final-rendered and "
+                "posted to YouTube + Instagram + TikTok with no clicks; pause stops it")
+
     def cloud():
         from .cloud.app import make_cloud_handler
         from .cloud.sync import CloudClient, CloudSync
@@ -392,6 +409,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Content calendar", calendar),
         ("Ideas from a source article", source_ideas),
         ("Viral AI videos → our own version", viral_remix),
+        ("Autopilot: a whole day with no clicks", autopilot),
         ("Cloud control room (sync + remote approval)", cloud),
         ("Every step traced", trace),
     ]:

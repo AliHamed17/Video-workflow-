@@ -34,6 +34,8 @@ may have another name — use whichever Higgsfield tools are available: `balance
 6. **Continue:** `vw run --until edited`. A `draft` phase ends with a low-res preview the user
    approves in the dashboard or Telegram ("Render final"), which queues the `final` phase:
    run this skill again for it. After the final phase, `vw run` publishes on schedule.
+   With the autopilot on (`autopilot.enabled`), continue with `vw autopilot run` instead: it
+   approves a passing preview and publishes by itself (see `.claude/skills/autopilot/SKILL.md`).
 7. **Report** credits spent, the new balance, and where to watch the result (`vw serve` → item page).
 
 ## Notes
