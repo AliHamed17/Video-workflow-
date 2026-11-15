@@ -637,7 +637,7 @@ class Pipeline:
             video = viral.manual_video(url, title, notes, views, likes, comments, self.secrets, self.http,
                                        self.clock()).model_dump(mode="json")
             video["manual"] = True
-            report = self.store.kv_get("viral_last") or {"at": self.clock().isoformat(), "videos": [], "found": 0,
+            report = self.store.kv_get("viral_last") or {"at": None, "videos": [], "found": 0,
                                                          "sources": {}, "errors": {}, "concepts": {}}
             key = f"{video['platform']}:{video['id']}"
             report["videos"] = [video] + [v for v in report["videos"] if f"{v['platform']}:{v['id']}" != key]

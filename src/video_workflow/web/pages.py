@@ -520,7 +520,7 @@ def render_viral(pipeline, st: dict, flash: str = "") -> str:
     cfg = pipeline.config.viral
     sources = " · ".join(f"{e(k)}: {e(str(v))}" for k, v in report.get("sources", {}).items()) or "not run yet"
     errors = "".join(f"<p class=bad>{e(k)}: {e(v)}</p>" for k, v in report.get("errors", {}).items())
-    when = report.get("at", "")[:16].replace("T", " ")
+    when = (report.get("at") or "")[:16].replace("T", " ") if report.get("sources") else ""
     head = (f"<p class=meta>The most-watched AI-generated shorts of the last {cfg.lookback_days} days, ranked by "
             "reach, speed (views per hour) and engagement. We keep the <b>format</b> — the hook, the visual "
             "mechanic, the motion — and make an original video of our own. "
@@ -545,7 +545,8 @@ def render_viral(pipeline, st: dict, flash: str = "") -> str:
             f"❤️ {short(v.get('likes'))}" if v.get("likes") is not None else "",
             f"💬 {short(v.get('comments'))}" if v.get("comments") is not None else "",
             f"↗ {short(v.get('shares'))}" if v.get("shares") is not None else "",
-            f"⚡ {short(v.get('views_per_hour'))}/h" if v.get("views_per_hour") else "") if x)
+            f"⚡ {short(v.get('views_per_hour'))}/h" if v.get("views_per_hour") and v.get("published_at") else "")
+            if x)
         concept = ""
         if c:
             concept = (f"<div class=concept><b>{e(c['format'])}</b><div>{e(c['why_it_works'])}</div>"
