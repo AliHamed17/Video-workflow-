@@ -1016,8 +1016,8 @@ class Pipeline:
                 elif item.stage == Stage.EDITED:
                     if item.awaiting_final_approval or not self.publishers:
                         break
-                    if self.config.autopilot.enabled and not self.autopilot_active:
-                        break  # autopilot paused: the stop button also holds posting
+                    if self.config.autopilot.enabled and (not self.autopilot_active or item.attention):
+                        break  # paused (the stop button also holds posting), or it needs a human first
                     item = self.publish(item)
             except Exception as exc:
                 log.exception("item %s failed at %s", item.id, before)

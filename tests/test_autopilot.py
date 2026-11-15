@@ -105,6 +105,13 @@ def test_pause_stops_everything_including_posting(tmp_path):
     pipe.run()
     assert pipe.store.get(item.id).stage == Stage.EDITED                     # ... but nothing is posted
     say("/resume")
+    flagged = pipe.store.get(item.id)
+    flagged.attention = "Restored on a new machine without 1 clip file(s)"
+    pipe.store.save(flagged)
+    pipe.run()
+    assert pipe.store.get(item.id).stage == Stage.EDITED                     # never posts with a note open
+    flagged.attention = None
+    pipe.store.save(flagged)
     pipe.run()
     assert pipe.store.get(item.id).stage == Stage.PUBLISHED
 
