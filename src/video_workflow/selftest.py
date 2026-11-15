@@ -24,6 +24,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import httpx
+from pydantic import SecretStr
 
 from .config import AppConfig, Secrets, TrendsConfig
 from .daemon import Daemon
@@ -49,7 +50,7 @@ EXPECTED_STEPS = [
     "edit.voice", "edit.assemble", "qa.technical", "gate.final", "render.final", "publish.youtube",
     "publish.instagram", "publish.tiktok", "stats.refresh", "daemon.tick", "llm.scripting",
     "notify.needs_approval", "notify.preview_ready", "notify.published", "localize.es", "localize.ar",
-    "plan", "source.fetch", "cloud.sync", "cloud.approve",
+    "plan", "source.fetch", "cloud.sync", "cloud.approve", "viral.scout", "viral.analyze",
 ]
 
 
@@ -129,7 +130,9 @@ def build(workdir: Path, config: AppConfig, width: int, height: int):
         publishers=publishers, notifier=notifier,
         voice=FliteVoice() if _has_flite() else ToneVoice(),
         http=http,
+        secrets=Secrets(_env_file=None, youtube_api_key=SecretStr("selftest")),
     )
+    config.viral.enabled = True
     return pipe, platforms, memory
 
 
@@ -320,6 +323,21 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         state["source_item"] = item
         return f"idea pitched from the article: '{item.idea.title}'"
 
+    def viral_remix():
+        from .viral import short
+
+        report = pipe.viral_scout()
+        assert report["videos"] and not report["errors"].get("youtube"), report["errors"]
+        top = report["videos"][0]
+        items = pipe.viral_remix(1)
+        assert items and items[0].inspiration, "no remix"
+        item = pipe.develop(items[0])
+        assert item.stage == Stage.REVIEWED and item.render_plan
+        found = ", ".join(f"{k} {v}" for k, v in report["sources"].items() if isinstance(v, int))
+        return (f"{len(report['videos'])} AI shorts ranked ({found}); #1 {top['platform']} "
+                f"'{top['title'][:40]}' {short(top.get('views'))} views → our version '{item.idea.title[:48]}' "
+                f"(format: {item.inspiration.format}) scripted + directed")
+
     def cloud():
         from .cloud.app import make_cloud_handler
         from .cloud.sync import CloudClient, CloudSync
@@ -373,6 +391,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Publish kit", publish_kit),
         ("Content calendar", calendar),
         ("Ideas from a source article", source_ideas),
+        ("Viral AI videos → our own version", viral_remix),
         ("Cloud control room (sync + remote approval)", cloud),
         ("Every step traced", trace),
     ]:

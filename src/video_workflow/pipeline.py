@@ -39,6 +39,7 @@ from .agents import (
     Scriptwriter,
     Translator,
     TrendScout,
+    ViralAnalyst,
     VisualQA,
 )
 from .agents.fact_checker import summarize as summarize_fact_check
@@ -85,6 +86,7 @@ class Pipeline:
     http: httpx.Client | None = None         # for trend sources
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     tracer: Tracer | None = None
+    secrets: Any = None                      # Secrets, for sources that need keys (viral scout)
 
     def __post_init__(self) -> None:
         self.scout = TrendScout(self.config, self.router)
@@ -97,6 +99,7 @@ class Pipeline:
         self.visual_qa = VisualQA(self.config, self.router)
         self.translator = Translator(self.config, self.router)
         self.planner = Planner(self.config, self.router)
+        self.viral_analyst = ViralAnalyst(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -203,11 +206,13 @@ class Pipeline:
                 self.store.save(item)
 
             script, review, corrections = None, None, ""
+            brief = item.inspiration.brief() if item.inspiration else ""
             rounds = self.config.review.max_revisions + 1
             passed = False
             for round_ in range(rounds):
                 with self.tracer.span("develop.write", item.id, round=round_ + 1) as span:
-                    script = self.writer.write(item.idea, previous=script, review=review, corrections=corrections)
+                    script = self.writer.write(item.idea, previous=script, review=review, corrections=corrections,
+                                               inspiration=brief)
                     span.detail = f"draft {round_ + 1}: {len(script.shots)} shots"
                 check = None
                 if cc.fact_check:
@@ -221,7 +226,7 @@ class Pipeline:
                     item.fact_check = check
                     corrections = summarize_fact_check(check) if check.overall == "fix" else ""
                 with self.tracer.span("develop.review", item.id, round=round_ + 1) as span:
-                    review = self.critic.review(item.idea, script, check)
+                    review = self.critic.review(item.idea, script, check, inspiration=brief)
                     span.detail = f"{review.verdict} {review.score:.1f}/10 (hook {review.hook_strength:.0f})"
                     span.status = "ok" if review.verdict == "approve" else "warn"
                 item.script, item.review, item.revisions = script, review, round_
@@ -250,7 +255,7 @@ class Pipeline:
                 item.attention = f"The critic still wanted changes after {rounds} drafts ({why}). Your call."
 
             with self.tracer.span("develop.direct", item.id) as span:
-                item.render_plan = self.director.plan(item.script)
+                item.render_plan = self.director.plan(item.script, inspiration=brief)
                 span.detail = f"{len(item.render_plan.shots)} Higgsfield prompts"
             with self.tracer.span("develop.package", item.id) as span:
                 item.packaging = self.packager.package(item.script)
@@ -596,6 +601,127 @@ class Pipeline:
     def todays_plan(self) -> dict | None:
         today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
         return next((d for d in self.store.kv_get("content_plan", []) if d["date"] == today), None)
+
+    # ---- viral scout ----------------------------------------------------------------------
+    def viral_scout(self) -> dict:
+        """Pull today's best-performing AI shorts from every configured source and rank them."""
+        from . import viral
+        from .config import Secrets
+
+        with self.tracer.span("viral.scout", None) as span:
+            report = viral.scout(self.config.viral, self.secrets or Secrets(), self.http, self.clock())
+            previous = self.store.kv_get("viral_last") or {}
+            fresh = {f"{v['platform']}:{v['id']}" for v in report["videos"]}
+            manual = [v for v in previous.get("videos", []) if v.get("manual")
+                      and f"{v['platform']}:{v['id']}" not in fresh][:20]   # videos you added stay listed
+            report["videos"] = manual + report["videos"]
+            concepts = previous.get("concepts", {})  # keep analyses of videos we already studied
+            report["concepts"] = {k: c for k, c in concepts.items()
+                                  if k in {f"{v['platform']}:{v['id']}" for v in report["videos"]}}
+            self.store.kv_set("viral_last", report)
+            parts = [f"{name}: {n}" for name, n in report["sources"].items()]
+            span.detail = f"{len(report['videos'])} AI videos kept of {report['found']} found · " + ", ".join(parts)
+            if report["errors"]:
+                span.status = "warn" if report["videos"] else "error"
+                span.detail += " · errors: " + "; ".join(f"{k}: {v[:120]}" for k, v in report["errors"].items())
+            elif not report["videos"]:
+                span.status = "warn"
+        return report
+
+    def viral_add(self, url: str, title: str = "", notes: str = "", views: int | None = None,
+                  likes: int | None = None, comments: int | None = None) -> dict:
+        """Add a video you found yourself to the viral list (so it can be studied and remixed)."""
+        from . import viral
+
+        with self.tracer.span("viral.add", None, url=url) as span:
+            video = viral.manual_video(url, title, notes, views, likes, comments, self.secrets, self.http,
+                                       self.clock()).model_dump(mode="json")
+            video["manual"] = True
+            report = self.store.kv_get("viral_last") or {"at": self.clock().isoformat(), "videos": [], "found": 0,
+                                                         "sources": {}, "errors": {}, "concepts": {}}
+            key = f"{video['platform']}:{video['id']}"
+            report["videos"] = [video] + [v for v in report["videos"] if f"{v['platform']}:{v['id']}" != key]
+            self.store.kv_set("viral_last", report)
+            span.detail = f"{key} · {video['title'][:80]}"
+        return video
+
+    def viral_remix(self, count: int | None = None, keys: list[str] | None = None,
+                    rescout: bool = False) -> list[ContentItem]:
+        """Study the top viral videos, then pitch our own versions of the strongest concepts.
+
+        `keys` ("youtube:abc123") picks specific videos; otherwise the best ones we haven't used yet.
+        """
+        from . import viral
+        from .models import Inspiration
+
+        cfg = self.config.viral
+        count = cfg.daily_remixes if count is None else count
+        report = self.store.kv_get("viral_last")
+        if rescout or not report:
+            report = self.viral_scout()
+        used = set(self.store.kv_get("viral_used", []))
+        pool = [v for v in report.get("videos", []) if f"{v['platform']}:{v['id']}" not in used]
+        if keys:
+            pool = [v for v in report.get("videos", []) if f"{v['platform']}:{v['id']}" in keys]
+        pool = pool[: max(cfg.analyze_top, len(keys or []))]
+        if not pool or count <= 0:
+            return []
+
+        thumbs: list[tuple[int, Path]] = []
+        thumb_dir = self.store.data_dir / "viral"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        for index, v in enumerate(pool):
+            data = viral.thumbnail_bytes(v, self.http) if self.http else None
+            if data:
+                path = thumb_dir / f"{v['platform']}_{v['id']}.jpg"
+                path.write_bytes(data)
+                thumbs.append((index, path))
+
+        shared = Usage()
+        with self.tracer.span("viral.analyze", None, videos=len(pool)) as span, usage.tracking(shared):
+            try:
+                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche,
+                                                      thumbs or None)
+            except LLMError:
+                if not thumbs:
+                    raise
+                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche)
+            concepts = [c for c in analysis.concepts
+                        if 0 <= c.source_index < len(pool) and c.replicable and c.is_ai_generated]
+            concepts.sort(key=lambda c: c.our_version.predicted_score, reverse=True)
+            span.detail = f"{len(analysis.concepts)} concepts from {len(pool)} videos, {len(concepts)} usable"
+            if not concepts:
+                span.status = "warn"
+
+        saved = report.setdefault("concepts", {})
+        for c in analysis.concepts:
+            if 0 <= c.source_index < len(pool):
+                v = pool[c.source_index]
+                saved[f"{v['platform']}:{v['id']}"] = c.model_dump(mode="json")
+
+        items = []
+        for c in concepts[:count]:
+            v = pool[c.source_index]
+            key = f"{v['platform']}:{v['id']}"
+            item = ContentItem(channel=self.config.channel.name, idea=c.our_version, inspiration=Inspiration(
+                platform=v["platform"], url=v["url"], title=v.get("title", ""), creator=v.get("creator", ""),
+                views=v.get("views"), likes=v.get("likes"), comments=v.get("comments"), format=c.format,
+                why_it_works=c.why_it_works, hook_pattern=c.hook_pattern, visual_mechanic=c.visual_mechanic,
+                motion_notes=c.motion_notes, originality=c.originality))
+            for label, u in shared.llm.items():
+                entry = item.usage.llm.setdefault(label, type(u)())
+                entry.calls += 1
+                entry.input_tokens += u.input_tokens // max(len(concepts[:count]), 1)
+                entry.output_tokens += u.output_tokens // max(len(concepts[:count]), 1)
+            item.move(Stage.IDEA, f"remix of a viral {v['platform']} video ({c.format})")
+            items.append(self.store.save(item))
+            saved[key]["item_id"] = item.id
+            used.add(key)
+            self.tracer.event("idea.pitched", "ok", item.id,
+                              f"{c.our_version.title} · viral format \"{c.format}\" from {v['platform']}")
+        self.store.kv_set("viral_used", sorted(used)[-1000:])
+        self.store.kv_set("viral_last", report)
+        return items
 
     def _assign_slot(self, item: ContentItem) -> None:
         with self._slot_lock:

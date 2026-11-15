@@ -41,6 +41,15 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 1.8: Learn from what's viral ✅
+
+- [x] Daily viral scout: YouTube Data API, Reddit, TikTok/Instagram (Apify or Graph), links you paste
+- [x] AI-video detection + ranking by reach, speed and engagement
+- [x] Viral analyst: format, hook, visual mechanic, motion → our original version, with guardrails
+- [x] The brief steers the writer, critic and director (motion-rich Higgsfield prompts)
+- [ ] Score our published videos against the viral originals (which formats transfer best)
+- [ ] Higgsfield `virality_predictor` on the preview as an extra gate
+
 ## Phase 1: First real video
 
 - [ ] Write the real channel brief in `config/channel.yaml` (niche, voice, pillars, visual style)

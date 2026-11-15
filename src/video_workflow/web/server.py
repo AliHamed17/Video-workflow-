@@ -70,6 +70,25 @@ def run_plan(pipeline, days: int = 7) -> None:
         store.kv_set("planning_running", False)
 
 
+def run_viral(pipeline, args: dict) -> None:
+    """scout | remix (key) | add (url, title, views) — shared by the dashboard and cloud commands."""
+    store = pipeline.store
+    store.kv_set("viral_running", True)
+    try:
+        op = args.get("op", "scout")
+        if op == "scout":
+            pipeline.viral_scout()
+        elif op == "remix":
+            pipeline.viral_remix(1, keys=[args["key"]])
+        elif op == "add":
+            video = pipeline.viral_add(args["url"], args.get("title", ""), views=args.get("views"))
+            pipeline.viral_remix(1, keys=[f"{video['platform']}:{video['id']}"])
+    except Exception:
+        log.exception("viral %s failed", args.get("op"))
+    finally:
+        store.kv_set("viral_running", False)
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -125,6 +144,8 @@ def make_handler(pipeline, token: str | None = None):
                 if path == "/activity":
                     return self._send(200, pages.render_activity(
                         pipeline, data.status(pipeline), q.get("status", [None])[0], q.get("item", [None])[0]).encode())
+                if path == "/viral":
+                    return self._send(200, pages.render_viral(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
                     return self._send(200, pages.render_calendar(pipeline, data.status(pipeline), flash).encode())
                 m = re.fullmatch(r"/item/([0-9a-f]+)/kit", path)
@@ -238,6 +259,27 @@ def make_handler(pipeline, token: str | None = None):
                 about = f" from {url}" if url else f" about {topic}" if topic else ""
                 msg = f"{count} idea(s){about} requested — pitched on the next cycle."
                 return self._redirect(f"/?flash={quote(msg)}")
+            if path in ("/viral/scout", "/viral/remix", "/viral/add"):
+                op = path.rsplit("/", 1)[1]
+                args: dict = {"op": op}
+                if op == "remix":
+                    args["key"] = form.get("key", "")[:200]
+                if op == "add":
+                    url = form.get("url", "").strip()[:500]
+                    if not url.startswith(("http://", "https://")):
+                        return self._redirect(f"/viral?flash={quote('Paste a full https:// link.')}")
+                    views = form.get("views", "").strip()
+                    args.update(url=url, title=form.get("title", "").strip()[:300],
+                                views=int(views) if views.isdigit() else None)
+                if cloud:
+                    store.enqueue("viral", None, args, source="cloud dashboard")
+                    msg = "Sent to your worker — results appear here after its next sync."
+                else:
+                    if not store.kv_get("viral_running"):
+                        _background("viral", lambda: run_viral(pipeline, args))
+                    msg = {"scout": "Scouting…", "remix": "Studying the video and writing our version…",
+                           "add": "Added — studying it and writing our version…"}[op]
+                return self._redirect(f"/viral?flash={quote(msg)}")
             if path == "/plan":
                 if cloud:
                     store.enqueue("plan", None, {"days": 7}, source="cloud dashboard")

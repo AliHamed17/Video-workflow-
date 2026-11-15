@@ -22,7 +22,8 @@ from ..models import ContentItem
 
 log = logging.getLogger(__name__)
 
-SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan")
+SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan",
+           "viral_last", "viral_running")
 MEDIA_ITEMS = 40              # media is kept for the most recent items
 MAX_UPLOAD = 4_300_000        # stay under Vercel's 4.5 MB request limit
 
@@ -138,6 +139,15 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
                              "url": args.get("url") or None})
             store.kv_set("pending_requests", requests)
             return True, f"queued {args.get('count', 1)} idea(s)"
+        if action == "viral":
+            from ..web.server import run_viral
+
+            args = cmd.get("args") or {}
+            if args.get("op") not in ("scout", "remix", "add"):
+                return False, f"unknown viral op {args.get('op')}"
+            run_viral(pipeline, args)
+            last = store.kv_get("viral_last") or {}
+            return True, f"viral {args['op']} done · {len(last.get('videos', []))} videos listed"
         if action == "plan":
             days = pipeline.plan(int((cmd.get("args") or {}).get("days", 7)))
             return True, f"planned through {days[-1]['date'] if days else '?'}"

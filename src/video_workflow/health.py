@@ -214,6 +214,32 @@ def check_trends(config: AppConfig, http: httpx.Client, live: bool) -> list[Chec
             for s in config.trends.sources]
 
 
+def check_viral(config: AppConfig, secrets: Secrets, http: httpx.Client, live: bool) -> list[Check]:
+    from . import viral
+
+    if not config.viral.enabled:
+        return [Check("viral scout", None, "disabled (viral.enabled: false)")]
+    out = []
+    for source, missing in viral.available_sources(config.viral, secrets).items():
+        if missing:
+            out.append(Check(f"viral {source}", None, missing))
+        elif live and source == "youtube":
+            def yt():
+                viral.youtube_details(["jNQXAC9IVRw"], _s(secrets.youtube_api_key), http)
+                return "YouTube Data API key works"
+            out.append(_guard("viral youtube", yt))
+        elif live and source in ("tiktok", "instagram") and secrets.apify_token:
+            def ap():
+                resp = net.send(http, "GET", "https://api.apify.com/v2/users/me",
+                                headers={"Authorization": f"Bearer {_s(secrets.apify_token)}"}, retries=1)
+                resp.raise_for_status()
+                return f"Apify user {resp.json().get('data', {}).get('username', '?')}"
+            out.append(_guard(f"viral {source}", ap))
+        else:
+            out.append(Check(f"viral {source}", True, "configured"))
+    return out
+
+
 def run_checks(config: AppConfig, secrets: Secrets, publishers: dict, live: bool = False,
                http: httpx.Client | None = None, store=None) -> list[Check]:
     http = http or net.default_client()
@@ -229,6 +255,7 @@ def run_checks(config: AppConfig, secrets: Secrets, publishers: dict, live: bool
     checks += check_publishers(publishers, live)
     checks += check_notify(config, secrets, http, live)
     checks += check_trends(config, http, live)
+    checks += check_viral(config, secrets, http, live)
     if store is not None:
         from datetime import UTC, datetime
         store.kv_set("health_last", {"at": datetime.now(UTC).isoformat(), "live": live,

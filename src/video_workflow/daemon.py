@@ -17,12 +17,26 @@ from zoneinfo import ZoneInfo
 from .monitor import scan
 from .notify import Notice
 from .pipeline import STOP_STAGES, Pipeline
+from .viral import short
 
 log = logging.getLogger(__name__)
 
 
 class AlreadyRunning(RuntimeError):
     pass
+
+
+def viral_notice(report: dict, remixes: list) -> Notice:
+    videos = report.get("videos", [])
+    lines = [f"{len(videos)} AI videos trending · sources: "
+             + ", ".join(f"{k} {v}" for k, v in report.get("sources", {}).items())]
+    for v in videos[:3]:
+        lines.append(f"• {v['platform']}: {v.get('title', '')[:70]} — {short(v.get('views'))} views, "
+                     f"{short(v.get('likes'))} likes, {short(v.get('comments'))} comments")
+    for item in remixes:
+        lines.append(f"➜ our version: {item.idea.title} ({item.inspiration.format if item.inspiration else ''})")
+    return Notice(kind="viral", title="Today's viral AI videos", lines=lines,
+                  links=[(v["platform"], v["url"]) for v in videos[:3]])
 
 
 @contextlib.contextmanager
@@ -94,6 +108,14 @@ class Daemon:
         if requests:
             self.store.kv_set("pending_requests", [])
             for req in requests:
+                if req.get("viral") is not None:  # "make our version of this viral video"
+                    try:
+                        report["requested"] += len(self.pipeline.viral_remix(
+                            len(req["viral"].get("keys") or []) or 1, keys=req["viral"].get("keys") or None,
+                            rescout=bool(req["viral"].get("rescout"))))
+                    except Exception as exc:
+                        log.warning("viral request failed: %s", exc)
+                    continue
                 try:
                     report["requested"] += len(self.pipeline.ideate(
                         int(req.get("ideas", 1)), req.get("seeds") or None, source_url=req.get("url")))
@@ -111,6 +133,20 @@ class Daemon:
                 except Exception as exc:
                     log.warning("planning failed: %s", exc)
                 self.store.kv_set("last_plan", today.isoformat())
+
+        # Daily viral scout: today's best AI shorts → our own versions of the strongest formats.
+        vc = self.config.viral
+        if vc.enabled and self._local_now().hour >= vc.hour and self.store.kv_get("last_viral") != today.isoformat():
+            self.store.kv_set("last_viral", today.isoformat())
+            try:
+                unfinished = sum(1 for i in self.store.list() if i.stage not in STOP_STAGES)
+                remixes = self.pipeline.viral_remix(
+                    min(vc.daily_remixes, max(self.config.runtime.max_backlog - unfinished, 0)), rescout=True)
+                report["viral"] = len(remixes)
+                self.pipeline.notify(viral_notice(self.store.kv_get("viral_last") or {}, remixes))
+            except Exception as exc:
+                log.warning("viral scout failed: %s", exc)
+                report["viral"] = "failed"
 
         # 2. Daily idea quota, bounded by the unfinished backlog.
         rt = self.config.runtime

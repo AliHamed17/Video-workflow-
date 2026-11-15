@@ -180,6 +180,21 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     parts.append(_section("Idea", source + f"<p><b>Hook:</b> {e(idea.hook)}</p><p><b>Angle:</b> {e(idea.angle)}</p>"
                  f"<p class=meta>Pillar {e(idea.pillar)} · predicted {idea.predicted_score:.1f}/10 · "
                  f"{e(idea.why_it_will_perform)}</p>"))
+    if item.inspiration:
+        from ..viral import short
+
+        ins = item.inspiration
+        stats = " · ".join(f"{short(n)} {k}" for k, n in (("views", ins.views), ("likes", ins.likes),
+                                                        ("comments", ins.comments)) if n is not None)
+        parts.append(_section("🔥 Inspired by a viral video", (
+            f"<p><a href='{e(ins.url, quote=True)}' target=_blank rel='noopener noreferrer'>{e(ins.title[:140])}</a>"
+            f" <span class=meta>{e(ins.platform)} · {e(ins.creator)}{' · ' + stats if stats else ''}</span></p>"
+            "<table class=copytbl>"
+            + "".join(f"<tr><th>{label}</th><td>{e(val)}</td></tr>" for label, val in (
+                ("Format", ins.format), ("Why it works", ins.why_it_works), ("Hook", ins.hook_pattern),
+                ("Visual", ins.visual_mechanic), ("Motion", ins.motion_notes), ("Ours is original by", ins.originality))
+                      if val)
+            + "</table>")))
     if item.hook_options:
         rows = "".join(f"<tr><td>{'⭐ ' if h.text.strip() == item.idea.hook.strip() else ''}{e(h.text)}</td>"
                        f"<td>{e(h.technique)}</td><td class=num>{h.strength:.0f}</td></tr>" for h in item.hook_options)
@@ -483,3 +498,76 @@ def render_calendar(pipeline, st: dict, flash: str = "") -> str:
             "today's theme), scheduled posts ⏰ and published videos 🚀 — three weeks from this Monday.</p>"
             + button + f"<div class=cal>{''.join(cells)}</div>")
     return page("Calendar", body, st, "/calendar", every_ms=3000 if planning else 5000)
+
+
+def _age(published: str | None, now: datetime) -> str:
+    if not published:
+        return ""
+    try:
+        hours = (now - datetime.fromisoformat(published)).total_seconds() / 3600
+    except ValueError:
+        return ""
+    return f"{hours:.0f}h ago" if hours < 48 else f"{hours / 24:.0f}d ago"
+
+
+def render_viral(pipeline, st: dict, flash: str = "") -> str:
+    from ..viral import short
+
+    now = datetime.now(UTC)
+    report = pipeline.store.kv_get("viral_last") or {}
+    concepts = report.get("concepts", {})
+    busy = pipeline.store.kv_get("viral_running")
+    cfg = pipeline.config.viral
+    sources = " · ".join(f"{e(k)}: {e(str(v))}" for k, v in report.get("sources", {}).items()) or "not run yet"
+    errors = "".join(f"<p class=bad>{e(k)}: {e(v)}</p>" for k, v in report.get("errors", {}).items())
+    when = report.get("at", "")[:16].replace("T", " ")
+    head = (f"<p class=meta>The most-watched AI-generated shorts of the last {cfg.lookback_days} days, ranked by "
+            "reach, speed (views per hour) and engagement. We keep the <b>format</b> — the hook, the visual "
+            "mechanic, the motion — and make an original video of our own. "
+            f"{'Runs daily at ' + str(cfg.hour) + ':00.' if cfg.enabled else 'Daily scout is off (viral.enabled).'}"
+            f"</p><p class=meta>Last scout: {e(when) or 'never'} · {sources}</p>{errors}")
+    actions = ("<p class=warn>Working… this page refreshes when it's done.</p>" if busy else
+               "<div class=actions><form method=post action='/viral/scout'><button class=primary>🔥 Scout now</button>"
+               "</form></div>")
+    add = ("<form method=post action='/viral/add' class=actions style='align-items:center'><b>Found one yourself?</b>"
+           "<input name=url type=url class=field required placeholder='TikTok / Reels / Shorts link' "
+           "style='flex:2;min-width:220px'><input name=title class=field placeholder='what happens in it' "
+           "style='flex:2;min-width:180px'><input name=views type=number min=0 class=field placeholder='views' "
+           "style='width:7em'><button>➕ Add &amp; make our version</button></form>")
+    cards = []
+    for v in report.get("videos", [])[:40]:
+        key = f"{v['platform']}:{v['id']}"
+        c = concepts.get(key)
+        thumb = (f"<img src='{e(v['thumbnail'], quote=True)}' loading=lazy referrerpolicy=no-referrer alt=''>"
+                 if v.get("thumbnail") else f"<div class=vthumb-empty>{e(v['platform'])}</div>")
+        stats = " · ".join(x for x in (
+            f"👁 {short(v.get('views'))}" if v.get("views") is not None else "",
+            f"❤️ {short(v.get('likes'))}" if v.get("likes") is not None else "",
+            f"💬 {short(v.get('comments'))}" if v.get("comments") is not None else "",
+            f"↗ {short(v.get('shares'))}" if v.get("shares") is not None else "",
+            f"⚡ {short(v.get('views_per_hour'))}/h" if v.get("views_per_hour") else "") if x)
+        concept = ""
+        if c:
+            concept = (f"<div class=concept><b>{e(c['format'])}</b><div>{e(c['why_it_works'])}</div>"
+                       f"<div class=meta>🎥 {e(c['motion_notes'])}</div></div>")
+        if c and c.get("item_id"):
+            cta = f"<a class=btn href='/item/{e(c['item_id'])}'>➜ Our version</a>"
+        elif busy:
+            cta = ""
+        else:
+            cta = (f"<form method=post action='/viral/remix'><input type=hidden name=key value='{e(key, quote=True)}'>"
+                   "<button>🎬 Make our version</button></form>")
+        cards.append(
+            f"<div class=vcard><a href='{e(v['url'], quote=True)}' target=_blank rel='noopener noreferrer' "
+            f"class=vthumb>{thumb}<span class=vplat>{e(v['platform'])}</span></a><div class=vbody>"
+            f"<a href='{e(v['url'], quote=True)}' target=_blank rel='noopener noreferrer'><b>{e(v.get('title', '')[:110])}</b></a>"
+            f"<div class=meta>{e(v.get('creator') or '')} {_age(v.get('published_at'), now)}"
+            f"{' · added by you' if v.get('manual') else ''}</div>"
+            f"<div class=vstats>{stats} · score {v.get('score', 0):.1f}</div>"
+            f"<div class=meta>AI: {e(', '.join(v.get('ai_signals', [])[:4]))}</div>{concept}"
+            f"<div class=actions>{cta}</div></div></div>")
+    grid = (f"<div class=vgrid>{''.join(cards)}</div>" if cards else
+            "<p class=meta>Nothing yet. Add a YouTube API key (YOUTUBE_API_KEY) and/or an Apify token "
+            "(APIFY_TOKEN), then press Scout now — or paste a video you found above.</p>")
+    body = _flash(flash) + "<h2>Viral AI videos</h2>" + head + actions + add + grid
+    return page("Viral", body, st, "/viral", every_ms=3000 if busy else 10000)

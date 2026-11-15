@@ -89,6 +89,7 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
         notifier=build_dispatcher(config.notify, secrets, http),
         voice=build_voice(config.video.voice, secrets, http),
         http=http,
+        secrets=secrets,
     )
 
 

@@ -104,7 +104,8 @@ class LLMRouter:
     # ---- calls -------------------------------------------------------------------------
     # New tasks inherit a sensible route if the config predates them.
     FALLBACK_TASK = {"hooks": "scripting", "factcheck": "review", "visual_qa": "review",
-                     "translate": "packaging", "planning": "ideation"}
+                     "translate": "packaging", "planning": "ideation",
+                     "viral": "ideation"}
 
     def candidates(self, task: str) -> list[tuple[str, str]]:
         route = (self.config.routes.get(task) or self.config.routes.get(self.FALLBACK_TASK.get(task, ""))

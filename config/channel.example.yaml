@@ -90,6 +90,7 @@ llm:
     visual_qa: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5"]
     translate: ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5"]
     planning:  ["anthropic:claude-opus-5-5", "openai:gpt-5.5", "gemini:gemini-3.1-pro-preview"]
+    viral:     ["anthropic:claude-opus-5-5", "gemini:gemini-3.1-pro-preview", "openai:gpt-5.5"]
   effort:
     hooks: medium
     factcheck: high
@@ -99,6 +100,7 @@ llm:
     directing: medium
     review: high
     packaging: low
+    viral: high
   # OpenAI-compatible endpoints ("any LLM"): OpenRouter, Groq, Together, local Ollama...
   # Use them in routes as e.g. "openrouter:meta-llama/llama-4-maverick".
   compat_providers:
@@ -170,10 +172,36 @@ trends:
     # - type: rss
     #   url: "https://www.sciencedaily.com/rss/top/science.xml"
 
+viral:
+  # Every day: find the best-performing AI-generated shorts, learn WHY they work (hook, format,
+  # visual mechanic, motion) and pitch our own ORIGINAL versions — same format, new content.
+  enabled: true
+  sources: [youtube, reddit, tiktok, instagram]   # youtube needs YOUTUBE_API_KEY; tiktok/instagram need
+                                                  # APIFY_TOKEN (instagram can use your Graph credentials)
+  daily_remixes: 1          # our versions per day (they go through the normal script → approve → render flow)
+  hour: 7                   # local hour (publish.schedule.timezone) for the daily scout
+  lookback_days: 7
+  min_views: 50000
+  max_duration_s: 180
+  require_ai: true          # only videos with AI-generation signals (tags, tools named, AI communities)
+  stay_in_niche: false      # true: adapt every concept to the channel's niche
+  analyze_top: 8
+  youtube:
+    queries: ["AI generated video", "veo 3", "kling ai", "ai animation shorts", "ai asmr"]
+    region: ""              # e.g. US
+  reddit:
+    subreddits: [aivideo]
+  tiktok:
+    actor: clockworks~tiktok-scraper
+    hashtags: [aivideo, veo3, aigenerated, aiart]
+  instagram:
+    actor: apify~instagram-hashtag-scraper
+    hashtags: [aivideo, aiart, veo3]
+
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)
   channels: [log, telegram]
-  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert]
+  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert, viral]
 
 runtime:
   workers: 3                    # items processed in parallel

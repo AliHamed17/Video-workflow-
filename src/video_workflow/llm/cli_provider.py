@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 
 from ..config import Effort
 from .base import LLMError, ProviderUnavailable, T, parse_into, schema_instructions
@@ -16,6 +17,7 @@ from .usage import report
 
 class CLIAgentProvider:
     name = "cli"
+    retry_delay_s = 5.0
 
     def __init__(self, commands: dict[str, list[str]], timeout_s: int = 600, runner=subprocess.run):
         self._commands = commands
@@ -35,14 +37,23 @@ class CLIAgentProvider:
 
         full_prompt = f"{system}\n\n{prompt}\n\n{schema_instructions(schema)}"
         last_error: Exception | None = None
-        for _attempt in range(2):  # one retry on malformed output
+        crashes = 0
+        attempt = 0
+        while attempt < 2:  # one retry on malformed output
             try:
                 result = self._run(command, input=full_prompt, capture_output=True, text=True,
                                    timeout=self._timeout, check=False)
             except subprocess.TimeoutExpired as exc:
                 raise LLMError(f"{model} CLI timed out") from exc
             if result.returncode != 0:
-                raise LLMError(f"{model} CLI exited {result.returncode}: {result.stderr[-500:]}")
+                # CLI agents occasionally drop out with no message (session hiccup): try once more.
+                crashes += 1
+                if crashes <= 1:
+                    time.sleep(self.retry_delay_s)
+                    continue
+                raise LLMError(f"{model} CLI exited {result.returncode}: "
+                               f"{(result.stderr or result.stdout)[-500:]}")
+            attempt += 1
             # CLIs don't report usage: record an estimate (~4 characters per token) for the ledger.
             report(len(full_prompt) // 4, len(result.stdout) // 4)
             try:

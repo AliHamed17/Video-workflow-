@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -30,6 +31,8 @@ from .models import (
     ShotPrompt,
     ShotQA,
     SocialMeta,
+    ViralAnalysis,
+    ViralConcept,
     YouTubeMeta,
 )
 
@@ -114,6 +117,15 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                                ("Plants that move fast", "one surprising fact"),
                                ("The coldest place in space", "countdown"),
                                ("How geckos stick", "myth vs fact")]]),
+        ViralAnalysis: ViralAnalysis(concepts=[ViralConcept(
+            source_index=0, is_ai_generated=True, format="impossible object sliced open (ASMR)",
+            why_it_works="satisfying slow reveal + a 'how is that inside?' question that makes people rewatch",
+            hook_pattern="the blade touches the object in the first second", visual_mechanic="macro cross-section "
+            "reveal of a hidden world", motion_notes="locked macro, slow push-in as it splits, slow-motion debris",
+            replicable=True, originality="our object is a real animal's anatomy (an octopus heart model), our own "
+            "narration with true facts; no glass planet, no copied shots",
+            our_version=idea.model_copy(update={"title": "Slicing open an octopus heart (model) — there are 3",
+                                                "predicted_score": 8.8}))]),
         Script: Script(title=idea.title, hook=idea.hook,
                        shots=[Shot(index=i, duration_s=duration, visual=v, voiceover=vo, on_screen_text=t)
                               for i, (v, vo, t) in enumerate(picked)],
@@ -134,6 +146,40 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
     }
 
 
+def viral_fixtures(now: datetime | None = None) -> dict:
+    """Simulated platform data for the viral scout: one clear winner, plus videos the filters must drop."""
+    now = now or datetime.now(UTC)
+    ago = lambda h: (now - timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+    yt = [
+        # id, title, description, hours ago, views, likes, comments, duration
+        ("vGlass01", "Cutting a glass planet in half 🪐 #aivideo", "Made with Veo 3. ASMR.", 30, "4800000", "390000",
+         "5100", "PT21S"),
+        ("vCat0002", "Cat pilots a tiny airplane (AI)", "ai generated short film", 70, "1200000", "61000", "900",
+         "PT34S"),
+        ("vReal003", "My morning routine", "vlog", 20, "9000000", "200000", "3000", "PT40S"),       # not AI
+        ("vLong004", "AI movie trailer (full)", "made with ai, kling", 50, "3000000", "90000", "800", "PT9M"),  # too long
+        ("vTiny005", "AI dragon test", "sora test", 10, "900", "40", "2", "PT12S"),                 # too few views
+    ]
+    return {
+        "search": {"items": [{"id": {"videoId": v[0]}} for v in yt]},
+        "videos": {"items": [{
+            "id": v[0], "snippet": {"title": v[1], "description": v[2], "channelTitle": f"creator {i}",
+                                    "publishedAt": ago(v[3]),
+                                    "thumbnails": {"high": {"url": f"https://i.ytimg.com/vi/{v[0]}/hq.jpg"}}},
+            "statistics": {"viewCount": v[4], "likeCount": v[5], "commentCount": v[6]},
+            "contentDetails": {"duration": v[7]}} for i, v in enumerate(yt)]},
+        "reddit": {"data": {"children": [{"data": {
+            "id": "r1", "title": "Tiny astronauts building a sandcastle on Mars", "is_video": True, "score": 14200,
+            "num_comments": 610, "permalink": "/r/aivideo/comments/r1/tiny_astronauts/", "author": "maker",
+            "created_utc": (now - timedelta(hours=9)).timestamp(), "media": {"reddit_video": {"duration": 18}}}}]}},
+        "tiktok": [{"id": "7400000000777", "text": "POV: you're a raindrop falling from space #aivideo #veo3",
+                    "webVideoUrl": "https://www.tiktok.com/@fx/video/7400000000777", "playCount": 8800000,
+                    "diggCount": 1100000, "commentCount": 9800, "shareCount": 70000,
+                    "createTimeISO": ago(26), "authorMeta": {"name": "fx"}, "videoMeta": {"duration": 15},
+                    "hashtags": [{"name": "aivideo"}, {"name": "veo3"}]}],
+    }
+
+
 class FakePlatforms:
     """One MockTransport handler that behaves like YouTube, Instagram, TikTok and Telegram."""
 
@@ -141,6 +187,7 @@ class FakePlatforms:
         self.calls: list[tuple[str, str]] = []
         self.counters: dict[str, int] = defaultdict(int)
         self.telegram_messages: list[dict] = []
+        self.viral = viral_fixtures()
 
     def client(self) -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(self.handle))
@@ -157,6 +204,17 @@ class FakePlatforms:
         if host == "www.googleapis.com" and path == "/upload/session/1":
             self.counters["youtube"] += 1
             return httpx.Response(201, json={"id": f"yt{self.counters['youtube']}"})
+        if host == "www.googleapis.com" and path == "/youtube/v3/search":
+            return httpx.Response(200, json=self.viral["search"])
+        if host == "www.googleapis.com" and path == "/youtube/v3/videos" and "contentDetails" in req.url.params.get("part", ""):
+            wanted = set(req.url.params.get("id", "").split(","))
+            return httpx.Response(200, json={"items": [v for v in self.viral["videos"]["items"] if v["id"] in wanted]})
+        if host == "www.reddit.com" and path.endswith("/top.json"):
+            return httpx.Response(200, json=self.viral["reddit"])
+        if host == "api.apify.com" and "run-sync-get-dataset-items" in path:
+            return httpx.Response(200 if "tiktok" in path else 502, json=self.viral["tiktok"] if "tiktok" in path else {})
+        if host == "i.ytimg.com":
+            return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"\xff\xd8\xff\xd9")
         if host == "www.googleapis.com" and path == "/youtube/v3/videos":
             return httpx.Response(200, json={"items": [{"statistics": {"viewCount": "12400", "likeCount": "910",
                                                                        "commentCount": "64"}}]})

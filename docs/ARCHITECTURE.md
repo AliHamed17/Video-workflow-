@@ -51,7 +51,7 @@ stage.
 | | `llm/openai_provider.py` | OpenAI Responses API structured outputs; Chat Completions JSON mode for compatible endpoints |
 | | `llm/gemini_provider.py` | Gemini with `response_schema` |
 | | `llm/cli_provider.py` | Claude Code / Codex / Gemini CLI over stdin, JSON extracted and validated |
-| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, Scriptwriter, Critic, Director, Packager, Translator, Planner |
+| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, Scriptwriter, Critic, Director, Packager, Translator, Planner |
 | Render | `video/handoff.py` | Writes `render_request.json` for Claude Code + Higgsfield MCP |
 | | `video/higgsfield_mcp.py` | Headless MCP client: cost preflight → batch submit → poll → download |
 | | `video/mock.py` | Free placeholder clips for testing |
@@ -66,6 +66,7 @@ stage.
 | Quality | `agents/hook_lab.py`, `agents/fact_checker.py`, `agents/visual_qa.py`, `quality.py` | Hook variants, claim-by-claim fact-check, vision QA of shot frames, technical QA of the cut |
 | Observability | `trace.py`, `monitor.py`, `web/` | Event log of every step (spans with duration/status/detail), alerts, dashboard pages + JSON/Prometheus APIs |
 | Cloud | `cloud/app.py`, `cloud/store.py`, `cloud/sync.py`, `cloud/deploy.py`, `api/index.py` | Vercel app over Postgres (same pages, read from synced state); worker push/pull sync with a command queue; REST deployer |
+| Viral | `viral.py`, `agents/viral_analyst.py`, `pipeline.viral_scout/remix/add` | Daily scout of top AI shorts → concept analysis → original idea with an inspiration brief for writer, critic, director |
 | Growth | `kit.py`, `sources.py`, `pipeline.localize/plan` | Publish kit zip; ideas from an article; language versions; content calendar |
 | Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |
 | Entry | `cli.py`, `factory.py` | `vw` commands; wiring from config |

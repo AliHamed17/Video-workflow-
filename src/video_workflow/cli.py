@@ -101,6 +101,54 @@ def ideas(count: Annotated[int, typer.Option("--count", "-n")] = 3,
 
 
 @app.command()
+def viral(remix: Annotated[int, typer.Option("--remix", "-r", help="Make our versions of the top N concepts")] = 0,
+          key: Annotated[list[str] | None, typer.Option("--key", "-k", help="Remix this video, e.g. youtube:abc123")] = None,
+          cached: Annotated[bool, typer.Option("--cached", help="Use the last scout instead of pulling again")] = False,
+          top: Annotated[int, typer.Option("--top", "-t")] = 15,
+          config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Pull today's best-performing AI-generated shorts and (with --remix) pitch our own versions."""
+    from .viral import short
+
+    pipe = _setup(config, data, publishers=False)
+    report = (pipe.store.kv_get("viral_last") if cached else None) or pipe.viral_scout()
+    console.print("Sources: " + ", ".join(f"{k}: {v}" for k, v in report.get("sources", {}).items()))
+    for name, err in report.get("errors", {}).items():
+        console.print(f"[red]{name}: {err}[/red]")
+    table = Table("#", "key", "title", "views", "likes", "comm.", "views/h", "score", "AI signals")
+    for i, v in enumerate(report.get("videos", [])[:top]):
+        table.add_row(str(i + 1), f"{v['platform']}:{v['id']}", (v.get("title") or "")[:60], short(v.get("views")),
+                      short(v.get("likes")), short(v.get("comments")), short(v.get("views_per_hour")),
+                      f"{v.get('score', 0):.1f}", ", ".join(v.get("ai_signals", [])[:3]))
+    console.print(table)
+    if remix or key:
+        items = pipe.viral_remix(remix or len(key or []), keys=key or None)
+        for item in items:
+            console.print(f"[green]➜ {item.id}[/green] {item.idea.title}  ·  format: {item.inspiration.format}"
+                          f"\n   from {item.inspiration.url}\n   ours: {item.inspiration.originality}")
+        if not items:
+            console.print("No usable concept this time (none replicable/AI-generated).")
+
+
+@app.command("viral-add")
+def viral_add(url: str,
+              title: Annotated[str, typer.Option("--title", help="What the video is (if the link has no stats)")] = "",
+              notes: Annotated[str, typer.Option("--notes", help="What you noticed: why it works, what happens")] = "",
+              views: Annotated[int | None, typer.Option("--views")] = None,
+              likes: Annotated[int | None, typer.Option("--likes")] = None,
+              comments: Annotated[int | None, typer.Option("--comments")] = None,
+              remix: Annotated[bool, typer.Option("--remix", help="Make our version right away")] = False,
+              config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Add a viral video you found (any TikTok / Reels / Shorts link) so it can be studied and remixed."""
+    pipe = _setup(config, data, publishers=False)
+    video = pipe.viral_add(url, title, notes, views, likes, comments)
+    key = f"{video['platform']}:{video['id']}"
+    console.print(f"Added {key}: {video['title'][:80]}")
+    if remix:
+        for item in pipe.viral_remix(1, keys=[key]):
+            console.print(f"[green]➜ {item.id}[/green] {item.idea.title}  ·  format: {item.inspiration.format}")
+
+
+@app.command()
 def plan(days: Annotated[int, typer.Option("--days", "-d")] = 7, config: ConfigOpt = None,
          data: DataOpt = Path("data")) -> None:
     """Plan the content calendar: a theme, pillar and format for each of the next days."""

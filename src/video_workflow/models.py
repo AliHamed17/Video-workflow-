@@ -147,6 +147,23 @@ class ContentPlan(BaseModel):
     days: list[ContentPlanDay]
 
 
+class ViralConcept(BaseModel):
+    source_index: int = Field(description="0-based index of the video in the list you were given")
+    is_ai_generated: bool = Field(description="True if the video itself is clearly AI-generated")
+    format: str = Field(description="The repeatable format in a few words, e.g. 'POV vlog from a historical event'")
+    why_it_works: str = Field(description="Why people watch, like, comment and share it — the psychology")
+    hook_pattern: str = Field(description="How the first 1-2 seconds stop the scroll")
+    visual_mechanic: str = Field(description="The visual idea that makes it addictive to watch")
+    motion_notes: str = Field(description="Camera and subject motion that carry the energy (for the director)")
+    replicable: bool = Field(description="Can we make a strong ORIGINAL version with 5-second AI video shots?")
+    originality: str = Field(description="What our version changes so it is ours: new subject, story, characters, script")
+    our_version: Idea
+
+
+class ViralAnalysis(BaseModel):
+    concepts: list[ViralConcept]
+
+
 # --------------------------------------------------------------------------------------
 # Pipeline state
 # --------------------------------------------------------------------------------------
@@ -177,6 +194,34 @@ class ShotReview(BaseModel):
     shot_index: int
     qa: ShotQA
     frames: list[str] = Field(default_factory=list)   # local paths of the sampled frames
+
+
+class Inspiration(BaseModel):
+    """The viral video an idea's format came from (we keep the concept, never the content)."""
+
+    platform: str
+    url: str
+    title: str
+    creator: str = ""
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    format: str = ""
+    why_it_works: str = ""
+    hook_pattern: str = ""
+    visual_mechanic: str = ""
+    motion_notes: str = ""
+    originality: str = ""
+
+    def brief(self) -> str:
+        stats = " · ".join(f"{n} {k}" for k, n in (("views", self.views), ("likes", self.likes),
+                                                   ("comments", self.comments)) if n is not None)
+        return (f"This idea adapts a proven viral FORMAT ({self.platform}: \"{self.title}\"{', ' + stats if stats else ''}).\n"
+                f"- Format: {self.format}\n- Why it works: {self.why_it_works}\n"
+                f"- Hook pattern: {self.hook_pattern}\n- Visual mechanic: {self.visual_mechanic}\n"
+                f"- Motion: {self.motion_notes}\n- What makes ours original: {self.originality}\n"
+                "Keep the format, pacing and visual energy; never copy the original's script, characters, "
+                "names, logos, music or exact shots.")
 
 
 class Version(BaseModel):
@@ -296,6 +341,7 @@ class ContentItem(BaseModel):
     voice_clips: list[VoiceClip] = Field(default_factory=list)
     versions: list[Version] = Field(default_factory=list)
     source_url: str | None = None      # the article/page the idea was drawn from
+    inspiration: Inspiration | None = None   # the viral video whose format this remixes
     music_track: str | None = None
     final_video: str | None = None
     thumbnail: str | None = None

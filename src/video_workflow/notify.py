@@ -22,10 +22,11 @@ from .models import ContentItem
 log = logging.getLogger(__name__)
 
 Kind = Literal["needs_approval", "awaiting_render", "preview_ready", "scheduled", "published",
-               "failed", "rejected", "digest", "alert", "info"]
+               "failed", "rejected", "digest", "alert", "info", "viral"]
 
 ICONS = {"needs_approval": "📝", "awaiting_render": "🎬", "preview_ready": "👀", "scheduled": "⏰",
-         "published": "🚀", "failed": "❌", "rejected": "🗑️", "digest": "📊", "alert": "🚨", "info": "ℹ️"}
+         "published": "🚀", "failed": "❌", "rejected": "🗑️", "digest": "📊", "alert": "🚨", "info": "ℹ️",
+         "viral": "🔥"}
 
 
 class Notice(BaseModel):

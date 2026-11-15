@@ -142,7 +142,8 @@ def test_daemon_tick_handles_requests_quota_and_digest(config, tmp_path):
     config.runtime.digest_hour = 0
     pipe, mem = _pipeline(config, tmp_path)
     pipe.store.kv_set("pending_requests", [{"ideas": 1, "seeds": ["volcanoes"]}])
-    daemon = Daemon(pipe, clock=lambda: datetime(2026, 11, 14, 21, 0, tzinfo=UTC))
+    now = datetime.now(UTC)
+    daemon = Daemon(pipe, clock=lambda: now)  # items are stamped with the real time too
     report = daemon.tick()
     assert report["requested"] == 1 and report["pitched"] == 2 and report["digest"]
     assert len(pipe.store.list()) == 3

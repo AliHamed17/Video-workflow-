@@ -6,7 +6,7 @@ import html
 
 e = html.escape
 
-NAV = [("/", "Board"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
+NAV = [("/", "Board"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
        ("/metrics", "Metrics"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """
@@ -71,6 +71,14 @@ code{font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:5px}
 svg text{fill:var(--muted);font-size:10px}
 button.copy{padding:2px 9px;font-size:12px;margin-left:6px}
 table.copytbl th{white-space:nowrap;width:1%;vertical-align:top;padding-right:14px}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.vcard{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
+.vthumb{position:relative;flex:0 0 96px;height:150px;border-radius:8px;overflow:hidden;background:var(--chip)}
+.vthumb img{width:100%;height:100%;object-fit:cover}.vthumb-empty{display:grid;place-items:center;height:100%;color:var(--muted)}
+.vplat{position:absolute;left:4px;bottom:4px;font-size:11px;padding:1px 6px;border-radius:6px;background:#000a;color:#fff}
+.vbody{min-width:0;flex:1;font-size:14px;overflow-wrap:anywhere}.vstats{margin:4px 0;font-weight:600}
+.concept{margin-top:6px;padding:6px 8px;border-radius:8px;background:var(--chip);font-size:13px}
+@media (max-width:520px){.vgrid{grid-template-columns:1fr}.vthumb{flex-basis:80px;height:128px}}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 @media (max-width:900px){.cal{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .day{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px;min-height:120px;font-size:13px}

@@ -42,6 +42,11 @@ class Secrets(BaseSettings):
 
     elevenlabs_api_key: SecretStr | None = None
 
+    # Viral scout: YouTube Data API key (Google Cloud console) and, optionally, Apify for
+    # TikTok / Instagram discovery.
+    youtube_api_key: SecretStr | None = None
+    apify_token: SecretStr | None = None
+
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
     slack_webhook_url: SecretStr | None = None
@@ -228,12 +233,53 @@ class TrendsConfig(BaseModel):
     max_items: int = 25
 
 
+class ViralYouTubeConfig(BaseModel):
+    queries: list[str] = Field(default_factory=lambda: [
+        "AI generated video", "veo 3", "sora ai video", "kling ai", "ai animation shorts"])
+    region: str = ""                 # e.g. "US" — results most popular there
+    language: str = ""               # e.g. "en"
+    per_query: int = 25
+
+
+class ViralRedditConfig(BaseModel):
+    subreddits: list[str] = Field(default_factory=lambda: ["aivideo"])
+    per_sub: int = 25
+
+
+class ViralApifyConfig(BaseModel):
+    hashtags: list[str] = Field(default_factory=lambda: ["aivideo", "veo3", "aigenerated", "aiart"])
+    per_hashtag: int = 20
+    actor: str = ""                  # Apify actor id, e.g. clockworks~tiktok-scraper
+
+
+class ViralConfig(BaseModel):
+    """Daily scout of the best-performing AI-generated shorts → their concept → our own version."""
+
+    enabled: bool = False
+    sources: list[Literal["youtube", "reddit", "tiktok", "instagram"]] = Field(
+        default_factory=lambda: ["youtube", "reddit", "tiktok", "instagram"])
+    daily_remixes: int = 1           # new ideas per day built on the strongest viral concepts
+    hour: int = 7                    # local hour (schedule timezone) for the daily scout
+    lookback_days: int = 7           # only videos published this recently
+    min_views: int = 50_000
+    max_duration_s: int = 180        # shorts only
+    require_ai: bool = True          # keep only videos with AI-generation signals
+    stay_in_niche: bool = False      # true: adapt every concept to the channel's niche
+    analyze_top: int = 8             # how many top videos the analyst studies per run
+    youtube: ViralYouTubeConfig = Field(default_factory=ViralYouTubeConfig)
+    reddit: ViralRedditConfig = Field(default_factory=ViralRedditConfig)
+    tiktok: ViralApifyConfig = Field(default_factory=lambda: ViralApifyConfig(
+        actor="clockworks~tiktok-scraper"))
+    instagram: ViralApifyConfig = Field(default_factory=lambda: ViralApifyConfig(
+        actor="apify~instagram-hashtag-scraper"))
+
+
 class NotifyConfig(BaseModel):
     channels: list[Literal["telegram", "slack", "discord", "webhook", "log"]] = Field(
         default_factory=lambda: ["log"])
     events: list[str] = Field(default_factory=lambda: [
         "needs_approval", "awaiting_render", "preview_ready", "scheduled", "published", "failed",
-        "rejected", "digest", "alert"])
+        "rejected", "digest", "alert", "viral"])
 
 
 class RuntimeConfig(BaseModel):
@@ -256,6 +302,7 @@ class AppConfig(BaseModel):
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
+    viral: ViralConfig = Field(default_factory=ViralConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)

@@ -29,6 +29,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Monitoring** | Every step, LLM call, render, check and upload is traced: live activity feed, workflow map with per-step health, item timelines, metrics, alerts (stuck items, failures, daemon down, low credits, budget), Prometheus/JSON endpoints, `vw logs -f` |
 | **Learns** | Pulls views/likes/comments back from every platform and feeds the winners into the next ideas |
 | **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
+| **Viral scout** | Every day: the best-performing AI-generated shorts (YouTube, TikTok, Reels, Reddit, or links you paste), why each works (hook, format, visual, motion), and our own **original** version of the strongest formats, straight into the pipeline ([docs/VIRAL.md](docs/VIRAL.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
 | **Content calendar** | An LLM plans a theme per day a week ahead (formats, pillars, timely hooks like anniversaries and meteor showers); the daemon pitches from today's theme and keeps the plan topped up |
@@ -103,8 +104,9 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 
 | Command | What it does |
 |---|---|
-| `vw selftest [--full-hd]` | Run every component together offline and report each step (18 checks) |
+| `vw selftest [--full-hd]` | Run every component together offline and report each step (19 checks) |
 | `vw cloud deploy [--skip-secrets]` · `vw cloud sync` · `vw cloud status` | Deploy the cloud dashboard to Vercel · push state + apply cloud commands now · check the connection |
+| `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
 | `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
 | `vw logs [id] [-f]` · `vw alerts` · `vw quality <id>` | Step-by-step trace (live with `-f`) · current problems · an item's quality report |
 | `vw approve-final <id>` · `vw retry <id>` · `vw rerender <id> -s 2 --note "..."` | Approve the full-res render · resume a failed item · re-shoot chosen shots |
@@ -140,7 +142,7 @@ through to the next one. Token use is recorded per video and shown in the dashbo
 
 ```
 src/video_workflow/
-  agents/        trend scout, scriptwriter, critic, director, packager, translator, planner (+ prompts/*.md)
+  agents/        trend scout, viral analyst, scriptwriter, critic, director, packager, translator, planner (+ prompts/*.md)
   llm/           provider-neutral LLM layer, router with fallbacks, usage ledger
   video/         renderers (handoff, higgsfield_mcp, mock) and the ffmpeg editor
   publishers/    youtube.py, instagram.py, tiktok.py (publish + stats)
@@ -152,18 +154,19 @@ src/video_workflow/
   quality.py     technical video QA     web/          monitoring dashboard
   cloud/         Vercel app, Postgres store, worker sync, REST deployer
   kit.py         publish kit (zip)      sources.py    ideas from an article
+  viral.py       viral scout (sources, AI detection, ranking)
   selftest.py    whole-system check
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            ARCHITECTURE · SETUP · OPERATIONS · CLOUD · HIGGSFIELD · ROADMAP
+docs/            ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).
 
 ## Status
 
-Phases 0–3 are built and tested: 85 tests, plus `vw selftest` (18 end-to-end checks) in CI
+Phases 0–3 are built and tested: 94 tests, plus `vw selftest` (19 end-to-end checks) in CI
 and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
