@@ -35,6 +35,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Viral scout** | Every day: the best-performing AI-generated shorts (YouTube, TikTok, Reels, Reddit, or links you paste), why each works (hook, format, visual, motion), and our own **original** version of the strongest formats, straight into the pipeline ([docs/VIRAL.md](docs/VIRAL.md)) |
 | **Safety** | A compliance check on every script before anything is rendered (copyright, real people's likeness, trademarks, harmful claims, guidelines, copying more than a viral video's format); fixable problems are rewritten automatically, the rest wait for you |
 | **Growth** | Learns from our own results: every video's views against our median, % watched, hook hold at 3 s and the shot where viewers leave, engagement and what it was made of; a weekly playbook (what to repeat, what to drop, one experiment) that ideas, hooks and scripts follow; follow-ups of our hits; video ideas from viewers' comments; best posting times ([docs/GROWTH.md](docs/GROWTH.md)) |
+| **Community** | Drafted replies to viewers' comments (questions first, answered only from the video's fact-checked script; spam and bait skipped), sent from the dashboard or Telegram; optional first comment; real YouTube search phrases in titles and tags; title rescue for a video that underperforms on day one ([docs/COMMUNITY.md](docs/COMMUNITY.md)) |
 | **Money** | Costs per video (credits + AI usage) and subscriptions, YouTube ad revenue per video, Stripe sponsor payments, CSV imports, invoices with due dates, cash, burn and runway, ROI/RPM per video; budget, runway and overdue-payment alerts ([docs/MONEY.md](docs/MONEY.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
@@ -115,6 +116,7 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 | `vw autopilot run\|ready\|status\|pause\|resume` | Fully automatic daily production, its setup checklist and its stop button |
 | `vw audio add <id> voice\|music <url>` | Register Higgsfield narration / music (the render skill does this) |
 | `vw growth [--stats] [--refresh] [--follow-up ID] [--request N]` | What our results say: the playbook, hits worth a follow-up, viewer requests |
+| `vw community [--draft] [--send N] [--skip N]` | Replies to viewers: draft, send, skip |
 | `vw money report\|add\|paid\|import` | The books: P&L, cash, runway, per-video ROI; record income, expenses, invoices |
 | `vw cloud restore` | Continue on a fresh machine (state, today's spend, rotated tokens) |
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
@@ -160,6 +162,7 @@ src/video_workflow/
   pipeline.py    stage machine          daemon.py     always-on loop
   flows/         trends, viral, autopilot, growth, sound, reporting (mixed into the pipeline)
   growth.py      our own results made comparable (index, breakdowns, hits, best hours)
+  seo.py         what people type into YouTube search about a topic
   voice.py       narration engines      schedule.py   posting slots
   notify.py      Telegram/Slack/Discord telegram_bot.py approvals from your phone
   trends.py      trend signals          health.py     live connection checks
@@ -173,7 +176,7 @@ src/video_workflow/
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            AUTOPILOT · GROWTH · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
+docs/            AUTOPILOT · GROWTH · COMMUNITY · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).

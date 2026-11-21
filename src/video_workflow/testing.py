@@ -30,6 +30,8 @@ from .models import (
     Playbook,
     PlaybookRule,
     RenderPlan,
+    ReplyBatch,
+    ReplyOption,
     Review,
     Script,
     Shot,
@@ -131,6 +133,11 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                        signal_indices=[0, 1]),
             TrendTopic(topic="College football scores", why_now="game day", momentum="peaking", shelf_life_hours=12,
                        fit=1.0, angle="(not for this channel)", signal_indices=[2])]),
+        ReplyBatch: ReplyBatch(replies=[   # questions come first: [0] "which heart stops??", [1] the request
+            ReplyOption(index=0, reply="The systemic heart — it stops while the octopus swims, which is why they "
+                        "prefer crawling.", skip=False, why="answers the question from the script"),
+            ReplyOption(index=1, reply="Noted! The pistol shrimp snaps a bubble hotter than the Sun's surface — "
+                        "we'll take a look 🦐", skip=False, why="a request we can answer honestly")]),
         Playbook: Playbook(
             summary="Animal superpowers shown up close beat everything else 3 to 1; the opening second decides it.",
             rules=[PlaybookRule(do="Open on the impossible visual and say the number in the first second",
@@ -168,7 +175,9 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
         Packaging: Packaging(
             youtube=YouTubeMeta(title="An octopus has THREE hearts 🐙 #Shorts",
                                 description="Three hearts, blue blood, and one heart that stops when it swims.",
-                                tags=["octopus", "biology", "animal facts"]),
+                                tags=["octopus", "biology", "animal facts"],
+                                alt_titles=["Why does an octopus need three hearts? #Shorts",
+                                            "This heart stops every time an octopus swims #Shorts"]),
             instagram=SocialMeta(caption="Three hearts. Blue blood. Which fact got you?",
                                  hashtags=["octopus", "ocean", "sciencefacts"]),
             tiktok=SocialMeta(caption="3 hearts?! 🐙", hashtags=["octopus", "sciencetok"])),
@@ -217,6 +226,7 @@ class FakePlatforms:
         self.counters: dict[str, int] = defaultdict(int)
         self.telegram_messages: list[dict] = []
         self.viral = viral_fixtures()
+        self.posted: list[tuple[str, dict]] = []   # replies, first comments and title updates we "posted"
 
     def client(self) -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(self.handle))
@@ -244,14 +254,35 @@ class FakePlatforms:
             return httpx.Response(200 if "tiktok" in path else 502, json=self.viral["tiktok"] if "tiktok" in path else {})
         if host == "i.ytimg.com":
             return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"\xff\xd8\xff\xd9")
+        if host == "www.googleapis.com" and path == "/youtube/v3/commentThreads" and req.method == "POST":
+            self.posted.append(("youtube.comment", json.loads(req.content)))
+            return httpx.Response(200, json={"id": f"ytc{len(self.posted)}"})
         if host == "www.googleapis.com" and path == "/youtube/v3/commentThreads":
+            video = req.url.params.get("videoId", "")
             return httpx.Response(200, json={"items": [
-                {"snippet": {"topLevelComment": {"snippet": {
+                {"snippet": {"channelId": "UCours", "topLevelComment": {"id": f"{video}-c1", "snippet": {
                     "textDisplay": "Do the pistol shrimp next!!", "authorDisplayName": "@reefnerd", "likeCount": 120,
-                    "publishedAt": "2026-11-20T10:00:00Z"}}}},
-                {"snippet": {"topLevelComment": {"snippet": {
+                    "authorChannelId": {"value": "UCreef"}, "publishedAt": "2026-11-20T10:00:00Z"}}}},
+                {"snippet": {"channelId": "UCours", "topLevelComment": {"id": f"{video}-c2", "snippet": {
                     "textDisplay": "wait which heart stops when it swims??", "authorDisplayName": "@curious",
-                    "likeCount": 41, "publishedAt": "2026-11-20T11:00:00Z"}}}}]})
+                    "likeCount": 41, "authorChannelId": {"value": "UCcurious"}, "publishedAt": "2026-11-20T11:00:00Z"}}}},
+                {"snippet": {"channelId": "UCours", "topLevelComment": {"id": f"{video}-c3", "snippet": {
+                    "textDisplay": "Which fact surprised you most?", "authorDisplayName": "Our channel",
+                    "likeCount": 3, "authorChannelId": {"value": "UCours"}, "publishedAt": "2026-11-20T09:00:00Z"}}}}]})
+        if host == "www.googleapis.com" and path == "/youtube/v3/comments" and req.method == "POST":
+            self.posted.append(("youtube.reply", json.loads(req.content)))
+            return httpx.Response(200, json={"id": f"ytr{len(self.posted)}"})
+        if host == "www.googleapis.com" and path == "/youtube/v3/videos" and req.method == "PUT":
+            self.posted.append(("youtube.title", json.loads(req.content)))
+            return httpx.Response(200, json=json.loads(req.content))
+        if host == "www.googleapis.com" and path == "/youtube/v3/videos" and req.url.params.get("part") == "snippet":
+            return httpx.Response(200, json={"items": [{"id": req.url.params.get("id"), "snippet": {
+                "title": "An octopus has THREE hearts 🐙 #Shorts", "description": "Three hearts, blue blood.",
+                "tags": ["octopus"], "categoryId": "28", "channelId": "UCours", "publishedAt": "2026-11-20T09:00:00Z",
+                "thumbnails": {}}}]})
+        if host == "suggestqueries.google.com":
+            q = req.url.params.get("q", "")
+            return httpx.Response(200, json=[q, [f"{q} explained", f"{q} facts", f"why do {q}", f"{q} shorts"]])
         if host == "youtubeanalytics.googleapis.com" and path == "/v2/reports":
             ids = req.url.params.get("filters", "").removeprefix("video==").split(",")
             if req.url.params.get("metrics") == "audienceWatchRatio":   # a short with a strong hook, a dip at 40%
@@ -277,10 +308,18 @@ class FakePlatforms:
             if path.endswith("/media_publish"):
                 self.counters["instagram"] += 1
                 return httpx.Response(200, json={"id": f"ig{self.counters['instagram']}"})
+            if path.endswith("/comments") and req.method == "POST":
+                self.posted.append(("instagram.comment", dict(req.url.params)))
+                return httpx.Response(200, json={"id": f"igc{len(self.posted)}"})
+            if path.endswith("/replies") and req.method == "POST":
+                self.posted.append(("instagram.reply", {"comment": path.split("/")[-2], **dict(req.url.params)}))
+                return httpx.Response(200, json={"id": f"igr{len(self.posted)}"})
             if path.endswith("/comments"):
-                return httpx.Response(200, json={"data": [{"text": "My kid made me watch this 6 times 😂",
-                                                           "like_count": 15, "username": "reels_mom",
-                                                           "timestamp": "2026-11-20T09:30:00+0000"}]})
+                return httpx.Response(200, json={"data": [
+                    {"id": "17900001", "text": "My kid made me watch this 6 times 😂", "like_count": 15,
+                     "username": "reels_mom", "from": {"id": "555"}, "timestamp": "2026-11-20T09:30:00+0000"},
+                    {"id": "17900002", "text": "Which fact surprised you most?", "like_count": 2,
+                     "username": "demo_channel", "from": {"id": "42"}, "timestamp": "2026-11-20T09:00:00+0000"}]})
             if path.endswith("/insights"):
                 return httpx.Response(200, json={"data": [{"name": "views", "values": [{"value": 8300}]},
                                                           {"name": "likes", "values": [{"value": 450}]}]})

@@ -238,11 +238,31 @@ growth:
   follow_ups: true          # the autopilot makes a follow-up of each new hit (one a day)
   comments: true            # read YouTube + Instagram comments (Instagram needs the comments permission)
   learn_slots: false        # true: post at the hours that performed best (2+ videos per hour needed)
+  # Title rescue: a recent YouTube video far below our usual first-day views gets its reserve title (once).
+  title_rescue: false       # off by default: it edits a live post
+  rescue_below: 0.5         # first-day views under half our usual ...
+  rescue_min_videos: 3      # ... once 3+ earlier videos have a first-day count
+
+community:
+  # Answering viewers. The most-liked comments (questions first) on recent videos get a drafted
+  # reply, written only from the video's own fact-checked script; spam, bait and insults are skipped.
+  # Nothing is posted until you press Send (dashboard → Community, or /send <n> on Telegram).
+  enabled: true
+  replies_per_video: 5
+  max_age_days: 14
+  auto_reply: false         # true: send drafts without asking
+  first_comment: false      # true: post the video's call to action as the first comment (YouTube, Instagram)
+
+seo:
+  # YouTube's own autocomplete: what people type about the topic, used in titles, descriptions and tags.
+  enabled: true
+  region: US
 
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)
   channels: [log, telegram]
-  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert, viral]
+  events: [needs_approval, awaiting_render, preview_ready, scheduled, published, failed, rejected, digest, alert, viral,
+           community]
 
 runtime:
   workers: 3                    # items processed in parallel

@@ -276,7 +276,16 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                        f"<td class=meta>{e(c.detail)}</td></tr>" for c in q.checks)
         parts.append(_section(f"Technical quality — {q.score:.0f}/100", f"<table>{rows}</table>"))
     if item.packaging:
-        parts.append(_section("Posting copy", copy_table(item.packaging)))
+        extra = ""
+        if item.packaging.youtube.alt_titles:
+            extra += "<p class=meta>Reserve titles (title rescue): " + " · ".join(
+                e(t) for t in item.packaging.youtube.alt_titles) + "</p>"
+        if item.search_terms:
+            extra += "<p class=meta>🔎 People search for: " + ", ".join(e(t) for t in item.search_terms[:10]) + "</p>"
+        for ch in item.title_changes:
+            extra += (f"<p class=warn>Title changed on {e(ch.platform)} {ch.at:%d %b %H:%M}: “{e(ch.old)}” → "
+                      f"“{e(ch.new)}” ({e(ch.reason)})</p>")
+        parts.append(_section("Posting copy", copy_table(item.packaging) + extra))
     if item.versions:
         blocks = []
         for v in item.versions:
@@ -307,8 +316,17 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                         + "</td></tr>" for k, v in item.metrics.items())
         parts.append(_section("Publishing & stats", f"<table>{rows}{stats}</table>" + retention_html(item)))
     if item.comments:
+        answers = {r.comment_id: r for r in item.replies}
+
+        def answered(c) -> str:
+            r = answers.get(c.id) if c.id else None
+            if r is None or not r.reply:
+                return ""
+            label = {"sent": "↳ replied", "drafted": "↳ draft (Community page)", "failed": "↳ failed"}.get(r.status, "")
+            return f"<div class=meta>{label}: {e(r.reply)}</div>" if label else ""
+
         said = "".join(f"<tr><td>{e(c.text[:300])}<div class=meta>{e(c.author)} · {e(c.platform)} · {c.likes} likes"
-                       "</div></td></tr>" for c in item.comments[:12])
+                       f"</div>{answered(c)}</td></tr>" for c in item.comments[:12])
         parts.append(_section(f"🗣 Comments ({len(item.comments)})", f"<table>{said}</table>"))
     parts.append(_section("💰 Cost &amp; earnings", money_html(pipeline, item)))
     parts.append(_section("Timeline (every step, oldest first)", timeline_html(pipeline, item)))
@@ -975,3 +993,48 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
     body = (_flash(flash) + "<h2>Growth</h2>" + head + kpi_html + button + errors + playbook + hits_html + asks_html
             + what + videos + comments)
     return page("Growth", body, st, "/growth", every_ms=3000 if busy else 30000)
+
+
+def render_community(pipeline, st: dict, flash: str = "") -> str:
+    """Replies to viewers: drafts to send (editable), what went out, and what was skipped."""
+    store, cc = pipeline.store, pipeline.config.community
+    busy = store.kv_get("community_running")
+    items = store.list(Stage.PUBLISHED)
+    pending = sorted(((i, r) for i in items for r in i.replies if r.status == "drafted"), key=lambda x: (x[1].at, -x[1].likes))
+    head = ("<p class=meta>Viewers' comments on recent videos get a drafted reply — answers come only from the "
+            "video's own fact-checked script. Nothing is posted until you press Send"
+            + (" (auto_reply is <b>on</b>: drafts are sent by themselves)" if cc.auto_reply else "")
+            + ". Telegram: /replies, /send &lt;n&gt;, /skip &lt;n&gt;.</p>")
+    if not cc.enabled:
+        head += "<p class=warn>Replies are off (community.enabled: false).</p>"
+    button = ("<p class=warn>Drafting…</p>" if busy else
+              "<div class=actions><form method=post action='/community/draft'><button class=primary>💬 Draft replies "
+              "to new comments</button></form></div>")
+    field = ("width:100%;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);"
+             "background:var(--card);color:var(--ink);margin:6px 0")
+    cards = []
+    for n, (item, r) in enumerate(pending, 1):
+        hidden = (f"<input type=hidden name=item_id value='{e(item.id)}'>"
+                  f"<input type=hidden name=comment_id value='{e(r.comment_id, quote=True)}'>")
+        cards.append(
+            f"<section><div class=meta>#{n} · <a href='/item/{e(item.id)}'>{e(item.idea.title[:60])}</a> · "
+            f"{e(r.platform)} · {r.likes} likes</div><p><b>{e(r.author or 'viewer')}:</b> {e(r.comment)}</p>"
+            f"<form method=post action='/community/send'>{hidden}<textarea name=text rows=3 style='{field}'>"
+            f"{e(r.reply)}</textarea><div class=actions><button class=primary>📨 Send</button>"
+            f"<button formaction='/community/skip'>Skip</button><span class=meta>{e(r.why)}</span></div></form>"
+            "</section>")
+    inbox = "".join(cards) or "<p class=meta>No replies waiting. New comments are read with the stats.</p>"
+    done = sorted(((i, r) for i in items for r in i.replies if r.status in ("sent", "failed")),
+                  key=lambda x: x[1].sent_at or x[1].at, reverse=True)[:30]
+    sent = "".join(
+        f"<tr><td>{pill(r.status, 'ok' if r.status == 'sent' else 'error')}</td><td>"
+        + (f"<b>{e(r.author)}:</b> {e(r.comment[:140])}<div>↳ {e(r.reply)}</div>" if r.comment
+           else f"<b>first comment:</b> {e(r.reply)}")
+        + f"<div class=meta><a href='/item/{e(item.id)}'>{e(item.idea.title[:50])}</a> · {e(r.platform)}"
+        + (f" · {e(r.detail)}" if r.detail else "") + "</div></td></tr>" for item, r in done)
+    skipped = sum(1 for i in items for r in i.replies if r.status == "skipped")
+    history = (_section(f"Sent ({len(done)})", f"<table>{sent}</table>") if sent else "") + (
+        f"<p class=meta>{skipped} comment(s) skipped (spam, bait, or better left alone).</p>" if skipped else "")
+    body = (_flash(flash) + f"<h2>Community <span class=meta>· {len(pending)} waiting</span></h2>" + head + button
+            + inbox + history)
+    return page("Community", body, st, "/community", every_ms=3000 if busy else 30000)

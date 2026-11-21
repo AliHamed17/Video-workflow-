@@ -17,6 +17,7 @@ UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
+REPLY_URL = "https://www.googleapis.com/youtube/v3/comments"
 
 
 class YouTubePublisher(HTTPPublisher):
@@ -136,6 +137,23 @@ class YouTubePublisher(HTTPPublisher):
             curve.append(round(value * 100, 1))
         return curve
 
+    # Fields of a video's snippet that videos.update accepts back (the rest are read-only).
+    WRITABLE_SNIPPET = ("title", "description", "tags", "categoryId", "defaultLanguage", "defaultAudioLanguage")
+
+    def update_title(self, video_id: str, title: str) -> None:
+        """Change a live video's title. videos.update replaces the whole snippet, so read it first and send
+        everything back unchanged except the title (youtube.force-ssl scope)."""
+        auth = {"Authorization": f"Bearer {self.access_token()}"}
+        items = self._send("GET", VIDEOS_URL, "YouTube snippet", headers=auth,
+                           params={"part": "snippet", "id": video_id}).json().get("items") or []
+        if not items:
+            raise PublishError(f"YouTube video {video_id} not found")
+        snippet = {k: v for k, v in items[0].get("snippet", {}).items() if k in self.WRITABLE_SNIPPET}
+        snippet["title"] = title[:100]
+        snippet.setdefault("categoryId", self.config.category_id)
+        self._send("PUT", VIDEOS_URL, "YouTube title update", headers=auth, params={"part": "snippet"},
+                   json={"id": video_id, "snippet": snippet})
+
     def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
         """Top-level comments, most relevant first (youtube.readonly scope)."""
         resp = self._send("GET", COMMENTS_URL, "YouTube comments",
@@ -144,12 +162,28 @@ class YouTubePublisher(HTTPPublisher):
                                   "textFormat": "plainText", "maxResults": min(limit, 100)})
         out = []
         for thread in resp.json().get("items") or []:
-            sn = thread.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
-            if sn.get("textDisplay"):
-                out.append(Comment(platform=self.name, author=sn.get("authorDisplayName", ""),
+            top = thread.get("snippet", {}).get("topLevelComment", {})
+            sn = top.get("snippet", {})
+            ours = sn.get("authorChannelId", {}).get("value") == thread.get("snippet", {}).get("channelId")
+            if sn.get("textDisplay") and not ours:     # skip the channel's own comments
+                out.append(Comment(platform=self.name, id=top.get("id", ""), author=sn.get("authorDisplayName", ""),
                                    text=sn["textDisplay"][:500], likes=to_int(sn.get("likeCount")) or 0,
                                    at=_iso(sn.get("publishedAt"))))
         return out
+
+    def reply_comment(self, post_id: str, comment_id: str, text: str) -> str:
+        """Answer a viewer's comment as the channel (youtube.force-ssl scope). Returns the reply's id."""
+        resp = self._send("POST", REPLY_URL, "YouTube reply", idempotent=False, params={"part": "snippet"},
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          json={"snippet": {"parentId": comment_id, "textOriginal": text}})
+        return str(resp.json().get("id", ""))
+
+    def post_comment(self, post_id: str, text: str) -> str:
+        """A top-level comment from the channel on its own video."""
+        resp = self._send("POST", COMMENTS_URL, "YouTube comment", idempotent=False, params={"part": "snippet"},
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          json={"snippet": {"videoId": post_id, "topLevelComment": {"snippet": {"textOriginal": text}}}})
+        return str(resp.json().get("id", ""))
 
 
 def _iso(value: str | None) -> datetime | None:

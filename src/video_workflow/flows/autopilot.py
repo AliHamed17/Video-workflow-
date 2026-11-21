@@ -173,6 +173,8 @@ class AutopilotFlow:
         self.refresh_metrics()
         if self.config.growth.comments:
             self.refresh_comments()
+            self.draft_replies()
+        self.rescue_titles()
         self.store.kv_set("last_stats", self.clock().isoformat())
         return True
 

@@ -15,6 +15,8 @@ from video_workflow.models import (
     IdeaBatch,
     Packaging,
     RenderPlan,
+    ReplyBatch,
+    ReplyOption,
     Review,
     Script,
     Shot,
@@ -59,7 +61,8 @@ def make_review(verdict: str = "approve", score: float = 9.0) -> Review:
 def make_packaging() -> Packaging:
     return Packaging(
         youtube=YouTubeMeta(title="Octopuses have THREE hearts #Shorts", description="Science!",
-                            tags=["octopus", "biology"]),
+                            tags=["octopus", "biology"], alt_titles=["Why does an octopus need 3 hearts? #Shorts",
+                                                                     "One octopus heart stops when it swims #Shorts"]),
         instagram=SocialMeta(caption="Three hearts. Which one breaks?", hashtags=["#octopus", "science"]),
         tiktok=SocialMeta(caption="3 hearts?!", hashtags=["octopus"]),
     )
@@ -80,6 +83,10 @@ def default_responses(shots: int = 2) -> dict:
         FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
         ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
         ComplianceCheck: ComplianceCheck(verdict="pass", issues=[]),
+        ReplyBatch: ReplyBatch(replies=[
+            ReplyOption(index=0, reply="The one that pumps blood to the body pauses while it swims, so it prefers to "
+                        "crawl! 🐙", skip=False, why="answers the question from the script"),
+            ReplyOption(index=1, reply="", skip=True, why="self-promotion")]),
         **{k: v for k, v in demo_content(2, 2).items() if k.__name__ in ("Localization", "ContentPlan", "TrendRadar",
                                                                       "Playbook")},
     }

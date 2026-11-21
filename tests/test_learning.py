@@ -255,7 +255,8 @@ def test_a_scheduled_run_reads_the_numbers_itself(config, tmp_path):
     youtube = YouTubePublisher("id", "secret", "refresh", config.publish.youtube, http=http, sleep=lambda s: None)
     pipe = _pipe(config, tmp_path, publishers={"youtube": youtube})
     _video(pipe.store, *HISTORY[0], post_id="ytA")
-    pipe.config.autopilot.enabled = True
+    ap = pipe.config.autopilot
+    ap.enabled, ap.source, ap.videos_per_day = True, "calendar", 0      # today: only the numbers, no new videos
     pipe.autopilot_day()
     item = pipe.store.list(Stage.PUBLISHED)[0]
     assert item.metrics["youtube"].views == 12_400 and item.metrics["youtube"].avg_view_pct == 64.5

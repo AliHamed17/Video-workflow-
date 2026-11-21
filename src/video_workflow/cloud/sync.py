@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 
 SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan",
            "viral_last", "viral_running", "autopilot_paused", "readiness", "trend_radar", "trends_running",
-           "money_snapshot", "autopilot_last_run", "growth", "growth_running")
+           "money_snapshot", "autopilot_last_run", "growth", "growth_running",
+           "community_running")
 # What a fresh worker needs to pick up where the last one stopped (`vw cloud restore`).
 RESTORE_KV = ("content_plan", "viral_last", "viral_used", "last_viral", "last_plan", "last_digest", "last_stats",
               "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault", "trend_radar",
@@ -205,6 +206,13 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str] | None:
             radar = store.kv_get("trend_radar") or {}
             top = radar.get("topics") or []
             return True, f"{len(top)} trend topics" + (f"; top: {top[0]['topic'][:60]}" if top else "")
+        if action == "community":
+            from ..web.server import run_community
+
+            args = cmd.get("args") or {}
+            if args.get("item_id") and args["item_id"] not in {i.id for i in store.list()}:
+                return _not_here(cmd, f"video {args['item_id']}")
+            return run_community(pipeline, args)
         if action == "growth":
             from ..web.server import run_growth
 

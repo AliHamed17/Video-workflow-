@@ -134,6 +134,15 @@ class YouTubeMeta(BaseModel):
     title: str = Field(description="<=100 chars, curiosity-driven, no ALL CAPS spam")
     description: str
     tags: list[str]
+    alt_titles: list[str] = Field(description="Two alternative titles with a different angle (same rules), kept "
+                                              "in reserve in case the first one underperforms")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_alternatives_by_default(cls, data):
+        if isinstance(data, dict) and "alt_titles" not in data:
+            data = {**data, "alt_titles": []}
+        return data
 
 
 class SocialMeta(BaseModel):
@@ -214,6 +223,17 @@ class PlaybookRule(BaseModel):
 class AudienceRequest(BaseModel):
     idea: str = Field(description="A video the audience is asking for, phrased as a pitchable topic")
     evidence: str = Field(description="What viewers said (short quote or paraphrase) and on which video")
+
+
+class ReplyOption(BaseModel):
+    index: int = Field(description="0-based index of the comment you are answering")
+    reply: str = Field(description="The reply as the channel, under 220 characters ('' when skip)")
+    skip: bool = Field(description="True for spam, insults, bait, off-topic or anything better left alone")
+    why: str = Field(description="One short reason: what the reply does, or why it is skipped")
+
+
+class ReplyBatch(BaseModel):
+    replies: list[ReplyOption]
 
 
 class Playbook(BaseModel):
@@ -343,10 +363,35 @@ class Comment(BaseModel):
     """A viewer comment on one of our posts (what they ask for becomes ideas)."""
 
     platform: str
+    id: str = ""                      # the platform's comment id (needed to reply)
     author: str = ""
     text: str
     likes: int = 0
     at: datetime | None = None
+
+
+class ReplyDraft(BaseModel):
+    """A reply to a viewer's comment: drafted by the community manager, sent once you (or the autopilot) say so."""
+
+    platform: str
+    comment_id: str
+    comment: str
+    author: str = ""
+    likes: int = 0
+    reply: str = ""
+    why: str = ""
+    status: Literal["drafted", "sent", "skipped", "failed"] = "drafted"
+    detail: str = ""
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sent_at: datetime | None = None
+
+
+class TitleChange(BaseModel):
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    platform: str = "youtube"
+    old: str
+    new: str
+    reason: str = ""
 
 
 class ModelUsage(BaseModel):
@@ -425,6 +470,10 @@ class ContentItem(BaseModel):
     publishes: list[PublishResult] = Field(default_factory=list)
     metrics: dict[str, PostMetrics] = Field(default_factory=dict)
     comments: list[Comment] = Field(default_factory=list)   # top viewer comments across platforms
+    replies: list[ReplyDraft] = Field(default_factory=list)  # our answers to them (drafted / sent)
+    search_terms: list[str] = Field(default_factory=list)    # what people type into YouTube search for this topic
+    early_views: dict[str, int] = Field(default_factory=dict)   # views per platform about a day after posting
+    title_changes: list[TitleChange] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     attention: str | None = None   # why a human should look at this item
     history: list[Event] = Field(default_factory=list)

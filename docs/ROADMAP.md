@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.5: Community and discoverability ✅
+
+- [x] Replies to viewers: drafted from the video's fact-checked script (questions first, spam skipped, our own comments ignored), sent from the dashboard, Telegram, the terminal or the cloud; optional auto-reply and first comment
+- [x] Real YouTube search phrases (autocomplete) in titles, descriptions and tags
+- [x] First-day views per video; title rescue to a reserve title for underperformers (opt-in, description and tags kept)
+- [x] Fixes: a stats refresh no longer wipes retention numbers; one test no longer reached the network
+
 ## Phase 2.4: Reach and safety ✅
 
 - [x] Retention curves: hook hold at 3 s and the shot where viewers leave, per video; on the video page and in the playbook

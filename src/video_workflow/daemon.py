@@ -198,6 +198,8 @@ class Daemon:
                 try:
                     if self.config.growth.comments:
                         report["comments"] = self.pipeline.refresh_comments()
+                        report["replies"] = len(self.pipeline.draft_replies())
+                    report["retitled"] = len(self.pipeline.rescue_titles())
                     growth = self.pipeline.growth_report()
                     report["winners"] = len(growth.get("winners", []))
                 except Exception as exc:   # learning must never stop production

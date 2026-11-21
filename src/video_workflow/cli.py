@@ -498,6 +498,35 @@ def growth(refresh: Annotated[bool, typer.Option("--refresh", help="Rewrite the 
 
 
 @app.command()
+def community(draft: Annotated[bool, typer.Option("--draft", help="Read new comments and draft replies now")] = False,
+              send: Annotated[int | None, typer.Option("--send", help="Send reply N")] = None,
+              skip: Annotated[int | None, typer.Option("--skip", help="Skip reply N")] = None,
+              text: Annotated[str, typer.Option("--text", help="Your own wording for --send")] = "",
+              config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Answer viewers: drafted replies to their comments, sent when you say so."""
+    from .web.server import run_community
+
+    pipe = _setup(config, data, publishers=draft or send is not None)
+    if draft:
+        pipe.refresh_comments()
+        console.print(run_community(pipe, {"op": "draft"})[1])
+    pending = pipe.pending_replies()
+    for number, op in ((send, "send"), (skip, "skip")):
+        if number is None:
+            continue
+        if not 1 <= number <= len(pending):
+            raise typer.BadParameter(f"choose 1-{len(pending)}")
+        item, reply = pending[number - 1]
+        ok, detail = run_community(pipe, {"op": op, "item_id": item.id, "comment_id": reply.comment_id, "text": text})
+        console.print(("[green]" if ok else "[yellow]") + detail + "[/]")
+        return
+    table = Table("n", "video", "viewer", "comment", "our reply")
+    for n, (item, reply) in enumerate(pending, 1):
+        table.add_row(str(n), item.idea.title[:30], reply.author, reply.comment[:60], reply.reply[:80])
+    console.print(table if pending else "No replies waiting.")
+
+
+@app.command()
 def digest(send: Annotated[bool, typer.Option("--send", help="Also send it to the notify channels")] = False,
            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Summary: what is waiting for you, what's scheduled, views and spend."""
@@ -580,7 +609,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 22:
+    if passed != len(results) or len(results) < 23:
         raise typer.Exit(1)
 
 

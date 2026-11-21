@@ -20,7 +20,8 @@ Telegram) the daemon:
 4. Advances every item in parallel (`runtime.workers`): script → critique → package → (your
    approval) → render → voice → edit → schedule → publish.
 5. Refreshes stats every `runtime.stats_every_hours`: views, likes, comments, shares and (YouTube) %
-   watched, then the top comments, then the growth numbers. The playbook is rewritten weekly
+   watched, then the top comments (and drafted replies to them), title rescue if it's on, then the
+   growth numbers. The playbook is rewritten weekly
    ([GROWTH.md](GROWTH.md)).
 6. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`):
    what went out today, what waits for you, the next post, views, the autopilot's spend against its
@@ -63,6 +64,7 @@ The bot obeys only that chat. Commands:
 | `/ideas [n] [topic or URL]` | Pitch new ideas on the next cycle |
 | `/viral`, `/remix <n>` | Today's top AI videos; make our own version of number *n* |
 | `/trends [refresh]` | What's trending for this channel, with momentum, time left and our angle |
+| `/replies`, `/send <n> [your words]`, `/skip <n>` | Drafted answers to viewers' comments: send or skip ([COMMUNITY.md](COMMUNITY.md)) |
 | `/insights`, `/followup <n>`, `/ask <n>` | What works on our channel, hits to follow up, what viewers asked for; act on them |
 | `/money` | This month's income and costs, cash, burn, runway, overdue payments, best-earning videos |
 | `/autopilot`, `/ready` | On or paused, today's spend against the cap, last run, held videos; the setup checklist |

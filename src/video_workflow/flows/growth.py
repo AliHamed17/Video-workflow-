@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from statistics import median
 
 from .. import growth
 from ..llm import LLMError
-from ..models import Comment, ContentItem, Stage
+from ..models import Comment, ContentItem, Stage, TitleChange
+from ..notify import Notice
+from .common import published_at
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +163,42 @@ class GrowthFlow:
         if items:
             self.tracer.event("growth.request", "ok", items[0].id, f"audience request: {req['idea'][:120]}")
         return items[0] if items else None
+
+    def rescue_titles(self, max_age_hours: int = 72) -> list[str]:
+        """Title rescue (growth.title_rescue): a recent YouTube video far below our usual first-day views
+        switches to its reserve title, once. Returns the ids changed."""
+        gc = self.config.growth
+        update = getattr(self.publishers.get("youtube"), "update_title", None)
+        if not (gc.title_rescue and update):
+            return []
+        counted = [i for i in self.store.list(Stage.PUBLISHED) if "youtube" in i.early_views]
+        changed = []
+        for item in counted:
+            at = published_at(item)
+            alts = item.packaging.youtube.alt_titles if item.packaging else []
+            if item.title_changes or not alts or at is None or self.clock() - at > timedelta(hours=max_age_hours):
+                continue
+            others = [i.early_views["youtube"] for i in counted if i.id != item.id]
+            if len(others) < gc.rescue_min_videos:
+                continue
+            usual, views = median(others), item.early_views["youtube"]
+            if not usual or views >= gc.rescue_below * usual:
+                continue
+            old, new = item.packaging.youtube.title, alts[0]
+            reason = f"first-day views {views:,} vs our usual {usual:,.0f}"
+            with self.tracer.span("growth.title_rescue", item.id) as span:
+                try:
+                    update(item.post_id("youtube"), new)
+                except Exception as exc:
+                    span.status, span.detail = "error", f"title not changed: {exc}"[:300]
+                    continue
+                item.title_changes.append(TitleChange(old=old, new=new, reason=reason))
+                self.store.save(item)
+                span.detail = f"\"{old[:50]}\" → \"{new[:50]}\" ({reason})"
+            self.notify(Notice(kind="info", title=f"New title on YouTube: {new}", item_id=item.id,
+                               lines=[f"Was: {old}", f"Why: {reason}."]))
+            changed.append(item.id)
+        return changed
 
     def learned_slots(self) -> list[str]:
         """Posting times that beat our median (only used with growth.learn_slots)."""

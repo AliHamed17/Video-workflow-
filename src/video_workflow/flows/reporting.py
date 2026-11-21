@@ -44,7 +44,13 @@ class ReportingFlow:
                     if "SEND_TO_USER_INBOX" in (result.detail or ""):
                         continue  # TikTok draft: no public video yet
                     try:
-                        item.metrics[result.platform] = fetch(result.post_id)
+                        fresh, before = fetch(result.post_id), item.metrics.get(result.platform)
+                        if before is not None:   # keep what the counters call doesn't return (retention)
+                            for name in ("avg_view_pct", "avg_view_s", "retention_curve"):
+                                if getattr(fresh, name) is None:
+                                    setattr(fresh, name, getattr(before, name))
+                        item.metrics[result.platform] = fresh
+                        self._snapshot_first_day(item, result.platform, fresh.views)
                         changed, updated = True, updated + 1
                     except Exception as exc:
                         log.warning("metrics %s/%s failed: %s", item.id, result.platform, exc)
@@ -54,6 +60,14 @@ class ReportingFlow:
             retention = self._refresh_retention(cutoff)
             span.detail = f"{updated} post(s) updated" + (f", retention for {retention}" if retention else "")
         return updated
+
+    def _snapshot_first_day(self, item: ContentItem, platform: str, views: int | None) -> None:
+        """Views about a day after posting: the fair way to compare a new video with earlier ones."""
+        at = published_at(item)
+        if views is None or at is None or platform in item.early_views:
+            return
+        if 18 <= (self.clock() - at).total_seconds() / 3600 <= 36:
+            item.early_views[platform] = views
 
     def _refresh_retention(self, cutoff) -> int:
         """How much of each YouTube Short people watch (YouTube Analytics; lags a day or two)."""

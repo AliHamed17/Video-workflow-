@@ -4,7 +4,8 @@ Only messages from the configured TELEGRAM_CHAT_ID are obeyed. The bot long-poll
 (no public webhook needed) and remembers its offset in the store.
 
 Commands: /list · /status <id> · /approve <id> · /reject <id> · /ideas [n] [topic] · /digest ·
-/money · /trends · /viral · /remix <n> · /insights · /followup <n> · /ask <n> · /ready · /autopilot ·
+/money · /trends · /viral · /remix <n> · /insights · /followup <n> · /ask <n> · /replies · /send <n> ·
+/skip <n> · /ready · /autopilot ·
 /pause · /resume · /help
 """
 
@@ -29,6 +30,7 @@ HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, wit
         "/trends [refresh] — what's trending for this channel\n/money — this month, cash, runway, best videos\n"
         "/insights — what works on our channel, our hits, what viewers ask for\n"
         "/followup <n> — a follow-up of hit n · /ask <n> — make what viewers asked for (n from /insights)\n"
+        "/replies — drafted answers to viewers · /send <n> [your own words] · /skip <n>\n"
         "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
         "/alerts · /plan — the content calendar · /digest — summary now\n"
         "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
@@ -133,6 +135,10 @@ class TelegramBot:
             self.say(self.insights_text())
         elif command in ("/followup", "/ask"):
             self.say(self.queue_growth(command, rest.strip()))
+        elif command == "/replies":
+            self.say(self.replies_text())
+        elif command in ("/send", "/skip"):
+            self.say(self.answer(command, rest.strip()))
         elif command == "/ready":
             self.say(self.ready_text())
         elif command == "/autopilot":
@@ -330,6 +336,29 @@ class TelegramBot:
         self.store.kv_set("pending_requests", requests)
         self.on_change()
         return f"🎬 Queued: {what}. The script is written on the next cycle."
+
+    def replies_text(self) -> str:
+        pending = self.pipeline.pending_replies()
+        if not pending:
+            return "No replies waiting. New comments are read with the stats."
+        lines = [f"💬 {len(pending)} repl{'y' if len(pending) == 1 else 'ies'} drafted (/send <n>, /send <n> your words, "
+                 "/skip <n>):"]
+        for n, (item, r) in enumerate(pending[:10], 1):
+            lines.append(f"{n}. [{item.idea.title[:30]}] {r.author}: \"{r.comment[:90]}\"\n   → {r.reply}")
+        return "\n".join(lines)
+
+    def answer(self, command: str, arg: str) -> str:
+        from .web.server import run_community
+
+        number, _, text = arg.partition(" ")
+        pending = self.pipeline.pending_replies()
+        if not number.isdigit() or not 1 <= int(number) <= len(pending):
+            return (f"Usage: {command} <n>, n from 1 to {len(pending)} (see /replies)" if pending
+                    else "No replies waiting.")
+        item, draft = pending[int(number) - 1]
+        ok, detail = run_community(self.pipeline, {"op": command[1:], "item_id": item.id,
+                                                   "comment_id": draft.comment_id, "text": text.strip()})
+        return ("✅ " if ok else "⚠️ ") + detail
 
     def ready_text(self) -> str:
         result = self.pipeline.refresh_readiness()

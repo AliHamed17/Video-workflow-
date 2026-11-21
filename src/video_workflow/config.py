@@ -365,6 +365,28 @@ class GrowthConfig(BaseModel):
     follow_ups: bool = True          # the autopilot makes a follow-up of each new winner (one a day)
     comments: bool = True            # read viewers' comments (YouTube, Instagram): questions become ideas
     learn_slots: bool = False        # post at the hours that performed best (needs 2+ videos per hour)
+    # Title rescue: a YouTube video far below our usual first-day views gets its reserve title.
+    title_rescue: bool = False       # off by default: it edits a live post
+    rescue_below: float = 0.5        # first-day views under this × our median first-day views ...
+    rescue_min_videos: int = 3       # ... once this many earlier videos have a first-day count
+
+
+class CommunityConfig(BaseModel):
+    """Answering viewers. Replies are drafted from the video's own (fact-checked) script; they are sent
+    when you approve them, or by themselves with auto_reply."""
+
+    enabled: bool = True
+    replies_per_video: int = 5       # the most-liked comments (questions first) get a drafted reply
+    max_age_days: int = 14           # only answer on recent videos
+    auto_reply: bool = False         # send drafts without asking (they still skip spam, bait and insults)
+    first_comment: bool = False      # post the video's call to action as the first comment (YouTube, Instagram)
+
+
+class SeoConfig(BaseModel):
+    """Search-aware packaging: what people actually type into YouTube search about the topic."""
+
+    enabled: bool = True
+    region: str = "US"
 
 
 class NotifyConfig(BaseModel):
@@ -372,7 +394,7 @@ class NotifyConfig(BaseModel):
         default_factory=lambda: ["log"])
     events: list[str] = Field(default_factory=lambda: [
         "needs_approval", "awaiting_render", "preview_ready", "scheduled", "published", "failed",
-        "rejected", "digest", "alert", "viral"])
+        "rejected", "digest", "alert", "viral", "community"])
 
 
 class RuntimeConfig(BaseModel):
@@ -400,6 +422,8 @@ class AppConfig(BaseModel):
     money: MoneyConfig = Field(default_factory=MoneyConfig)
     growth: GrowthConfig = Field(default_factory=GrowthConfig)
     compliance: ComplianceConfig = Field(default_factory=ComplianceConfig)
+    community: CommunityConfig = Field(default_factory=CommunityConfig)
+    seo: SeoConfig = Field(default_factory=SeoConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)

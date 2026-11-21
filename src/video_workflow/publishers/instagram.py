@@ -132,16 +132,28 @@ class InstagramPublisher(HTTPPublisher):
     def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
         """Comments on a Reel (needs the comments permission on the Instagram token)."""
         resp = self._send("GET", f"{self.base}/{post_id}/comments", "Instagram comments", headers=self._auth(),
-                          params={"fields": "text,like_count,timestamp,username", "limit": min(limit, 50)})
+                          params={"fields": "id,text,like_count,timestamp,username,from", "limit": min(limit, 50)})
         out = []
         for c in resp.json().get("data") or []:
-            if c.get("text"):
+            ours = str(c.get("from", {}).get("id", "")) == str(self.user_id)
+            if c.get("text") and not ours:
                 at = None
                 with contextlib.suppress(ValueError, AttributeError):
                     at = datetime.strptime(c.get("timestamp", ""), "%Y-%m-%dT%H:%M:%S%z")
-                out.append(Comment(platform=self.name, author=c.get("username", ""), text=c["text"][:500],
-                                   likes=to_int(c.get("like_count")) or 0, at=at))
+                out.append(Comment(platform=self.name, id=str(c.get("id", "")), author=c.get("username", ""),
+                                   text=c["text"][:500], likes=to_int(c.get("like_count")) or 0, at=at))
         return out
+
+    def reply_comment(self, post_id: str, comment_id: str, text: str) -> str:
+        """Answer a comment on our Reel (comments permission). Returns the reply's id."""
+        resp = self._send("POST", f"{self.base}/{comment_id}/replies", "Instagram reply", idempotent=False,
+                          headers=self._auth(), params={"message": text})
+        return str(resp.json().get("id", ""))
+
+    def post_comment(self, post_id: str, text: str) -> str:
+        resp = self._send("POST", f"{self.base}/{post_id}/comments", "Instagram comment", idempotent=False,
+                          headers=self._auth(), params={"message": text})
+        return str(resp.json().get("id", ""))
 
     def fetch_metrics(self, post_id: str) -> PostMetrics:
         values: dict[str, int | None] = {}

@@ -160,6 +160,25 @@ def run_growth(pipeline, args: dict) -> tuple[bool, str]:
         store.kv_set("growth_running", False)
 
 
+def run_community(pipeline, args: dict) -> tuple[bool, str]:
+    """send | skip (item_id, comment_id[, text]) | draft — shared by the dashboard, Telegram and cloud commands."""
+    try:
+        op = args.get("op")
+        if op == "draft":
+            made = pipeline.draft_replies()
+            return True, f"{len(made)} repl(ies) drafted"
+        if op == "send":
+            draft = pipeline.send_reply(args["item_id"], args["comment_id"], args.get("text") or None)
+            return draft.status == "sent", (f"sent to {draft.author}: {draft.reply[:80]}" if draft.status == "sent"
+                                            else f"not sent: {draft.detail}")
+        if op == "skip":
+            draft = pipeline.skip_reply(args["item_id"], args["comment_id"])
+            return True, f"skipped the reply to {draft.author}"
+        return False, f"unknown community op {op}"
+    except (KeyError, ValueError) as exc:
+        return False, str(exc)[:300]
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -223,6 +242,8 @@ def make_handler(pipeline, token: str | None = None):
                     return self._send(200, pages.render_viral(pipeline, data.status(pipeline), flash).encode())
                 if path == "/growth":
                     return self._send(200, pages.render_growth(pipeline, data.status(pipeline), flash).encode())
+                if path == "/community":
+                    return self._send(200, pages.render_community(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
                     return self._send(200, pages.render_calendar(pipeline, data.status(pipeline), flash).encode())
                 m = re.fullmatch(r"/item/([0-9a-f]+)/kit", path)
@@ -401,6 +422,30 @@ def make_handler(pipeline, token: str | None = None):
                     msg = {"scout": "Scouting…", "remix": "Studying the video and writing our version…",
                            "add": "Added — studying it and writing our version…"}[op]
                 return self._redirect(f"/viral?flash={quote(msg)}")
+            if path in ("/community/send", "/community/skip", "/community/draft"):
+                op = path.rsplit("/", 1)[1]
+                args = {"op": op}
+                if op != "draft":
+                    item_id, comment_id = form.get("item_id", ""), form.get("comment_id", "")[:200]
+                    if not re.fullmatch(r"[0-9a-f]{6,32}", item_id) or not comment_id:
+                        return self._redirect(f"/community?flash={quote('Unknown reply.')}")
+                    args.update(item_id=item_id, comment_id=comment_id, text=form.get("text", "").strip()[:500])
+                if cloud:
+                    store.enqueue("community", args.get("item_id"), args, source="cloud dashboard")
+                    msg = "Sent to your worker — it posts the reply at its next sync."
+                elif op == "draft":
+                    if not store.kv_get("community_running"):
+                        def drafting():
+                            store.kv_set("community_running", True)
+                            try:
+                                run_community(pipeline, args)
+                            finally:
+                                store.kv_set("community_running", False)
+                        _background("community", drafting)
+                    msg = "Reading the comments and drafting replies…"
+                else:
+                    msg = run_community(pipeline, args)[1]
+                return self._redirect(f"/community?flash={quote(msg)}")
             if path in ("/growth/refresh", "/growth/follow-up", "/growth/request"):
                 op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request"}[path.rsplit("/", 1)[1]]
                 args = {"op": op}

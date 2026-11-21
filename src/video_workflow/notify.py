@@ -22,7 +22,7 @@ from .models import ContentItem
 log = logging.getLogger(__name__)
 
 Kind = Literal["needs_approval", "awaiting_render", "preview_ready", "scheduled", "published",
-               "failed", "rejected", "digest", "alert", "info", "viral"]
+               "failed", "rejected", "digest", "alert", "info", "viral", "community"]
 
 ICONS = {"needs_approval": "📝", "awaiting_render": "🎬", "preview_ready": "👀", "scheduled": "⏰",
          "published": "🚀", "failed": "❌", "rejected": "🗑️", "digest": "📊", "alert": "🚨", "info": "ℹ️",

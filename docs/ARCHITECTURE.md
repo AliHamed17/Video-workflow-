@@ -51,6 +51,7 @@ stage.
 | | `flows/viral.py` | Viral scout, concept analysis (with thumbnails), remixes with an inspiration brief |
 | | `flows/autopilot.py` | Daily target, source order (trend × viral format → remix → calendar), spend cap and balance checks, preview gate, pause |
 | | `flows/growth.py` | Comments and retention in, playbook out (rules, avoid, viewer requests, experiment); follow-ups of hits; learned posting times |
+| | `flows/community.py` | Replies to viewers: drafts from the video's own script, send/skip, auto-reply, first comment |
 | | `flows/sound.py` | Narration per shot (Higgsfield or fallback), music track, extra-language versions |
 | | `flows/reporting.py` | Post stats, performance feedback for ideation, the daily digest (output, spend, trends, money, setup gaps, alerts) |
 | LLM | `llm/router.py` | Task → `[provider:model, ...]` with fallback and lazy provider construction |
@@ -58,7 +59,7 @@ stage.
 | | `llm/openai_provider.py` | OpenAI Responses API structured outputs; Chat Completions JSON mode for compatible endpoints |
 | | `llm/gemini_provider.py` | Gemini with `response_schema` |
 | | `llm/cli_provider.py` | Claude Code / Codex / Gemini CLI over stdin, JSON extracted and validated |
-| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, TrendAnalyst, GrowthAnalyst, Scriptwriter, Critic, ComplianceReviewer, Director, Packager, Translator, Planner |
+| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, TrendAnalyst, GrowthAnalyst, Scriptwriter, Critic, ComplianceReviewer, Director, Packager, CommunityManager, Translator, Planner |
 | Render | `video/handoff.py` | Writes `render_request.json` for Claude Code + Higgsfield MCP |
 | | `video/higgsfield_mcp.py` | Headless MCP client: cost preflight → batch submit → poll → download |
 | | `video/mock.py` | Free placeholder clips for testing |
@@ -75,6 +76,7 @@ stage.
 | Cloud | `cloud/app.py`, `cloud/store.py`, `cloud/sync.py`, `cloud/deploy.py`, `api/index.py` | Vercel app over Postgres (same pages, read from synced state); worker push/pull sync with a command queue; REST deployer |
 | Viral | `viral.py`, `agents/viral_analyst.py`, `flows/viral.py` | Daily scout of top AI shorts → concept analysis → original idea with an inspiration brief for writer, critic, director |
 | Growth | `growth.py`, `agents/growth_analyst.py` | Per-video rows made comparable (index = views ÷ median once mature), breakdowns by format/pillar/hook/source/hour/length, hits, best slots |
+| Search | `seo.py` | YouTube autocomplete phrases for the packager (free, fail-soft) |
 | Money | `money.py` | Ledger (costs per video, subscriptions, revenue imports, invoices), P&L, cash, runway, per-video ROI |
 | Growth | `kit.py`, `sources.py`, `flows/sound.py` (`localize`), `flows/trends.py` (`plan`) | Publish kit zip; ideas from an article; language versions; content calendar |
 | Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |

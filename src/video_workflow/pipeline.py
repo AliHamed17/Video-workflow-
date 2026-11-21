@@ -33,6 +33,7 @@ import httpx
 
 from . import quality, schedule
 from .agents import (
+    CommunityManager,
     ComplianceReviewer,
     Critic,
     Director,
@@ -51,7 +52,15 @@ from .agents.compliance import summarize as summarize_compliance
 from .agents.fact_checker import summarize as summarize_fact_check
 from .agents.planner import Planner
 from .config import AppConfig
-from .flows import AutopilotFlow, GrowthFlow, ReportingFlow, SoundFlow, TrendFlow, ViralFlow
+from .flows import (
+    AutopilotFlow,
+    CommunityFlow,
+    GrowthFlow,
+    ReportingFlow,
+    SoundFlow,
+    TrendFlow,
+    ViralFlow,
+)
 from .flows.common import BUDGET_HOLDS, ORDER, STOP_STAGES, split_usage
 from .llm import LLMError, LLMRouter, usage
 from .models import Clip, ContentItem, PublishResult, RenderPlan, ShotReview, Stage, Usage
@@ -69,7 +78,7 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 
 @dataclass
-class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, ReportingFlow):
+class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, SoundFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -98,6 +107,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
         self.trend_analyst = TrendAnalyst(self.config, self.router)
         self.growth_analyst = GrowthAnalyst(self.config, self.router)
         self.compliance = ComplianceReviewer(self.config, self.router)
+        self.community_manager = CommunityManager(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -270,8 +280,13 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
 
             def package():
                 with self.tracer.span("develop.package", item.id) as span:
-                    packaging = self.packager.package(item.script)
-                    span.detail = packaging.youtube.title
+                    if self.config.seo.enabled and not item.search_terms:
+                        from . import seo
+                        item.search_terms = seo.search_terms(item.idea.title, item.idea.hook, self.http,
+                                                             self.config.channel.language, self.config.seo.region)
+                    packaging = self.packager.package(item.script, item.search_terms)
+                    span.detail = packaging.youtube.title + (f" · {len(item.search_terms)} search phrases"
+                                                             if item.search_terms else "")
                 return packaging
 
             def comply():
@@ -665,6 +680,11 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
         with ThreadPoolExecutor(max_workers=max(len(jobs), 1)) as pool:
             results = list(pool.map(run, jobs.items()))
         item.publishes.extend(results)
+        if any(r.ok for r in results):
+            try:
+                self.first_comment(item, [r.platform for r in results if r.ok])
+            except Exception as exc:   # a comment must never undo a publish
+                log.warning("first comment failed for %s: %s", item.id, exc)
         for failure in (r for r in results if not r.ok):
             self.notify(Notice(kind="failed", title=f"{failure.platform} upload failed: {item.idea.title}",
                                lines=[failure.detail or ""], item_id=item.id))

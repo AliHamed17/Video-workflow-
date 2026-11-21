@@ -255,6 +255,39 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
                 f"{yt.avg_view_pct:.0f}% watched, hook hold {shape['hook_hold']:.0f}%, biggest drop in shot "
                 f"{shape['drop_shot'] + 1}")
 
+    def engagement():
+        item = store.get(state["item"].id)
+        assert item.search_terms and any("octopus" in t for t in item.search_terms), item.search_terms
+        drafted = pipe.draft_replies()
+        own = [r for i in store.list() for r in i.replies if "Which fact surprised you" in r.comment]
+        assert drafted and not own, "the channel's own comments must never get a reply"
+        bot = TelegramBot("TOKEN", "42", pipe, platforms.client())
+        bot.handle({"message": {"chat": {"id": 42}, "text": "/send 1"}})
+        replies = [body for kind, body in platforms.posted if kind == "youtube.reply"]
+        assert replies and replies[0]["snippet"]["parentId"].endswith("-c2"), platforms.posted   # the question
+        assert replies[0]["snippet"]["textOriginal"].startswith("The systemic heart")
+        pipe.config.community.first_comment = True
+        pipe.first_comment(item, ["youtube", "instagram"])
+        firsts = [kind for kind, _ in platforms.posted if kind.endswith(".comment")]
+        assert firsts == ["youtube.comment", "instagram.comment"], firsts
+        # Title rescue: today's video gets a fifth of our usual first-day views.
+        pipe.config.growth.title_rescue = True
+        for n, other in enumerate(i for i in store.list(Stage.PUBLISHED) if i.id != item.id):
+            other.early_views = {"youtube": 9_000 + 500 * n}
+            store.save(other)
+        item = store.get(item.id)
+        item.early_views = {"youtube": 1_800}
+        store.save(item)
+        assert pipe.rescue_titles() == [item.id]
+        update = next(body for kind, body in platforms.posted if kind == "youtube.title")
+        new = item.packaging.youtube.alt_titles[0]
+        assert update["snippet"]["title"] == new and update["snippet"]["description"], update
+        assert store.get(item.id).title_changes[0].new == new and pipe.rescue_titles() == []
+        pipe.config.growth.title_rescue = pipe.config.community.first_comment = False
+        return (f"{len(item.search_terms)} real search phrases in the packaging · {len(drafted)} replies drafted "
+                f"(our own comments skipped), one sent from Telegram · first comment on YouTube + Instagram · "
+                f"title rescue: 1,800 first-day views vs ~10,000 usual → \"{new[:40]}\" (description kept)")
+
     def compliance():
         llm = pipe.router._providers["fake"]
         saved = {k: llm.responses[k] for k in (Script, ComplianceCheck)}
@@ -492,6 +525,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Stats → feedback into ideas", stats_feedback),
         ("Growth: learn from results → follow up the hit", growth),
         ("Compliance: a risky script is fixed before rendering", compliance),
+        ("Engagement: search phrases, replies to viewers, title rescue", engagement),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

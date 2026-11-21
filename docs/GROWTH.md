@@ -49,6 +49,11 @@ follows still win over a rule.
   videos per hour). With `growth.learn_slots: true`, new posts use those hours instead of
   `publish.schedule.slots`. It is off by default: when to post is your call.
 
+## Title rescue
+
+See [COMMUNITY.md](COMMUNITY.md#title-rescue): with `growth.title_rescue: true`, a video far below
+our usual first-day views switches to a reserve title the packager wrote, once.
+
 ## Where you see it
 
 | Where | What |
