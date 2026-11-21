@@ -71,6 +71,7 @@ code{font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:5px}
 svg text{fill:var(--muted);font-size:10px}
 button.copy{padding:2px 9px;font-size:12px;margin-left:6px}
 table.copytbl th{white-space:nowrap;width:1%;vertical-align:top;padding-right:14px}
+.scrollx{overflow-x:auto;max-width:100%}.scrollx table{min-width:640px}.scrollx th,.scrollx button{white-space:nowrap}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
 .vcard{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
 .vthumb{position:relative;flex:0 0 96px;height:150px;border-radius:8px;overflow:hidden;background:var(--chip)}

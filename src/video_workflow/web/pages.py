@@ -643,12 +643,13 @@ def render_trends(pipeline, st: dict, flash: str = "") -> str:
                     f"</div></td><td>{pill(t['momentum'], 'ok' if t['momentum'] == 'rising' else 'gated')}</td>"
                     f"<td class=num>{pill(fit_label, tone)}</td><td class=num>~{t['shelf_life_hours']}h</td>"
                     f"<td>{e(t['angle'])}</td><td>{make}</td></tr>")
-    table = (f"<section><table><tr><th class=num>Score</th><th>Topic</th><th>Momentum</th><th class=num>Fit</th>"
-             f"<th class=num>Timely for</th><th>Our angle</th><th></th></tr>{''.join(rows)}</table></section>"
+    table = (f"<section><div class=scrollx><table><tr><th class=num>Score</th><th>Topic</th><th>Momentum</th>"
+             f"<th class=num>Fit</th><th class=num>Timely for</th><th>Our angle</th><th></th></tr>{''.join(rows)}"
+             f"</table></div></section>"
              if rows else "<p class=meta>No topics yet — press Refresh radar.</p>")
     signals = "".join(f"<tr><td class=meta>{e(sg['source'])}</td><td>{e(sg['title'])}</td><td class=meta>"
                       f"{e(sg.get('detail', ''))}</td></tr>" for sg in radar.get("signals", [])[:40])
-    raw = (f"<details><summary class=meta>Raw signals ({len(radar.get('signals', []))})</summary><section><table>"
-           f"{signals}</table></section></details>" if signals else "")
+    raw = (f"<details><summary class=meta>Raw signals ({len(radar.get('signals', []))})</summary><section>"
+           f"<div class=scrollx><table>{signals}</table></div></section></details>" if signals else "")
     body = _flash(flash) + "<h2>Trend radar</h2>" + head + button + table + raw
     return page("Trends", body, st, "/trends", every_ms=3000 if busy else 15000)
