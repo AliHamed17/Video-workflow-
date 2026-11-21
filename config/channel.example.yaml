@@ -141,6 +141,14 @@ review:
   max_revisions: 2      # writer <-> critic rounds before giving up
   on_exhausted: human   # human: park it for you with the critic's notes | reject: drop it
 
+compliance:
+  # Every script is checked before anything is rendered: copyright, real people's likeness, trademarks,
+  # harmful claims, community guidelines, and copying more than the FORMAT of a viral video. A fixable
+  # problem is rewritten once and checked again; anything else waits for you (the autopilot never
+  # renders it).
+  enabled: true
+  auto_fix: true
+
 approval:
   mode: manual          # manual: stop at "reviewed" until `vw approve <id>`; auto: approve if score >= auto_min_score
   auto_min_score: 8.5
@@ -172,6 +180,7 @@ publish:
     timezone: "UTC"     # e.g. "America/New_York"
     slots: []           # e.g. ["12:30", "19:00"]; every platform posts at the same slot. [] = immediately
     max_per_day: 2
+    rush_timely: true   # a trend video takes the earliest slot; if that is after its window, it posts now
 
 trends:
   enabled: false

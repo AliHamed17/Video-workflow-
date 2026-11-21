@@ -118,6 +118,24 @@ class YouTubePublisher(HTTPPublisher):
                                           "avg_view_s": float(rec.get("averageViewDuration") or 0)}
         return out
 
+    def fetch_retention_curve(self, video_id: str, start: str, end: str, points: int = 20) -> list[float]:
+        """% of viewers still watching at `points` even steps through the video (YouTube Analytics
+        audienceWatchRatio; above 100 where people rewind or rewatch). Empty until YouTube has data."""
+        resp = self._send("GET", ANALYTICS_URL, "YouTube retention curve",
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          params={"ids": "channel==MINE", "startDate": start, "endDate": end,
+                                  "metrics": "audienceWatchRatio", "dimensions": "elapsedVideoTimeRatio",
+                                  "filters": f"video=={video_id}"})
+        rows = sorted((float(r[0]), float(r[1])) for r in resp.json().get("rows") or [] if len(r) >= 2)
+        if not rows:
+            return []
+        curve = []
+        for i in range(1, points + 1):
+            target = i / points
+            ratio, value = min(rows, key=lambda r: abs(r[0] - target))
+            curve.append(round(value * 100, 1))
+        return curve
+
     def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
         """Top-level comments, most relevant first (youtube.readonly scope)."""
         resp = self._send("GET", COMMENTS_URL, "YouTube comments",

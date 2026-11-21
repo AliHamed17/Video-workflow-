@@ -12,11 +12,11 @@ Two kinds of models live here:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # --------------------------------------------------------------------------------------
 # LLM output schemas
@@ -31,6 +31,16 @@ class Idea(BaseModel):
     why_it_will_perform: str = Field(description="Retention/shareability reasoning")
     fact_check_notes: str = Field(description="Key claims and how confident we are they are true")
     predicted_score: float = Field(description="0-10: honest prediction of how well this performs vs. our other ideas")
+    timely_for_hours: int = Field(description="0 if evergreen; if the idea rides a trend or news story, how many "
+                                              "hours it stays timely (use the trend's 'timely for ~Nh')")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _evergreen_by_default(cls, data):
+        # Ideas stored before this field existed are evergreen. (The LLM schema still requires it.)
+        if isinstance(data, dict) and "timely_for_hours" not in data:
+            data = {**data, "timely_for_hours": 0}
+        return data
 
 
 class IdeaBatch(BaseModel):
@@ -73,6 +83,21 @@ class Review(BaseModel):
     strengths: list[str]
     problems: list[str] = Field(description="Concrete issues: retention risks, factual doubts, policy risks")
     revision_instructions: str = Field(description="Exact changes the writer should make ('' if approve)")
+
+
+class ComplianceIssue(BaseModel):
+    category: Literal["copyright", "likeness", "trademark", "claims", "safety", "platform_policy",
+                      "too_close_to_source", "disclosure"]
+    severity: Literal["block", "fix", "note"] = Field(
+        description="block: can't be fixed by rewriting; fix: rewrite needed before rendering; note: fine, be aware")
+    issue: str = Field(description="What exactly is risky, quoting the script")
+    fix: str = Field(description="The concrete change to the script that resolves it ('' for notes)")
+
+
+class ComplianceCheck(BaseModel):
+    verdict: Literal["pass", "fix", "block"] = Field(
+        description="pass: safe to render and post; fix: safe after the listed fixes; block: don't make this video")
+    issues: list[ComplianceIssue]
 
 
 class HookOption(BaseModel):
@@ -310,6 +335,7 @@ class PostMetrics(BaseModel):
     shares: int | None = None
     avg_view_pct: float | None = None     # YouTube Analytics: average percentage of the video watched
     avg_view_s: float | None = None       # average view duration in seconds
+    retention_curve: list[float] | None = None   # % of viewers still watching at 20 even points through the video
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -376,6 +402,7 @@ class ContentItem(BaseModel):
     hook_options: list[HookOption] = Field(default_factory=list)
     script: Script | None = None
     fact_check: FactCheck | None = None
+    compliance: ComplianceCheck | None = None
     review: Review | None = None
     revisions: int = 0
     render_plan: RenderPlan | None = None
@@ -403,6 +430,12 @@ class ContentItem(BaseModel):
     history: list[Event] = Field(default_factory=list)
     error: str | None = None
     failed_stage: Stage | None = None  # where it failed, so `retry` knows where to resume
+
+    @property
+    def timely_until(self) -> datetime | None:
+        """When a trend-based video stops being timely (None for evergreen ideas)."""
+        hours = self.idea.timely_for_hours
+        return self.created_at + timedelta(hours=hours) if hours > 0 else None
 
     @property
     def awaiting_final_approval(self) -> bool:

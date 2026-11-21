@@ -68,6 +68,9 @@ def _card(item: ContentItem, now_events: dict, now: datetime) -> str:
         bits.append(f"QA {item.quality.score:.0f}")
     if item.scheduled_for and item.stage == Stage.EDITED:
         bits.append(f"⏰ {item.scheduled_for:%d %b %H:%M}")
+    if item.timely_until and item.stage not in (Stage.PUBLISHED, Stage.REJECTED, Stage.FAILED):
+        left = (item.timely_until - now).total_seconds() / 3600
+        bits.append(f"⏱ timely, {left:.0f}h left" if left > 0 else "⏱ trend passed")
     if item.metrics:
         bits.append(f"{item.total_views:,} views")
     flag = f"<div class=warn>⚠ {e(item.attention[:90])}</div>" if item.attention else ""
@@ -204,6 +207,9 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     if sequels:
         source += "<p>🔁 Followed up by " + ", ".join(
             f"<a href='/item/{i.id}'>{e(i.idea.title[:60])}</a>" for i in sequels) + "</p>"
+    if item.timely_until:
+        source += (f"<p>⏱ Rides a trend: timely for {idea.timely_for_hours} h, until "
+                   f"{item.timely_until:%a %d %b %H:%M} UTC. It takes the earliest posting slot.</p>")
     parts.append(_section("Idea", source + f"<p><b>Hook:</b> {e(idea.hook)}</p><p><b>Angle:</b> {e(idea.angle)}</p>"
                  f"<p class=meta>Pillar {e(idea.pillar)} · predicted {idea.predicted_score:.1f}/10 · "
                  f"{e(idea.why_it_will_perform)}</p>"))
@@ -238,6 +244,15 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
         rows = "".join(f"<tr><td>{pill(c.verdict, c.verdict)}</td><td>{e(c.claim)}</td><td class=meta>{e(c.note)}</td></tr>"
                        for c in item.fact_check.claims)
         parts.append(_section(f"Fact-check — {e(item.fact_check.overall)}", f"<table>{rows}</table>"))
+    if item.compliance:
+        cmp = item.compliance
+        tone = {"block": "error", "fix": "warn", "note": "skipped"}
+        rows = "".join(f"<tr><td>{pill(i.severity, tone[i.severity])}</td><td><b>{e(i.category.replace('_', ' '))}</b>"
+                       f"<div>{e(i.issue)}</div>{f'<div class=meta>Fix: {e(i.fix)}</div>' if i.fix else ''}</td></tr>"
+                       for i in cmp.issues)
+        parts.append(_section(f"🛡 Compliance — {pill(cmp.verdict, 'ok' if cmp.verdict == 'pass' else tone.get(cmp.verdict, ''))}",
+                              f"<table>{rows}</table>" if rows else
+                              "<p class=meta>No copyright, likeness, trademark, claims, safety or policy issues found.</p>"))
     if item.review:
         r = item.review
         probs = "".join(f"<li>{e(p)}</li>" for p in r.problems) or "<li>none</li>"
@@ -286,11 +301,11 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                     f"<div class=meta>{e(r.detail or '')}</div></td></tr>")
 
         rows = "".join(publish_row(r) for r in item.publishes)
-        stats = "".join(f"<tr><td>{e(k)}</td><td colspan=2>{v.views or 0:,} views · {v.likes or 0:,} likes · "
+        stats = "".join(f"<tr><td style='white-space:nowrap'>{e(k)}</td><td colspan=2>{v.views or 0:,} views · {v.likes or 0:,} likes · "
                         f"{v.comments or 0:,} comments · {v.shares or 0:,} shares"
                         + (f" · {v.avg_view_pct:.0f}% watched on average" if v.avg_view_pct is not None else "")
                         + "</td></tr>" for k, v in item.metrics.items())
-        parts.append(_section("Publishing & stats", f"<table>{rows}{stats}</table>"))
+        parts.append(_section("Publishing & stats", f"<table>{rows}{stats}</table>" + retention_html(item)))
     if item.comments:
         said = "".join(f"<tr><td>{e(c.text[:300])}<div class=meta>{e(c.author)} · {e(c.platform)} · {c.likes} likes"
                        "</div></td></tr>" for c in item.comments[:12])
@@ -303,6 +318,41 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     body = (_flash(flash) + f"<h2>{e(item.idea.title)}</h2>"
             f"<div class=grid><div>{left}</div><div>{''.join(parts)}</div></div>")
     return page(item.idea.title, body, st, "/")
+
+
+def retention_html(item: ContentItem) -> str:
+    """The audience-retention curve (YouTube) with the hook line at 3 s and the biggest drop marked."""
+    from ..growth import curve_at, curve_summary
+
+    curve = next((m.retention_curve for m in item.metrics.values() if m.retention_curve), None)
+    shots = [s.duration_s for s in item.script.shots] if item.script else []
+    seconds = sum(shots) or None
+    if not curve or not seconds:
+        return ""
+    shape = curve_summary(curve, seconds, shots)
+    top = max(110.0, max(curve))
+    pts = [(0.0, 100.0)] + [((i + 1) / len(curve), v) for i, v in enumerate(curve)]
+
+    def xy(frac: float, value: float) -> tuple[float, float]:
+        return round(frac * 300, 1), round(80 - value / top * 76, 1)
+
+    line = " ".join(f"{x},{y}" for x, y in (xy(f, v) for f, v in pts))
+    hook_x = xy(min(1.0, 3 / seconds), 0)[0]
+    marks = (f"<line x1='{hook_x}' y1='2' x2='{hook_x}' y2='80' style='stroke:var(--muted)' "
+             "stroke-dasharray='3 3'/>")
+    caption = f"Hook hold <b>{shape['hook_hold']:.0f}%</b> at 3 s"
+    if shape.get("drop_at_s") is not None:
+        left = curve_at(curve, shape["drop_at_s"] / seconds)
+        dx, dy = xy(shape["drop_at_s"] / seconds, left)
+        marks += f"<circle cx='{dx}' cy='{dy}' r='4' style='fill:var(--bad)'/>"
+        where = (f"shot {shape['drop_shot'] + 1}: {e(item.script.shots[shape['drop_shot']].visual[:90])}"
+                 if shape.get("drop_shot") is not None and item.script else "")
+        caption += (f" · biggest drop <b class=bad>−{shape['drop_pts']:.0f} pts</b> at {shape['drop_at_s']:.1f} s"
+                    + (f" ({where})" if where else "") + f" · {left:.0f}% still watching there")
+    return ("<svg viewBox='0 0 300 84' style='width:100%;height:auto;margin:6px 0' role='img' "
+            "aria-label='audience retention curve'>"
+            f"<polyline points='{line}' fill='none' style='stroke:var(--accent)' stroke-width='2'/>{marks}</svg>"
+            f"<p class=meta>{caption}. Above 100% means people rewound or rewatched.</p>")
 
 
 def money_html(pipeline, item: ContentItem) -> str:
@@ -833,7 +883,8 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
         head += "<p class=warn>Growth learning is off (growth.enabled: false).</p>"
     kpis = [(g.get("published", 0), "published"), (g.get("mature", 0), f"mature (≥{gc.mature_hours}h)"),
             (num(g.get("median_views")), "median views"), (num(g.get("median_engagement"), "%"), "median engagement"),
-            (num(g.get("median_retention"), "%"), "median watched"), (len(g.get("winners", [])), "hits")]
+            (num(g.get("median_retention"), "%"), "median watched"),
+            (num(g.get("median_hook_hold"), "%"), "median hook hold (3 s)"), (len(g.get("winners", [])), "hits")]
     kpi_html = "<div class=kpis>" + "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>"
                                              for v, label in kpis) + "</div>"
     button = ("<p class=warn>Working on it…</p>" if busy else
@@ -891,7 +942,8 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
             continue
         body = "".join(f"<tr><td>{e(x['value'])}<div class=meta>{x['n']} video{'s' if x['n'] != 1 else ''} · "
                        f"{num(x['views'])} views · eng {num(x['engagement'], '%')} · {num(x['retention'], '%')} "
-                       f"watched</div></td><td class=num style='width:34%'>{_idx(x['index'])}</td></tr>"
+                       f"watched{' · hook hold ' + num(x.get('hook_hold'), '%') if x.get('hook_hold') is not None else ''}"
+                       f"</div></td><td class=num style='width:34%'>{_idx(x['index'])}</td></tr>"
                        for x in groups[:10])
         tables.append(f"<h4>{e(label)}</h4><table>{body}</table>")
     slots = g.get("best_slots") or []
@@ -902,8 +954,12 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
 
     vids = "".join(
         f"<tr><td><a href='/item/{e(r['id'])}'>{e(r['title'][:70])}</a><div class=meta>{r['views']:,} views · eng "
-        f"{num(r['engagement'], '%')} · {num(r['retention'], '%')} watched · {e(r['weekday'])} {e(r['hour'])}</div>"
-        f"<div class=meta>{e(r['source'])}{' · ' + e(r['format']) if r['format'] else ''}"
+        f"{num(r['engagement'], '%')} · {num(r['retention'], '%')} watched"
+        f"{' · hook hold ' + num(r.get('hook_hold'), '%') if r.get('hook_hold') is not None else ''}"
+        f" · {e(r['weekday'])} {e(r['hour'])}</div>"
+        + (f"<div class=meta>drops at shot {r['drop_shot'] + 1} ({num(r['drop_at_s'])}s, −{num(r['drop_pts'])} pts)</div>"
+           if r.get("drop_shot") is not None else "")
+        + f"<div class=meta>{e(r['source'])}{' · ' + e(r['format']) if r['format'] else ''}"
         f"{' · ' + e(r['hook_technique']) if r['hook_technique'] else ''}</div></td>"
         f"<td class=num style='width:30%'>{_idx(r['index'])}</td></tr>" for r in list(rows.values())[:40])
     videos = _section("🎞 Every video", f"<table>{vids}</table>") if vids else ""

@@ -12,6 +12,7 @@ Every published video gets one comparable row (`growth.py`, no LLM involved):
 |---|---|
 | Views, likes, comments, shares | Each platform's stats (`runtime.stats_every_hours`) |
 | % watched (retention) | YouTube Analytics, a day or two behind (same Google scope as revenue) |
+| **Hook hold** and **where viewers leave** | The retention curve (20 points per video): % still watching at 3 seconds, and the biggest drop after that, mapped to the shot it happens in ("−18 pts at 8.5 s, shot 2: the slow pan over the reef"). The video page draws the curve |
 | **Index** | views ÷ the channel's median views, counted once a video is `growth.mature_hours` old, so a 3-hour-old video is never compared with a 5-day-old one |
 | What it was made of | format (from the viral video it remixed), pillar, hook technique, where the idea came from, posting hour, length |
 
@@ -23,7 +24,9 @@ questions: 0.8×"), lists every video and shows the top comments.
 Once `growth.min_videos` videos are mature, the **growth analyst** (`growth` LLM task; it falls
 back to the `ideation` route) reads those numbers and the most-liked comments and writes:
 
-- **rules**: what to do more of, each with its evidence and a confidence (strong / medium / weak)
+- **rules**: what to do more of, each with its evidence and a confidence (strong / medium / weak).
+  The analyst sees each video's hook hold and the shot where viewers left, so rules can be as
+  specific as "cut the establishing shot: every video that opens wide loses 20 points by second 5"
 - **avoid**: what underperformed
 - **viewers asked for**: videos the comments asked for, phrased as pitchable topics
 - **this week's experiment**: one change to test, and how to judge it

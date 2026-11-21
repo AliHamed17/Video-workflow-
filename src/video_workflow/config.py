@@ -183,6 +183,15 @@ class ReviewConfig(BaseModel):
     on_exhausted: Literal["human", "reject"] = "human"
 
 
+class ComplianceConfig(BaseModel):
+    """Legal and platform risk, checked on every script before anything is rendered: copyright, real
+    people's likeness, trademarks, harmful claims, community guidelines, and copying too much of the
+    viral video a remix came from."""
+
+    enabled: bool = True
+    auto_fix: bool = True          # rewrite the script once with the fixes, then check again
+
+
 class QualityConfig(BaseModel):
     visual_qa: bool = True            # a vision model inspects frames of every rendered shot
     visual_min_score: float = 6.5     # shots below this (or flagged) are re-rendered
@@ -242,6 +251,9 @@ class ScheduleConfig(BaseModel):
     timezone: str = "UTC"
     slots: list[str] = Field(default_factory=list)  # ["09:00", "18:30"]; empty = publish immediately
     max_per_day: int = 2
+    # A timely (trend) video takes the earliest slot, ahead of evergreen ones; if even that is after its
+    # window closes, it posts right away instead of going out stale.
+    rush_timely: bool = True
 
 
 class PublishConfig(BaseModel):
@@ -387,6 +399,7 @@ class AppConfig(BaseModel):
     viral: ViralConfig = Field(default_factory=ViralConfig)
     money: MoneyConfig = Field(default_factory=MoneyConfig)
     growth: GrowthConfig = Field(default_factory=GrowthConfig)
+    compliance: ComplianceConfig = Field(default_factory=ComplianceConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)

@@ -72,13 +72,20 @@ class ReportingFlow:
         except Exception as exc:   # analytics scope missing or not available yet
             self.tracer.event("stats.retention", "warn", None, f"YouTube retention: {exc}"[:300])
             return 0
-        for post_id, values in data.items():
-            item = posts.get(post_id)
-            if item is None:
-                continue
+        curve_fetch = getattr(self.publishers.get("youtube"), "fetch_retention_curve", None)
+        start, end = cutoff.date().isoformat(), self.clock().date().isoformat()
+        for post_id, item in posts.items():
             m = item.metrics.setdefault("youtube", PostMetrics())
-            m.avg_view_pct, m.avg_view_s = values.get("avg_view_pct"), values.get("avg_view_s")
-            self.store.save(item)
+            values = data.get(post_id)
+            if values:
+                m.avg_view_pct, m.avg_view_s = values.get("avg_view_pct"), values.get("avg_view_s")
+            if curve_fetch and values:   # where viewers leave: one call per video that has data
+                try:
+                    m.retention_curve = curve_fetch(post_id, start, end) or m.retention_curve
+                except Exception as exc:
+                    self.tracer.event("stats.retention", "warn", item.id, f"retention curve: {exc}"[:300])
+            if values:
+                self.store.save(item)
         return len(data)
 
     # ---- the daily digest -----------------------------------------------------------------

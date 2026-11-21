@@ -58,13 +58,13 @@ stage.
 | | `llm/openai_provider.py` | OpenAI Responses API structured outputs; Chat Completions JSON mode for compatible endpoints |
 | | `llm/gemini_provider.py` | Gemini with `response_schema` |
 | | `llm/cli_provider.py` | Claude Code / Codex / Gemini CLI over stdin, JSON extracted and validated |
-| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, TrendAnalyst, GrowthAnalyst, Scriptwriter, Critic, Director, Packager, Translator, Planner |
+| Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, TrendAnalyst, GrowthAnalyst, Scriptwriter, Critic, ComplianceReviewer, Director, Packager, Translator, Planner |
 | Render | `video/handoff.py` | Writes `render_request.json` for Claude Code + Higgsfield MCP |
 | | `video/higgsfield_mcp.py` | Headless MCP client: cost preflight → batch submit → poll → download |
 | | `video/mock.py` | Free placeholder clips for testing |
 | Voice | `voice.py` | Per-shot narration: OpenAI TTS, ElevenLabs, or offline flite; cached by text hash |
 | Edit | `video/editor.py` | Parallel normalise to 1080x1920@30, stitch, fit narration per shot, ASS word captions + headline, music with sidechain ducking, loudnorm −14 LUFS, thumbnail |
-| Schedule | `schedule.py` | Next free posting slot per timezone and daily cap; every platform posts together |
+| Schedule | `schedule.py`, `pipeline._assign_slot` | Next free posting slot per timezone and daily cap; every platform posts together; trend videos (`timely_for_hours`) take the earliest slot and post at once rather than miss their window |
 | Publish | `publishers/*.py` | YouTube resumable upload; Instagram resumable Reels; TikTok chunked FILE_UPLOAD (draft or direct); `fetch_metrics` on each |
 | Network | `net.py` | Retries with backoff and Retry-After; non-idempotent calls never retried after an ambiguous 5xx |
 | Trends | `trends.py` | Wikipedia most-read, Google News/Trends RSS, Reddit, YouTube most-popular (fail-soft; feeds with a DTD are refused) |

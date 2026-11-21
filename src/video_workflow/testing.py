@@ -15,6 +15,8 @@ import httpx
 from .models import (
     AudienceRequest,
     Claim,
+    ComplianceCheck,
+    ComplianceIssue,
     ContentPlan,
     ContentPlanDay,
     FactCheck,
@@ -157,6 +159,9 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                        loop_strategy="ends on 'three hearts' which restarts the hook"),
         Review: Review(score=8.6, hook_strength=9, verdict="approve", strengths=["clean hook", "true facts"],
                        problems=[], revision_instructions=""),
+        ComplianceCheck: ComplianceCheck(verdict="pass", issues=[ComplianceIssue(
+            category="disclosure", severity="note", issue="photoreal octopus footage could be mistaken for real",
+            fix="")]),
         RenderPlan: RenderPlan(style_anchor="photoreal underwater macro, deep teal light, shallow depth of field",
                                shots=[ShotPrompt(index=i, prompt=v, duration_s=duration, camera="slow orbit")
                                       for i, (v, _, _) in enumerate(picked)]),
@@ -249,6 +254,12 @@ class FakePlatforms:
                     "likeCount": 41, "publishedAt": "2026-11-20T11:00:00Z"}}}}]})
         if host == "youtubeanalytics.googleapis.com" and path == "/v2/reports":
             ids = req.url.params.get("filters", "").removeprefix("video==").split(",")
+            if req.url.params.get("metrics") == "audienceWatchRatio":   # a short with a strong hook, a dip at 40%
+                curve = [(r / 100, (1.0 - r / 400 - (0.18 if r > 40 else 0)) * (1.15 if r < 4 else 1.0))
+                         for r in range(1, 101)]
+                return httpx.Response(200, json={"columnHeaders": [{"name": "elapsedVideoTimeRatio"},
+                                                                   {"name": "audienceWatchRatio"}],
+                                                 "rows": [[round(a, 2), round(b, 3)] for a, b in curve]})
             if "averageViewPercentage" in req.url.params.get("metrics", ""):
                 return httpx.Response(200, json={
                     "columnHeaders": [{"name": "video"}, {"name": "averageViewPercentage"},

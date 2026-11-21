@@ -33,6 +33,7 @@ import httpx
 
 from . import quality, schedule
 from .agents import (
+    ComplianceReviewer,
     Critic,
     Director,
     FactChecker,
@@ -46,6 +47,7 @@ from .agents import (
     ViralAnalyst,
     VisualQA,
 )
+from .agents.compliance import summarize as summarize_compliance
 from .agents.fact_checker import summarize as summarize_fact_check
 from .agents.planner import Planner
 from .config import AppConfig
@@ -95,6 +97,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
         self.viral_analyst = ViralAnalyst(self.config, self.router)
         self.trend_analyst = TrendAnalyst(self.config, self.router)
         self.growth_analyst = GrowthAnalyst(self.config, self.router)
+        self.compliance = ComplianceReviewer(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -271,7 +274,32 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
                     span.detail = packaging.youtube.title
                 return packaging
 
-            item.render_plan, item.packaging = self._parallel(direct, package)
+            def comply():
+                return self._compliance_check(item, brief)
+
+            # Compliance reads the same script as the director and packager: all three side by side.
+            item.render_plan, item.packaging, check = self._parallel(direct, package, comply)
+            if check is not None and check.verdict == "fix" and self.config.compliance.auto_fix:
+                with self.tracer.span("develop.write", item.id, round="compliance") as span:
+                    fixes = summarize_compliance(check)
+                    item.script = self.writer.write(
+                        item.idea, previous=item.script, corrections=fixes, inspiration=brief, lessons=lessons,
+                        review=item.review.model_copy(update={
+                            "verdict": "revise", "problems": ["compliance: " + i.issue for i in check.issues
+                                                              if i.severity == "fix"],
+                            "revision_instructions": "Apply ONLY the compliance fixes below; keep everything else."}))
+                    span.detail = f"rewrote for {len([i for i in check.issues if i.severity == 'fix'])} compliance fix(es)"
+                check, item.review = self._parallel(
+                    comply, lambda: self.critic.review(item.idea, item.script, None, inspiration=brief,
+                                                       checked_in_parallel=cc.fact_check))
+                item.render_plan, item.packaging = self._parallel(direct, package)
+                if item.review.score < self.config.review.min_score and item.attention is None:
+                    item.attention = (f"After the compliance fixes the critic scored {item.review.score:.1f}/10. "
+                                      "Your call.")
+            if check is not None and check.verdict != "pass" and item.attention is None:
+                worst = [i for i in check.issues if i.severity in ("block", "fix")][:3]
+                item.attention = (f"Compliance {check.verdict}: " + "; ".join(f"[{i.category}] {i.issue}" for i in worst)
+                                  )[:600]
         item.move(Stage.REVIEWED, f"score {item.review.score:.1f}")
         self.store.save(item)
 
@@ -280,11 +308,32 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
             return self.approve(item, note="auto-approved")
         if (self.autopilot_active and item.attention is None
                 and item.review.score >= self.config.autopilot.min_script_score):
-            return self.approve(item, note=f"autopilot: critic {item.review.score:.1f}/10, fact-check passed")
+            return self.approve(item, note=f"autopilot: critic {item.review.score:.1f}/10, fact-check passed"
+                                + (", compliance passed" if item.compliance else ""))
         notice = needs_approval(item)
         notice.lines.insert(2, self._balance_line(len(item.render_plan.shots)))
         self.notify(notice)
         return item
+
+    def _compliance_check(self, item: ContentItem, brief: str):
+        """Legal / platform risk of the current script (None when switched off). A check that can't run
+        parks the video for a human instead of letting the autopilot render it unchecked."""
+        if not self.config.compliance.enabled:
+            return None
+        with self.tracer.span("develop.compliance", item.id) as span:
+            try:
+                check = self.compliance.check(item.idea, item.script, brief)
+            except Exception as exc:
+                span.status, span.detail = "warn", f"compliance check unavailable: {exc}"[:300]
+                if item.attention is None:
+                    item.attention = f"The compliance check couldn't run ({str(exc)[:160]}). Review it yourself."
+                return None
+            item.compliance = check
+            flagged = [i for i in check.issues if i.severity != "note"]
+            span.detail = f"{check.verdict}" + (": " + "; ".join(f"{i.category}: {i.issue[:80]}" for i in flagged[:3])
+                                                if flagged else f" ({len(check.issues)} note(s))")
+            span.status = "ok" if check.verdict == "pass" else "error" if check.verdict == "block" else "warn"
+        return check
 
     def approve(self, item: ContentItem, note: str = "approved by human") -> ContentItem:
         self._expect(item, Stage.REVIEWED)
@@ -533,17 +582,41 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, Repor
 
     # ---- scheduling ---------------------------------------------------------------------
     def _assign_slot(self, item: ContentItem) -> None:
+        now, deadline, note = self.clock(), item.timely_until, ""
         with self._slot_lock:
-            taken = [i.scheduled_for for i in self.store.list()
-                     if i.scheduled_for and i.id != item.id and i.stage in (Stage.EDITED, Stage.PUBLISHED)]
+            others = [i for i in self.store.list()
+                      if i.scheduled_for and i.id != item.id and i.stage in (Stage.EDITED, Stage.PUBLISHED)]
             sched = self.config.publish.schedule
             if self.learned_slots():   # growth.learn_slots: post when our videos have done best
                 sched = sched.model_copy(update={"slots": self.learned_slots()})
-            item.scheduled_for = schedule.next_slot(sched, taken, self.clock())
+            slot = schedule.next_slot(sched, [i.scheduled_for for i in others], now)
+            if deadline and slot:
+                # A trend video goes first: it takes the earliest slot a waiting evergreen video holds.
+                waiting = sorted((i for i in others if i.stage == Stage.EDITED and i.timely_until is None
+                                  and now < i.scheduled_for < slot), key=lambda i: i.scheduled_for)
+                if waiting:
+                    try:
+                        with self.store.lease(waiting[0].id):
+                            other = self.store.get(waiting[0].id)
+                            slot, other.scheduled_for = other.scheduled_for, slot
+                            self.store.save(other)
+                        note = f"timely: moved ahead of {other.id} ({other.idea.title[:40]})"
+                        self.tracer.event("schedule.priority", "ok", item.id, note)
+                    except ItemBusy:
+                        pass
+                if slot > deadline and sched.rush_timely:
+                    slot, note = now, f"timely until {deadline.astimezone(self.tz):%a %H:%M}: posting now, no slot before"
+            item.scheduled_for = slot
             self.store.save(item)
+        if deadline and item.scheduled_for and item.scheduled_for > deadline:
+            self.tracer.event("schedule.late", "warn", item.id, f"posts after its window ({deadline:%a %H:%M} UTC)")
+            self.notify(Notice(kind="alert", title=f"Timely video posts late: {item.idea.title}", item_id=item.id,
+                               lines=[f"Its trend is timely until {deadline.astimezone(self.tz):%a %d %b %H:%M}; the "
+                                      f"next slot is {item.scheduled_for.astimezone(self.tz):%a %d %b %H:%M}.",
+                                      "Publish it now from the dashboard or with `vw publish <id> --now`."]))
         if item.scheduled_for:
             local = item.scheduled_for.astimezone(self.tz)
-            self.tracer.event("schedule.slot", "ok", item.id, f"{local:%a %d %b %H:%M}")
+            self.tracer.event("schedule.slot", "ok", item.id, f"{local:%a %d %b %H:%M}" + (f" · {note}" if note else ""))
             self.notify(Notice(kind="scheduled", title=f"Scheduled: {item.idea.title}",
                                lines=[f"Goes out on {', '.join(self.config.publish.platforms)} at "
                                       f"{local:%a %d %b %H:%M} ({self.config.publish.schedule.timezone})."],

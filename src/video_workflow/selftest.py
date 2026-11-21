@@ -30,7 +30,16 @@ from .config import AppConfig, Secrets, TrendsConfig
 from .daemon import Daemon
 from .health import check_notify, check_publishers, check_trends
 from .llm import LLMRouter
-from .models import ContentItem, PostMetrics, PublishResult, ShotQA, Stage
+from .models import (
+    ComplianceCheck,
+    ComplianceIssue,
+    ContentItem,
+    PostMetrics,
+    PublishResult,
+    Script,
+    ShotQA,
+    Stage,
+)
 from .monitor import scan
 from .notify import Dispatcher, MemoryNotifier, TelegramNotifier
 from .pipeline import Pipeline
@@ -237,7 +246,42 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         assert pipe.refresh_metrics() == 3
         item = store.get(state["item"].id)
         assert f"{item.total_views:,} views" in pipe.performance_summary()
-        return f"{item.total_views:,} views collected from 3 platforms and fed back to the trend scout"
+        yt = item.metrics["youtube"]
+        assert yt.avg_view_pct and yt.retention_curve and len(yt.retention_curve) == 20
+        from .growth import curve_summary
+        shape = curve_summary(yt.retention_curve, sum(s.duration_s for s in item.script.shots),
+                              [s.duration_s for s in item.script.shots])
+        return (f"{item.total_views:,} views collected from 3 platforms and fed back to the trend scout · "
+                f"{yt.avg_view_pct:.0f}% watched, hook hold {shape['hook_hold']:.0f}%, biggest drop in shot "
+                f"{shape['drop_shot'] + 1}")
+
+    def compliance():
+        llm = pipe.router._providers["fake"]
+        saved = {k: llm.responses[k] for k in (Script, ComplianceCheck)}
+        clean = saved[Script] if isinstance(saved[Script], Script) else saved[Script][-1]
+        risky = clean.model_copy(deep=True)
+        risky.shots[0].visual = "Mickey Mouse holds an octopus heart up to the camera"
+        fixed = clean.model_copy(deep=True)
+        fixed.shots[0].visual = "a cartoon mouse of our own design holds an octopus heart up to the camera"
+        llm.responses[Script] = [risky, fixed]
+        llm.responses[ComplianceCheck] = [
+            ComplianceCheck(verdict="fix", issues=[ComplianceIssue(
+                category="copyright", severity="fix", issue="shot 1 shows Mickey Mouse, a Disney character",
+                fix="replace 'Mickey Mouse' with an original cartoon mouse")]),
+            ComplianceCheck(verdict="pass", issues=[])]
+        try:
+            item = pipe.develop(pipe.ideate(1)[0])
+        finally:
+            llm.responses.update(saved)
+        rewrite = next(p for s, p in reversed(llm.calls) if s == "Script")
+        assert "replace 'Mickey Mouse' with an original cartoon mouse" in rewrite, "fix not passed to the writer"
+        assert item.compliance.verdict == "pass" and "Mickey" not in item.script.model_dump_json(), item.compliance
+        assert item.stage == Stage.REVIEWED and item.attention is None
+        rounds = [e["attrs"].get("round") for e in store.events(item_id=item.id, step_prefix="develop.write")]
+        assert "compliance" in rounds, rounds
+        pipe.reject(item, note="selftest: compliance demo")
+        return ("a script showing Mickey Mouse was flagged (copyright), rewritten with the fix and passed on "
+                "the second check, before anything was rendered")
 
     def growth():
         # A channel with a history: four older posts with very different results.
@@ -447,6 +491,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Publish to YouTube + Instagram + TikTok", publish),
         ("Stats → feedback into ideas", stats_feedback),
         ("Growth: learn from results → follow up the hit", growth),
+        ("Compliance: a risky script is fixed before rendering", compliance),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

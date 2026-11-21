@@ -61,6 +61,19 @@ def scan(store: Store, config: AppConfig, now: datetime | None = None) -> list[A
         elif item.stage == Stage.EDITED and item.quality and item.quality.failed and age <= 72:
             alerts.append(Alert(f"quality:{item.id}", "warning", "Quality gate failed — not publishing",
                                 ", ".join(c.name for c in item.quality.failed), item.id))
+        # A trend video whose window is closing while it waits on a human.
+        deadline = item.timely_until
+        waiting_on_you = item.stage == Stage.REVIEWED or item.awaiting_final_approval or (
+            item.attention and item.stage not in (Stage.PUBLISHED, Stage.REJECTED, Stage.FAILED))
+        if deadline and waiting_on_you:
+            left = _hours(deadline - now)
+            window = item.idea.timely_for_hours
+            if 0 < left <= max(6.0, window * 0.4):
+                alerts.append(Alert(f"timely:{item.id}", "warning", f"Timely video expires in {left:.0f} h",
+                                    f"{title} — it rides a trend; approve it soon or it goes out stale", item.id))
+            elif left <= 0 and -left <= 24:
+                alerts.append(Alert(f"timely-missed:{item.id}", "warning", "Timely video missed its window",
+                                    f"{title} — its trend has passed; post it anyway or reject it", item.id))
         for result in item.publishes:
             if not result.ok and _hours(now - result.at) <= 24:
                 alerts.append(Alert(f"publish:{item.id}:{result.platform}", "critical",

@@ -20,6 +20,7 @@ Turn it on in `config/channel.yaml` (`autopilot.enabled: true`, already on for t
 | Rail | What it does |
 |---|---|
 | Quality gates | Critic score ≥ `min_script_score` **and** a clean fact-check before any credit is spent; technical QA (and visual QA when a vision model is set) before posting. Anything that fails waits for you; the autopilot tries another idea (`max_attempts_per_day`) |
+| Compliance check | Every script, before any credit is spent: copyright (characters, franchises, lyrics, another creator's lines), a real person's likeness, trademarks, harmful claims, community guidelines, realistic fake events, and copying more than the *format* of the viral source. A fixable problem is rewritten once and checked again; anything else (or a check that couldn't run) waits for you. Dashboard → video → 🛡 Compliance (`compliance:` in the config) |
 | Spend cap | No render starts if today's Higgsfield spend + its estimate passes `max_credits_per_day`, or if the balance can't cover it. No script is even written that day |
 | Stop button | ⏸ **Pause everything** on the dashboard (local or cloud), `/pause` on Telegram, or `vw autopilot pause`. While paused nothing new is made, rendered **or posted**. `/resume` to continue |
 | Originality | Remixes keep the format and energy, never the original's footage, audio, characters, names or script, and skip videos built on real people, brands or copyrighted characters. Platforms bury re-uploads and near-copies (YouTube "reused content", TikTok/Instagram "unoriginal content"), so this also protects the account |
@@ -34,6 +35,12 @@ each with how long it stays timely and a ready, fact-careful angle. The idea wri
 the best topic with a format that is going viral in AI shorts today (from the viral scout). If
 no topic fits, it remixes today's strongest viral format instead. Dashboard → **Trends** shows
 the radar with a 🎬 Make a video button per topic.
+
+The first choice each day is a **follow-up of one of our own hits** when there is one
+([GROWTH.md](GROWTH.md)). A trend video carries its window (`timely_for_hours`): it takes the
+earliest posting slot ahead of evergreen videos, posts at once if no slot comes before its window
+closes (`publish.schedule.rush_timely`), and you get an alert if it is still waiting for your
+approval as the window closes.
 
 ## Production quality, built in
 

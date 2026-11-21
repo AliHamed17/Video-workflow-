@@ -31,3 +31,5 @@ spectacularly (scale, slow motion, impossible camera moves, macro worlds). Sprea
 ideas across different content pillars. Lean into the patterns behind our best performers
 and away from what underperformed. Only pitch claims that are well established.
 Give each idea an honest predicted_score (0-10) relative to the others — we only produce the best.
+Set timely_for_hours: 0 for an evergreen idea; for an idea that rides a trend or a news story, how many
+hours it stays worth posting (use the trend's "timely for ~Nh").

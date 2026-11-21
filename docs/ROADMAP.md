@@ -41,6 +41,12 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.4: Reach and safety ✅
+
+- [x] Retention curves: hook hold at 3 s and the shot where viewers leave, per video; on the video page and in the playbook
+- [x] Compliance check on every script before rendering (copyright, likeness, trademark, claims, safety, platform policy, too close to the viral source, disclosure); one automatic rewrite for fixable problems
+- [x] Trend-aware scheduling: timely videos jump the queue, post at once rather than go stale, and alert you when they wait on you near the end of their window
+
 ## Phase 2.3: Growth engine ✅
 
 - [x] Every video made comparable: index = views ÷ our median once 48 h old; breakdowns by format, pillar, hook technique, source, posting hour, length
@@ -127,7 +133,7 @@ We build this step by step. Each phase ends with something that works end to end
 
 - [x] Pull views/likes/comments (YouTube, Instagram Insights, TikTok) into the store
 - [x] Feed top and weakest performers back into the trend scout
-- [x] Average % watched per video (YouTube Analytics) → the playbook → hooks and scripts · [ ] full retention curves (where viewers drop)
+- [x] Average % watched per video (YouTube Analytics) → the playbook → hooks and scripts · [x] retention curves (hook hold, where viewers drop)
 - [x] Trend inputs: Google Trends, Reddit, RSS, Wikipedia most-read, YouTube's chart · [ ] TikTok Creative Center
 - [ ] Prompt evals: a fixed idea set scored by the critic to compare prompt/model changes
 

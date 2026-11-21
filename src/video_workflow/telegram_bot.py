@@ -191,6 +191,10 @@ class TelegramBot:
             lines.append(f"Inspired by: {i.inspiration.platform} · {i.inspiration.format}")
         if i.review:
             lines.append(f"Critic: {i.review.score:.1f}/10")
+        if i.compliance:
+            lines.append(f"Compliance: {i.compliance.verdict}")
+        if i.timely_until and i.stage not in (Stage.PUBLISHED, Stage.REJECTED):
+            lines.append(f"⏱ Timely until {i.timely_until.astimezone(self.pipeline.tz):%a %d %b %H:%M}")
         if i.scheduled_for:
             tz = self.pipeline.config.publish.schedule.timezone
             lines.append(f"Scheduled: {i.scheduled_for.astimezone(self.pipeline.tz):%a %d %b %H:%M} ({tz})")

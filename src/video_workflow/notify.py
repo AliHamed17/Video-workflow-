@@ -201,6 +201,9 @@ def needs_approval(item: ContentItem) -> Notice:
         lines.append(f"Critic: {r.score:.1f}/10 (hook {r.hook_strength:.0f}) — {r.verdict}")
     if item.attention:
         lines.append(f"⚠️ {item.attention}")
+    if item.compliance and not item.attention:
+        notes = [i for i in item.compliance.issues if i.severity == "note"]
+        lines.append(f"Compliance: {item.compliance.verdict}" + (f" ({len(notes)} note(s))" if notes else ""))
     if s:
         lines += [f"{sh.index + 1}. {sh.voiceover or sh.visual}" for sh in s.shots[:8]]
     if r and r.problems:
