@@ -187,6 +187,16 @@ class Daemon:
             report["metrics"] = self.pipeline.refresh_metrics()
             self.store.kv_set("last_stats", self.clock().isoformat())
 
+        # Books: costs, revenue (YouTube, Stripe), cash — refreshed with the stats.
+        if self.store.kv_get("last_money") != today.isoformat():
+            try:
+                from . import money
+                money.refresh(self.pipeline)
+                report["money"] = True
+            except Exception as exc:
+                log.warning("money refresh failed: %s", exc)
+            self.store.kv_set("last_money", today.isoformat())
+
         # 5. Daily digest.
         if self._local_now().hour >= rt.digest_hour and self.store.kv_get("last_digest") != today.isoformat():
             self.pipeline.notify(self.pipeline.digest())

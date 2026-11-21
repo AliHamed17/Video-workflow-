@@ -1020,6 +1020,12 @@ class Pipeline:
             report["published"] = sum(1 for i in moved if i.stage == Stage.PUBLISHED)
             report["waiting"] = sum(1 for i in moved if i.stage == Stage.AWAITING_RENDER)
             report["held"] = sum(1 for i in moved if i.attention and i.stage not in STOP_STAGES)
+        try:
+            from . import money
+            money.refresh(self)
+        except Exception as exc:  # the books must never stop production
+            log.warning("money refresh failed: %s", exc)
+        self.store.kv_set("autopilot_last_run", {"at": self.clock().isoformat(), "report": report})
         return report
 
     def _assign_slot(self, item: ContentItem) -> None:

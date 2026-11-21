@@ -113,7 +113,7 @@ def test_deploy_bundle_and_rest_calls(tmp_path):
     env.write_text("OPENAI_API_KEY=x\nVW_CLOUD_URL=old\n")
     result = deploy(Path("."), "vw", vercel, env, {"DASHBOARD_TOKEN": None, "VW_CLOUD_SECRET": None},
                     on_progress=lambda s: None)
-    assert result["url"] == "https://vw.vercel.app" and result["created_secrets"] == ["DASHBOARD_TOKEN", "VW_CLOUD_SECRET"]
+    assert result["url"] == "https://vw.vercel.app" and result["created_secrets"] == ["CRON_SECRET", "DASHBOARD_TOKEN", "VW_CLOUD_SECRET"]
     text = env.read_text()
     assert "OPENAI_API_KEY=x" in text and "VW_CLOUD_URL=https://vw.vercel.app" in text and "VW_CLOUD_SECRET=" in text
     assert all(c[2].get("teamId") == "team_1" for c in calls)

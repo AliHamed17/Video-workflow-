@@ -12,7 +12,8 @@ import httpx
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 YOUTUBE_SCOPES = ("https://www.googleapis.com/auth/youtube.upload "
-                  "https://www.googleapis.com/auth/youtube.readonly")  # upload + read stats
+                  "https://www.googleapis.com/auth/youtube.readonly "                 # upload + read stats
+                  "https://www.googleapis.com/auth/yt-analytics-monetary.readonly")  # revenue per video
 
 
 def youtube_refresh_token(client_id: str, client_secret: str, port: int = 8765,

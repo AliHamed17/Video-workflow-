@@ -137,7 +137,7 @@ def deploy(repo: Path, project_name: str, vercel: Vercel, env_file: Path, local:
     project = vercel.ensure_project(project_name)
     keys = vercel.env_keys(project["id"])
     created = {}
-    for key in ("DASHBOARD_TOKEN", "VW_CLOUD_SECRET") if manage_secrets else ():
+    for key in ("DASHBOARD_TOKEN", "VW_CLOUD_SECRET", "CRON_SECRET") if manage_secrets else ():
         value = local.get(key)
         if value:
             vercel.set_env(project["id"], key, value)  # keep Vercel in step with this worker

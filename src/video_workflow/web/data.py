@@ -203,4 +203,22 @@ def prometheus(pipeline) -> str:
     for model, v in m["models"].items():
         lines.append(f'vw_llm_calls_30d{{model="{model}",outcome="ok"}} {v["calls"] - v["errors"]}')
         lines.append(f'vw_llm_calls_30d{{model="{model}",outcome="error"}} {v["errors"]}')
+    # Money and autopilot (for Grafana / uptime alerts).
+    from ..money import summary
+    books = summary(pipeline.store, pipeline.config.money)
+    lines += ["# TYPE vw_money_month gauge",
+              f'vw_money_month{{kind="income"}} {books["month_income"]}',
+              f'vw_money_month{{kind="expense"}} {books["month_expense"]}',
+              "# TYPE vw_cash gauge", f"vw_cash {books['cash']}",
+              "# TYPE vw_money_expected gauge", f"vw_money_expected {books['expected_total']}",
+              "# TYPE vw_payments_overdue gauge", f"vw_payments_overdue {len(books['overdue'])}"]
+    if books["runway_days"] is not None:
+        lines += ["# TYPE vw_runway_days gauge", f"vw_runway_days {books['runway_days']}"]
+    last_run = pipeline.store.kv_get("autopilot_last_run")
+    if last_run:
+        age = (datetime.now(UTC) - datetime.fromisoformat(last_run["at"])).total_seconds() / 3600
+        lines += ["# TYPE vw_autopilot_last_run_hours gauge", f"vw_autopilot_last_run_hours {age:.2f}"]
+    ready = pipeline.store.kv_get("readiness")
+    if ready:
+        lines += ["# TYPE vw_setup_missing gauge", f"vw_setup_missing {len(ready.get('missing', []))}"]
     return "\n".join(lines) + "\n"

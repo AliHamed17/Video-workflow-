@@ -100,6 +100,12 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
                     ("VW_CLOUD_SECRET missing" if secrets.vw_cloud_url else "VW_CLOUD_URL / VW_CLOUD_SECRET missing"),
                     "" if cloud else "Copy VW_CLOUD_SECRET from Vercel → project → Settings → Environment Variables "
                                      "into the environment's variables"))
+    priced = config.money.credit_usd > 0
+    out.append(Need("Money tracking", "ok" if priced else "optional",
+                    f"videos costed at {config.money.credit_usd} {config.money.currency}/credit" if priced
+                    else "video costs unpriced",
+                    "" if priced else "Set money.credit_usd (plan price ÷ credits) and money.subscriptions; "
+                                      "STRIPE_API_KEY imports sponsor payments"))
     telegram = bool(secrets.telegram_bot_token and secrets.telegram_chat_id)
     out.append(Need("Telegram", "ok" if telegram else "optional",
                     "reports + /pause on your phone" if telegram else "not set",

@@ -70,6 +70,29 @@ def run_plan(pipeline, days: int = 7) -> None:
         store.kv_set("planning_running", False)
 
 
+def apply_money(pipeline, args: dict) -> str:
+    """add / paid — shared by the local dashboard and cloud commands. Returns what happened."""
+    from .. import money
+
+    if args.get("op") == "paid":
+        entry = money.mark_paid(pipeline.store, args["id"])
+        result = f"marked paid: {entry['amount']:,.2f} {entry['note']}"
+    elif args.get("op") == "add":
+        due = args.get("due")
+        entry = money.add(pipeline.store, args.get("kind", "income"), float(args["amount"]), args.get("category", ""),
+                          args.get("note", ""), status="expected" if due else "paid", due=due,
+                          currency=pipeline.config.money.currency)
+        result = f"added {entry['kind']} {entry['amount']:,.2f} {entry['note']}" + (f" (due {due})" if due else "")
+    else:
+        raise ValueError(f"unknown money op {args.get('op')}")
+    snap = money.summary(pipeline.store, pipeline.config.money)
+    snap["recent"] = money.ledger(pipeline.store)[-200:]
+    snap["at"] = datetime.now(UTC).isoformat()
+    snap["errors"] = (pipeline.store.kv_get("money_snapshot") or {}).get("errors", {})
+    pipeline.store.kv_set("money_snapshot", snap)
+    return result
+
+
 def run_trends(pipeline) -> str | None:
     store = pipeline.store
     store.kv_set("trends_running", True)
@@ -162,6 +185,8 @@ def make_handler(pipeline, token: str | None = None):
                 if path == "/activity":
                     return self._send(200, pages.render_activity(
                         pipeline, data.status(pipeline), q.get("status", [None])[0], q.get("item", [None])[0]).encode())
+                if path == "/money":
+                    return self._send(200, pages.render_money(pipeline, data.status(pipeline), flash).encode())
                 if path == "/trends":
                     return self._send(200, pages.render_trends(pipeline, data.status(pipeline), flash).encode())
                 if path == "/viral":
@@ -279,6 +304,26 @@ def make_handler(pipeline, token: str | None = None):
                 about = f" from {url}" if url else f" about {topic}" if topic else ""
                 msg = f"{count} idea(s){about} requested — pitched on the next cycle."
                 return self._redirect(f"/?flash={quote(msg)}")
+            if path in ("/money/add", "/money/paid"):
+
+                if path.endswith("add"):
+                    try:
+                        args = {"op": "add", "kind": form.get("kind", "income"), "amount": float(form.get("amount") or 0),
+                                "note": form.get("note", "")[:200], "category": form.get("category", "")[:60],
+                                "due": form.get("due") or None}
+                    except ValueError:
+                        return self._redirect(f"/money?flash={quote('Amount must be a number.')}")
+                else:
+                    args = {"op": "paid", "id": form.get("id", "")[:16]}
+                if cloud:
+                    store.enqueue("money", None, args, source="cloud dashboard")
+                    msg = "Sent to your worker — the books update at its next sync."
+                else:
+                    try:
+                        msg = apply_money(pipeline, args)
+                    except (KeyError, ValueError) as exc:
+                        msg = f"Not saved: {exc}"
+                return self._redirect(f"/money?flash={quote(msg)}")
             if path == "/trends/refresh":
                 if cloud:
                     store.enqueue("trends", None, {"op": "refresh"}, source="cloud dashboard")

@@ -448,7 +448,13 @@ def render_health(pipeline, st: dict, flash: str = "") -> str:
         commands = (f"<h2>Requests sent to the worker</h2><section><table><tr><th>When</th><th>Action</th><th>For</th>"
                     f"<th>From</th><th>Status</th><th>Result</th></tr>{rows_c or '<tr><td colspan=6 class=meta>none yet</td></tr>'}"
                     f"</table></section>")
-    body = (_flash(flash) + readiness_html(pipeline) + "<h2>Alerts</h2>"
+    dog = pipeline.store.kv_get("watchdog_last")
+    watch = (f"<p class=meta>Watchdog (Vercel, daily): last check {e(dog['at'][:16].replace('T', ' '))} UTC · "
+             f"{len(dog['alerts'])} alert(s) · {dog['notified']} new sent"
+             + (f" via {e(', '.join(dog['channels']))}" if dog.get("channels") else
+                " — no alert channel set on Vercel (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, SLACK_WEBHOOK_URL, "
+                "DISCORD_WEBHOOK_URL or NOTIFY_WEBHOOK_URL)") + "</p>") if dog else ""
+    body = (_flash(flash) + readiness_html(pipeline) + "<h2>Alerts</h2>" + watch
             + (alerts_html(st) or "<p class=ok>No alerts. All good.</p>")
             + f"<h2>Connections</h2><section>{bal}<p class=meta>{when}</p>{buttons}<table>{rows}</table></section>"
             + commands)
@@ -653,3 +659,84 @@ def render_trends(pipeline, st: dict, flash: str = "") -> str:
            f"<div class=scrollx><table>{signals}</table></div></section></details>" if signals else "")
     body = _flash(flash) + "<h2>Trend radar</h2>" + head + button + table + raw
     return page("Trends", body, st, "/trends", every_ms=3000 if busy else 15000)
+
+
+def _pct(value) -> str:
+    return "–" if value is None else f"{value:.0f}%"
+
+
+def render_money(pipeline, st: dict, flash: str = "") -> str:
+    from .. import money
+
+    cloud = _is_cloud(pipeline)
+    if cloud:
+        snap = pipeline.store.kv_get("money_snapshot") or {}
+    else:
+        snap = money.summary(pipeline.store, pipeline.config.money)
+        snap["recent"] = money.ledger(pipeline.store)[-200:]
+        snap["at"] = datetime.now(UTC).isoformat()
+    if not snap:
+        return page("Money", _flash(flash) + "<h2>Money</h2><p class=meta>No books yet — the worker builds them on its "
+                    "next run (<code>vw money report</code>).</p>", st, "/money")
+    cur = e(snap.get("currency", "USD"))
+
+    def amt(v) -> str:
+        return f"{v:,.2f}" if v is not None else "–"
+
+    runway = f"{snap['runway_days']:.0f} days" if snap.get("runway_days") is not None else "∞"
+    kpis = [(amt(snap["month_income"]), f"income {e(snap['month'])}"), (amt(snap["month_expense"]), f"spend {e(snap['month'])}"),
+            (amt(snap["month_net"]), "net this month"), (amt(snap["cash"]), f"cash ({cur})"), (runway, "runway"),
+            (amt(snap.get("expected_total")), "expected (invoices)"),
+            (amt(snap.get("cost_per_video")), "cost per video")]
+    kpi_html = "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>" for v, label in kpis)
+    warn = ""
+    if snap.get("over_budget"):
+        warn += f"<p class=bad>Over this month's budget ({amt(snap['budget'])} {cur}).</p>"
+    for o in snap.get("overdue", []):
+        warn += f"<p class=bad>Overdue: {amt(o['amount'])} {cur} — {e(o['note'])} (due {e(o['due'])}, id {e(o['id'])})</p>"
+    if not snap.get("credit_usd_set"):
+        warn += ("<p class=warn>Video costs need your price per Higgsfield credit: set <code>money.credit_usd</code> "
+                 "in the channel config (plan price ÷ credits).</p>")
+    for k, v in (snap.get("errors") or {}).items():
+        warn += f"<p class=meta>⚠ {e(k)}: {e(v)}</p>"
+    peak = max([max(m[1], m[2]) for m in snap.get("months", [])] + [1])
+    bars = "".join(
+        f"<div class=mcol title='{e(m[0])}: in {amt(m[1])} / out {amt(m[2])}'><div class=mbars>"
+        f"<i class=in style='height:{m[1] / peak * 100:.0f}%'></i><i class=out style='height:{m[2] / peak * 100:.0f}%'></i>"
+        f"</div><span>{e(m[0][5:])}</span></div>" for m in snap.get("months", []))
+    chart = (f"<section><h3>Income vs spend, last 12 months</h3><div class=mchart>{bars}</div>"
+             "<p class=meta><i class='key in'></i> income <i class='key out'></i> spend</p></section>")
+    vids = "".join(f"<tr><td><a href='/item/{e(v['item_id'])}'>{e(v['title'][:60])}</a></td><td class=num>{amt(v['cost'])}</td>"
+                   f"<td class=num>{amt(v['revenue'])}</td><td class=num><b>{amt(v['profit'])}</b></td>"
+                   f"<td class=num>{v['views']:,}</td><td class=num>{amt(v['rpm'])}</td>"
+                   f"<td class=num>{_pct(v['roi'])}</td></tr>"
+                   for v in snap.get("videos", []))
+    videos = (f"<section><h3>Per video</h3><div class=scrollx><table><tr><th>Video</th><th class=num>Cost</th>"
+              f"<th class=num>Revenue</th><th class=num>Profit</th><th class=num>Views</th><th class=num>RPM</th>"
+              f"<th class=num>ROI</th></tr>{vids}</table></div></section>" if vids else "")
+    cats = "".join(f"<tr><td>{e(k)}</td><td>{e(c)}</td><td class=num>{amt(v)}</td></tr>"
+                   for k, c, v in snap.get("by_category", []))
+    categories = (f"<section><h3>This month by category</h3><table>{cats}</table></section>" if cats else "")
+    rows = "".join(
+        f"<tr><td class=meta>{e(x['date'])}</td><td>{pill(x['kind'], 'ok' if x['kind'] == 'income' else 'gated' if x['kind'] == 'payout' else 'error')}</td>"
+        f"<td class=num>{amt(x['amount'])}</td><td>{e(x['category'])}</td><td>{e(x['note'][:80])}</td>"
+        f"<td class=meta>{e(x['source'])}</td><td>{'' if x['status'] == 'paid' else pill('expected ' + (x.get('due') or ''), 'warn')}"
+        + ("" if x["status"] == "paid" else
+           f"<form method=post action='/money/paid' style='display:inline'><input type=hidden name=id value='{e(x['id'])}'>"
+           "<button>Mark paid</button></form>") + "</td></tr>"
+        for x in reversed(snap.get("recent", [])[-60:]))
+    ledger = (f"<section><h3>Ledger</h3><div class=scrollx><table><tr><th>Date</th><th>Kind</th><th class=num>Amount</th>"
+              f"<th>Category</th><th>Note</th><th>Source</th><th></th></tr>{rows or '<tr><td colspan=7 class=meta>empty</td></tr>'}"
+              "</table></div></section>")
+    form = ("<form method=post action='/money/add' class=actions style='align-items:center'><b>Add</b>"
+            "<select name=kind class=field><option>income</option><option>expense</option><option>payout</option></select>"
+            "<input name=amount type=number step=0.01 min=0 required class=field placeholder='amount' style='width:8em'>"
+            "<input name=note class=field placeholder='what (sponsor, tool, payout…)' style='flex:2;min-width:160px'>"
+            "<input name=category class=field placeholder='category' style='width:9em'>"
+            "<input name=due type=date class=field title='Not received yet? Its due date'>"
+            "<button>➕ Add</button></form>")
+    body = (_flash(flash) + "<h2>Money</h2><p class=meta>Costs (video production from credits + AI usage, "
+            "subscriptions), earnings (YouTube ads per video, Stripe, imports, your entries), payments due, "
+            f"cash and runway. Updated {e((snap.get('at') or '')[:16].replace('T', ' '))} UTC.</p>"
+            + warn + f"<div class=kpis>{kpi_html}</div>" + form + chart + videos + categories + ledger)
+    return page("Money", body, st, "/money", every_ms=15000)

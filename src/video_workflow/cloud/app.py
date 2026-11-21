@@ -85,11 +85,57 @@ border:1px solid var(--line);background:var(--card);color:var(--ink);margin:8px 
 <input type=hidden name=next value="{next}"><button class=primary>Sign in</button></form>{error}</div></body></html>"""
 
 
+def watchdog(pipeline, store, now=None, http=None) -> dict:
+    """The daily check Vercel Cron runs, even when no worker is running: every alert, plus whether a
+    worker has synced recently; new problems are sent to Telegram / Slack / Discord / a webhook."""
+    from datetime import UTC, datetime, timedelta
+
+    from ..config import Secrets
+    from ..monitor import Alert, scan
+    from ..notify import Notice, build_dispatcher
+
+    now = now or datetime.now(UTC)
+    config = pipeline.config
+    alerts = scan(store, config, now)
+    sync = store.kv_get("sync") or {}
+    hours = (now - datetime.fromisoformat(sync["at"])).total_seconds() / 3600 if sync.get("at") else None
+    if hours is None or hours > 26:
+        alerts.append(Alert("worker-silent", "critical",
+                            f"No worker has synced for {hours:.0f}h" if hours else "No worker has ever synced",
+                            "The daily run or the daemon is not reaching the cloud — check the scheduled task."))
+    sent = store.kv_get("watchdog_sent", {}) or {}
+    fresh = [a for a in alerts if not sent.get(a.key)
+             or now - datetime.fromisoformat(sent[a.key]) > timedelta(hours=20)]
+    channels: list[str] = []
+    if fresh:
+        secrets = Secrets()
+        notify = config.notify.model_copy(deep=True)
+        for channel, present in (("telegram", secrets.telegram_bot_token and secrets.telegram_chat_id),
+                                 ("slack", secrets.slack_webhook_url), ("discord", secrets.discord_webhook_url),
+                                 ("webhook", secrets.notify_webhook_url)):
+            if present and channel not in notify.channels:
+                notify.channels.append(channel)
+        notify.events = list({*notify.events, "alert"})
+        dispatcher = build_dispatcher(notify, secrets, http)
+        channels = [n.name for n in dispatcher.notifiers if n.name != "log"]
+        dispatcher.send(Notice(kind="alert", title=f"{len(fresh)} problem(s) in the video workflow",
+                               lines=[f"{'🔴' if a.severity == 'critical' else '🟠'} {a.title}: {a.detail}"[:300]
+                                      for a in fresh[:8]] + ["Dashboard: Health page"]))
+        for a in fresh:
+            sent[a.key] = now.isoformat()
+        store.kv_set("watchdog_sent", sent)
+    result = {"at": now.isoformat(), "alerts": [{"severity": a.severity, "title": a.title} for a in alerts],
+              "notified": len(fresh), "channels": channels, "worker_sync_hours": hours}
+    store.kv_set("watchdog_last", result)
+    return result
+
+
 def make_cloud_handler(db_url: str | None = None, token: str | None = None, secret: str | None = None):
     db_url = db_url or os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") \
         or os.environ.get("VW_CLOUD_DB") or "sqlite:////tmp/vw-cloud.sqlite3"
     token = token if token is not None else os.environ.get("DASHBOARD_TOKEN")
     secret = secret if secret is not None else os.environ.get("VW_CLOUD_SECRET")
+    cron_secret = os.environ.get("CRON_SECRET")   # Vercel Cron sends it as a Bearer token
     store = CloudStore(DB(db_url))
     pipeline = CloudPipeline(store)
 
@@ -132,6 +178,12 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                 if not self._worker_ok():
                     return self._deny_worker()
                 return self._json({"commands": store.pending_commands()})
+            if path == "/api/cloud/watchdog":
+                sent = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                allowed = [s for s in (cron_secret, secret) if s]
+                if not allowed or not any(pysecrets.compare_digest(sent, s) for s in allowed):
+                    return self._send(401, b"Unauthorized", "text/plain")
+                return self._json(watchdog(pipeline, store))
             if path == "/api/cloud/export":
                 if not self._worker_ok():
                     return self._deny_worker()

@@ -96,6 +96,16 @@ English only, so set `video.voice.provider: openai` or `elevenlabs` for translat
 
 ## Alerts
 
+A **watchdog on Vercel** runs every day at 19:20 UTC, even when no worker is running. It checks
+every alert below plus whether a worker has synced in the last 26 hours, and sends anything new
+(at most once per 20 h per problem) to Telegram, Slack, Discord or a webhook. Set the channel on the
+Vercel project's environment variables: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`,
+`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` or `NOTIFY_WEBHOOK_URL`. Its last result is on the
+Health page.
+
+Alerts also cover the books and the autopilot: monthly budget exceeded, cash runway short,
+payments overdue, no autopilot run in the last day, autopilot setup incomplete.
+
 The daemon checks every cycle and notifies each new alert once (repeats after 12 h at most):
 item stuck in a working stage (`runtime.stuck_after_hours`), render handoff not picked up for
 24 h, approval or final approval waiting 2+ days, failed items, failed uploads, LLM error spike,

@@ -28,6 +28,8 @@ clips_app = typer.Typer(help="Register rendered clips (handoff flow)")
 app.add_typer(clips_app, name="clips")
 cloud_app = typer.Typer(help="Cloud control room on Vercel: deploy it, sync this worker to it")
 app.add_typer(cloud_app, name="cloud")
+money_app = typer.Typer(help="The books: costs, earnings, payments, cash and runway")
+app.add_typer(money_app, name="money")
 audio_app = typer.Typer(help="Narration lines and music tracks generated with Higgsfield")
 app.add_typer(audio_app, name="audio")
 autopilot_app = typer.Typer(help="Fully automatic production: viral formats → videos → published, no clicks")
@@ -665,6 +667,76 @@ def autopilot_resume(config: ConfigOpt = None, data: DataOpt = Path("data")) -> 
     """Continue automatic production."""
     _setup(config, data, publishers=False).set_autopilot_paused(False, by="cli")
     console.print("Autopilot resumed.")
+
+
+def _money_table(snap: dict) -> None:
+    cur = snap["currency"]
+    console.print(f"[bold]{snap['month']}[/]: income {snap['month_income']:,.2f} · spend {snap['month_expense']:,.2f} · "
+                  f"net {snap['month_net']:,.2f} {cur}")
+    runway = f"{snap['runway_days']:.0f} days" if snap["runway_days"] is not None else "n/a (not burning cash)"
+    console.print(f"Cash {snap['cash']:,.2f} {cur} · burn {snap['burn_per_month']:,.2f}/month · runway {runway} · "
+                  f"expected {snap['expected_total']:,.2f}" + (f" · cost/video {snap['cost_per_video']:,.2f}"
+                                                               if snap["cost_per_video"] else ""))
+    if snap["over_budget"]:
+        console.print(f"[red]Over this month's budget ({snap['budget']:,.2f})[/]")
+    for e in snap["overdue"]:
+        console.print(f"[red]Overdue[/] {e['id']}: {e['amount']:,.2f} {e['note']} (due {e['due']})")
+    if not snap["credit_usd_set"]:
+        console.print("[yellow]Set money.credit_usd (your price per Higgsfield credit) to cost the videos.[/]")
+    table = Table("video", "cost", "revenue", "profit", "views", "RPM", "ROI")
+    for v in snap["videos"][:15]:
+        table.add_row(v["title"][:40], f"{v['cost']:.2f}", f"{v['revenue']:.2f}", f"{v['profit']:.2f}",
+                      f"{v['views']:,}", f"{v['rpm']:.2f}" if v["rpm"] is not None else "–",
+                      f"{v['roi']:.0f}%" if v["roi"] is not None else "–")
+    if snap["videos"]:
+        console.print(table)
+
+
+@money_app.command("report")
+def money_report(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """This month's P&L, cash, runway, overdue payments and per-video ROI (refreshes costs + revenue)."""
+    from . import money
+
+    _money_table(money.refresh(_setup(config, data)))
+
+
+@money_app.command("add")
+def money_add(kind: Annotated[str, typer.Argument(help="income | expense | payout")], amount: float,
+              note: Annotated[str, typer.Option("--note", "-n")] = "",
+              category: Annotated[str, typer.Option("--category", "-c", help="e.g. sponsor, ads, tools")] = "",
+              platform: Annotated[str, typer.Option("--platform")] = "",
+              day: Annotated[str | None, typer.Option("--date", help="YYYY-MM-DD (default today)")] = None,
+              due: Annotated[str | None, typer.Option("--due", help="Not received yet: invoice due date")] = None,
+              item: Annotated[str | None, typer.Option("--item", help="Attribute to a video")] = None,
+              config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Record money in or out (a sponsor deal, a payout, a tool you pay for). --due = an invoice not yet paid."""
+    from . import money
+
+    pipe = _setup(config, data, publishers=False)
+    e = money.add(pipe.store, kind, amount, category, note, day, platform, item, "expected" if due else "paid", due,
+                  currency=pipe.config.money.currency)
+    console.print(f"Added {e['id']}: {e['kind']} {e['amount']:,.2f} {e['currency']} {e['note']}"
+                  + (f" (expected by {due})" if due else ""))
+
+
+@money_app.command("paid")
+def money_paid(entry_id: str, day: Annotated[str | None, typer.Option("--date")] = None,
+               config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Mark an expected payment (invoice) as received."""
+    from . import money
+
+    e = money.mark_paid(_setup(config, data, publishers=False).store, entry_id, day)
+    console.print(f"{e['id']} paid on {e['date']}: {e['amount']:,.2f} {e['note']}")
+
+
+@money_app.command("import")
+def money_import(path: Path, platform: Annotated[str, typer.Option(help="e.g. tiktok, adsense, bank")] = "",
+                 config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Import a CSV export (AdSense / TikTok Creator Rewards / bank): date, amount, description columns."""
+    from . import money
+
+    pipe = _setup(config, data, publishers=False)
+    console.print(f"Imported {money.import_csv(pipe.store, path, platform, pipe.config.money.currency)} entries")
 
 
 @app.command("auth-youtube")

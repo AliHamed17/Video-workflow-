@@ -33,6 +33,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Runs itself** | `vw daemon` (or `docker compose up`): daily idea quota → render → publish on schedule → stats → daily digest |
 | **Autopilot** | A new video every day with no clicks: viral format → our version → script → Higgsfield → QA → posted to all three platforms. Quality gates stay on, spending is capped, and one ⏸ button (dashboard, Telegram, CLI) stops everything ([docs/AUTOPILOT.md](docs/AUTOPILOT.md)) |
 | **Viral scout** | Every day: the best-performing AI-generated shorts (YouTube, TikTok, Reels, Reddit, or links you paste), why each works (hook, format, visual, motion), and our own **original** version of the strongest formats, straight into the pipeline ([docs/VIRAL.md](docs/VIRAL.md)) |
+| **Money** | Costs per video (credits + AI usage) and subscriptions, YouTube ad revenue per video, Stripe sponsor payments, CSV imports, invoices with due dates, cash, burn and runway, ROI/RPM per video; budget, runway and overdue-payment alerts ([docs/MONEY.md](docs/MONEY.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
 | **Content calendar** | An LLM plans a theme per day a week ahead (formats, pillars, timely hooks like anniversaries and meteor showers); the daemon pitches from today's theme and keeps the plan topped up |
@@ -111,6 +112,7 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 | `vw cloud deploy [--skip-secrets]` · `vw cloud sync` · `vw cloud status` | Deploy the cloud dashboard to Vercel · push state + apply cloud commands now · check the connection |
 | `vw autopilot run\|ready\|status\|pause\|resume` | Fully automatic daily production, its setup checklist and its stop button |
 | `vw audio add <id> voice\|music <url>` | Register Higgsfield narration / music (the render skill does this) |
+| `vw money report\|add\|paid\|import` | The books: P&L, cash, runway, per-video ROI; record income, expenses, invoices |
 | `vw cloud restore` | Continue on a fresh machine (state, today's spend, rotated tokens) |
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
 | `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
@@ -166,14 +168,14 @@ src/video_workflow/
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            AUTOPILOT · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
+docs/            AUTOPILOT · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).
 
 ## Status
 
-Phases 0–3 are built and tested: 111 tests, plus `vw selftest` (20 end-to-end checks) in CI
+Phases 0–3 are built and tested: 115 tests, plus `vw selftest` (20 end-to-end checks) in CI
 and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 

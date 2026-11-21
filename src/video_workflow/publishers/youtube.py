@@ -13,6 +13,7 @@ from .base import HTTPPublisher, PublishError, to_int
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
@@ -69,6 +70,23 @@ class YouTubePublisher(HTTPPublisher):
         return PublishResult(platform=self.name, ok=True, post_id=video_id,
                              url=f"https://youtube.com/shorts/{video_id}",
                              detail=f"privacy={self.config.privacy}")
+
+    def fetch_revenue(self, start: str, end: str) -> dict[str, dict]:
+        """{video_id: {"revenue": float, "views": int}} for a date range (YYYY-MM-DD), from YouTube Analytics.
+
+        Needs a monetized channel and the yt-analytics-monetary.readonly scope (`vw auth-youtube`)."""
+        resp = self._send("GET", ANALYTICS_URL, "YouTube revenue", headers={"Authorization": f"Bearer {self.access_token()}"},
+                          params={"ids": "channel==MINE", "startDate": start, "endDate": end,
+                                  "metrics": "estimatedRevenue,views", "dimensions": "video",
+                                  "sort": "-estimatedRevenue", "maxResults": 200})
+        body = resp.json()
+        names = [h.get("name") for h in body.get("columnHeaders", [])]
+        out = {}
+        for row in body.get("rows") or []:
+            rec = dict(zip(names, row, strict=False))
+            out[str(rec.get("video"))] = {"revenue": float(rec.get("estimatedRevenue") or 0),
+                                          "views": int(rec.get("views") or 0)}
+        return out
 
     def fetch_metrics(self, post_id: str) -> PostMetrics:
         """Needs the youtube.readonly scope (granted by `vw auth-youtube`)."""

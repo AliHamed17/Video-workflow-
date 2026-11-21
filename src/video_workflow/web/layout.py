@@ -7,7 +7,7 @@ import html
 e = html.escape
 
 NAV = [("/", "Board"), ("/trends", "Trends"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
-       ("/metrics", "Metrics"), ("/health", "Health"), ("/selftest", "Self-test")]
+       ("/metrics", "Metrics"), ("/money", "Money"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """
 :root{--bg:#f5f6f8;--card:#fff;--ink:#14161b;--muted:#5d6472;--line:#e2e5ea;--accent:#4f46e5;
@@ -71,6 +71,10 @@ code{font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:5px}
 svg text{fill:var(--muted);font-size:10px}
 button.copy{padding:2px 9px;font-size:12px;margin-left:6px}
 table.copytbl th{white-space:nowrap;width:1%;vertical-align:top;padding-right:14px}
+.mchart{display:flex;gap:6px;align-items:flex-end;height:140px;padding-top:8px}
+.mcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}.mcol span{font-size:11px;color:var(--muted)}
+.mbars{display:flex;gap:2px;align-items:flex-end;height:110px;width:100%}.mbars i{flex:1;border-radius:3px 3px 0 0;min-height:1px}
+i.in{background:var(--ok)}i.out{background:var(--bad)}i.key{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle}
 .scrollx{overflow-x:auto;max-width:100%}.scrollx table{min-width:640px}.scrollx th,.scrollx button{white-space:nowrap}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
 .vcard{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}

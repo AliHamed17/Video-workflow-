@@ -108,6 +108,36 @@ def scan(store: Store, config: AppConfig, now: datetime | None = None) -> list[A
         alerts.append(Alert(f"budget:{today}", "warning", "Daily credit budget exceeded",
                             f"{spent_today:.0f} > {config.runtime.daily_credit_budget:.0f} credits today"))
 
+    # Money: budget, runway, invoices not paid on time.
+    ledger = store.kv_get("ledger") or []
+    if ledger or config.money.opening_cash:
+        from . import money
+        books = money.summary(store, config.money, now)
+        cur = config.money.currency
+        if books["over_budget"]:
+            alerts.append(Alert(f"budget-month:{books['month']}", "warning", "Monthly budget exceeded",
+                                f"{books['month_expense']:,.2f} spent vs {books['budget']:,.2f} {cur} budget"))
+        if books["runway_days"] is not None and books["runway_days"] < config.money.runway_alert_days:
+            alerts.append(Alert("runway", "critical", f"Cash runs out in ≈{books['runway_days']:.0f} days",
+                                f"cash {books['cash']:,.2f} {cur}, burning {books['burn_per_month']:,.2f}/month"))
+        for e in books["overdue"]:
+            alerts.append(Alert(f"overdue:{e['id']}", "warning", f"Payment overdue: {e['amount']:,.2f} {cur}",
+                                f"{e['note']} (due {e['due']}) — `vw money paid {e['id']}` once it arrives"))
+
+    # Autopilot: did today's run happen, and does it have what it needs?
+    if config.autopilot.enabled:
+        last_run = store.kv_get("autopilot_last_run")
+        hours = ((now - datetime.fromisoformat(last_run["at"])).total_seconds() / 3600) if last_run else None
+        if hours is None or hours > 26:
+            alerts.append(Alert(f"autopilot-missed:{now.date()}", "warning",
+                                "No autopilot run in the last day" if hours else "The autopilot has never run",
+                                (f"last run {hours:.0f}h ago" if hours else "no run recorded")
+                                + " — check the daily scheduled task / daemon"))
+        ready = store.kv_get("readiness")
+        if ready and not ready.get("ready"):
+            alerts.append(Alert("readiness", "warning", "Autopilot setup incomplete",
+                                "missing: " + ", ".join(ready.get("missing", [])) + " (Health → Autopilot setup)"))
+
     # Last live connection check.
     health = store.kv_get("health_last")
     if health:

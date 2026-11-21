@@ -47,6 +47,9 @@ class Secrets(BaseSettings):
     youtube_api_key: SecretStr | None = None
     apify_token: SecretStr | None = None
 
+    # Money: a restricted (read-only) Stripe key to import sponsor payments, fees and payouts.
+    stripe_api_key: SecretStr | None = None
+
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
     slack_webhook_url: SecretStr | None = None
@@ -316,6 +319,28 @@ class ViralConfig(BaseModel):
         actor="apify~instagram-hashtag-scraper"))
 
 
+class SubscriptionCost(BaseModel):
+    name: str                      # e.g. "Higgsfield Plus", "Claude Max", "Apify"
+    amount: float                  # per month, in money.currency
+    day: int = 1                   # day of the month it is charged
+    since: str = ""                # YYYY-MM it started ("" = this month)
+
+
+class MoneyConfig(BaseModel):
+    """Costs, earnings, payments and cash — the channel's books."""
+
+    currency: str = "USD"
+    credit_usd: float = 0.0        # what ONE Higgsfield credit costs you (plan price ÷ credits); 0 = unknown
+    # Price per million tokens [input, output] by route label ("anthropic:<model>") or provider
+    # ("openai"). CLI agents on a subscription cost nothing extra per call (list them as subscriptions).
+    llm_prices: dict[str, list[float]] = Field(default_factory=dict)
+    subscriptions: list[SubscriptionCost] = Field(default_factory=list)
+    opening_cash: float = 0.0      # cash set aside for the channel when tracking started
+    monthly_budget: float = 0.0    # alert when a month's spend passes this (0 = off)
+    runway_alert_days: int = 30    # alert when cash would run out sooner than this
+    youtube_revenue: bool = True   # pull estimated revenue per video (YouTube Analytics, monetized channels)
+
+
 class NotifyConfig(BaseModel):
     channels: list[Literal["telegram", "slack", "discord", "webhook", "log"]] = Field(
         default_factory=lambda: ["log"])
@@ -346,6 +371,7 @@ class AppConfig(BaseModel):
     publish: PublishConfig = Field(default_factory=PublishConfig)
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     viral: ViralConfig = Field(default_factory=ViralConfig)
+    money: MoneyConfig = Field(default_factory=MoneyConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)

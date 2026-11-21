@@ -7,6 +7,9 @@
       "config": {"includeFiles": ["src/video_workflow/**"], "maxLambdaSize": "50mb"}
     }
   ],
+  "crons": [
+    {"path": "/api/cloud/watchdog", "schedule": "20 19 * * *"}
+  ],
   "routes": [
     {"src": "/robots.txt", "dest": "/api/index.py"},
     {"src": "/(.*)", "dest": "/api/index.py"}
