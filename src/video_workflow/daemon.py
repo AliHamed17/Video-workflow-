@@ -108,6 +108,14 @@ class Daemon:
         if requests:
             self.store.kv_set("pending_requests", [])
             for req in requests:
+                if req.get("growth") is not None:  # a follow-up of a hit / a viewer's request
+                    from .web.server import run_growth
+
+                    ok, detail = run_growth(self.pipeline, req["growth"])
+                    report["requested"] += 1 if ok else 0
+                    if not ok:
+                        log.warning("growth request failed: %s", detail)
+                    continue
                 if req.get("viral") is not None:  # "make our version of this viral video"
                     try:
                         report["requested"] += len(self.pipeline.viral_remix(
@@ -186,6 +194,14 @@ class Daemon:
         if not last or self.clock() - datetime.fromisoformat(last) >= timedelta(hours=rt.stats_every_hours):
             report["metrics"] = self.pipeline.refresh_metrics()
             self.store.kv_set("last_stats", self.clock().isoformat())
+            if self.config.growth.enabled:
+                try:
+                    if self.config.growth.comments:
+                        report["comments"] = self.pipeline.refresh_comments()
+                    growth = self.pipeline.growth_report()
+                    report["winners"] = len(growth.get("winners", []))
+                except Exception as exc:   # learning must never stop production
+                    log.warning("growth step failed: %s", exc)
 
         # Books: costs, revenue (YouTube, Stripe), cash — refreshed with the stats.
         if self.store.kv_get("last_money") != today.isoformat():

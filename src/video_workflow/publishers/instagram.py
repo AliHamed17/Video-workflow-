@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 
 from ..config import InstagramConfig
-from ..models import ContentItem, PostMetrics, PublishResult
+from ..models import Comment, ContentItem, PostMetrics, PublishResult
 from .base import HTTPPublisher, PublishError, hashtags, to_int
 
 log = logging.getLogger(__name__)
@@ -128,6 +128,20 @@ class InstagramPublisher(HTTPPublisher):
                                    headers=self._auth(), params={"fields": "permalink"},
                                    retries=0).json().get("permalink")
         return PublishResult(platform=self.name, ok=True, post_id=media_id, url=permalink)
+
+    def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
+        """Comments on a Reel (needs the comments permission on the Instagram token)."""
+        resp = self._send("GET", f"{self.base}/{post_id}/comments", "Instagram comments", headers=self._auth(),
+                          params={"fields": "text,like_count,timestamp,username", "limit": min(limit, 50)})
+        out = []
+        for c in resp.json().get("data") or []:
+            if c.get("text"):
+                at = None
+                with contextlib.suppress(ValueError, AttributeError):
+                    at = datetime.strptime(c.get("timestamp", ""), "%Y-%m-%dT%H:%M:%S%z")
+                out.append(Comment(platform=self.name, author=c.get("username", ""), text=c["text"][:500],
+                                   likes=to_int(c.get("like_count")) or 0, at=at))
+        return out
 
     def fetch_metrics(self, post_id: str) -> PostMetrics:
         values: dict[str, int | None] = {}

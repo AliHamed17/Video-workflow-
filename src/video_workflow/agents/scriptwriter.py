@@ -11,7 +11,8 @@ class Scriptwriter(Agent):
     task = "scripting"
 
     def write(self, idea: Idea, previous: Script | None = None,
-              review: Review | None = None, corrections: str = "", inspiration: str = "") -> Script:
+              review: Review | None = None, corrections: str = "", inspiration: str = "",
+              lessons: str = "") -> Script:
         video = self.config.video
         shot_duration = video.higgsfield.shot_duration_s
         shot_count = max(1, math.ceil(video.target_duration_s / shot_duration))
@@ -33,6 +34,9 @@ class Scriptwriter(Agent):
         if inspiration:
             prompt += ("\n\nVIRAL FORMAT TO FOLLOW\n" + inspiration
                        + "\nMatch its pacing: a visual change or escalation every shot, the payoff held to the end.")
+        if lessons:
+            prompt += ("\n\nWHAT WORKS ON OUR CHANNEL (from our own results — follow strong rules, lean on medium "
+                       "ones; a fact or the format above wins over a rule):\n" + lessons)
         script = self.ask(prompt, Script)
         # Enforce the renderer's fixed shot length regardless of what the model wrote.
         for i, shot in enumerate(script.shots):

@@ -178,6 +178,27 @@ class ViralAnalysis(BaseModel):
     concepts: list[ViralConcept]
 
 
+class PlaybookRule(BaseModel):
+    do: str = Field(description="One concrete, repeatable instruction for the next videos, e.g. "
+                                "'Open on the impossible visual, then say the number'")
+    evidence: str = Field(description="The numbers behind it: which videos, views/engagement/retention vs our median")
+    confidence: Literal["strong", "medium", "weak"] = Field(
+        description="strong = clear pattern over several videos; medium = suggestive; weak = a hunch worth testing")
+
+
+class AudienceRequest(BaseModel):
+    idea: str = Field(description="A video the audience is asking for, phrased as a pitchable topic")
+    evidence: str = Field(description="What viewers said (short quote or paraphrase) and on which video")
+
+
+class Playbook(BaseModel):
+    summary: str = Field(description="Two sentences: how the channel is doing and the single biggest lever")
+    rules: list[PlaybookRule] = Field(description="What to do more of, best-supported first")
+    avoid: list[str] = Field(description="Patterns that underperformed, each with its evidence in brackets")
+    audience_requests: list[AudienceRequest] = Field(description="Videos viewers asked for in the comments")
+    next_experiment: str = Field(description="One controlled test for the coming week and how we will judge it")
+
+
 # --------------------------------------------------------------------------------------
 # Pipeline state
 # --------------------------------------------------------------------------------------
@@ -287,7 +308,19 @@ class PostMetrics(BaseModel):
     likes: int | None = None
     comments: int | None = None
     shares: int | None = None
+    avg_view_pct: float | None = None     # YouTube Analytics: average percentage of the video watched
+    avg_view_s: float | None = None       # average view duration in seconds
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class Comment(BaseModel):
+    """A viewer comment on one of our posts (what they ask for becomes ideas)."""
+
+    platform: str
+    author: str = ""
+    text: str
+    likes: int = 0
+    at: datetime | None = None
 
 
 class ModelUsage(BaseModel):
@@ -356,6 +389,7 @@ class ContentItem(BaseModel):
     versions: list[Version] = Field(default_factory=list)
     source_url: str | None = None      # the article/page the idea was drawn from
     inspiration: Inspiration | None = None   # the viral video whose format this remixes
+    follow_up_of: str | None = None          # the id of our own hit this video follows up
     music_track: str | None = None
     music_generated: str | None = None  # an original track made for this video (Higgsfield)
     final_video: str | None = None
@@ -363,6 +397,7 @@ class ContentItem(BaseModel):
     scheduled_for: datetime | None = None
     publishes: list[PublishResult] = Field(default_factory=list)
     metrics: dict[str, PostMetrics] = Field(default_factory=dict)
+    comments: list[Comment] = Field(default_factory=list)   # top viewer comments across platforms
     usage: Usage = Field(default_factory=Usage)
     attention: str | None = None   # why a human should look at this item
     history: list[Event] = Field(default_factory=list)

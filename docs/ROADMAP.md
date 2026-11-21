@@ -41,6 +41,15 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.3: Growth engine ✅
+
+- [x] Every video made comparable: index = views ÷ our median once 48 h old; breakdowns by format, pillar, hook technique, source, posting hour, length
+- [x] YouTube retention (% watched) and top comments from YouTube and Instagram
+- [x] Growth analyst writes a weekly playbook (rules with evidence and confidence, avoid, viewer requests, one experiment)
+- [x] The playbook feeds ideation; its rules feed the hook lab and the scriptwriter
+- [x] Follow-ups of hits (the autopilot's first choice each day); viewer requests become ideas; learned posting times (opt-in)
+- [x] Growth page, `/insights` `/followup` `/ask`, `vw growth`, growth line in the digest; works from the cloud dashboard too
+
 ## Phase 2.2: Hardening and the business on your phone ✅
 
 - [x] Pipeline split: the stage machine in `pipeline.py`; trends, viral, autopilot, sound and reporting in `flows/`
@@ -118,8 +127,8 @@ We build this step by step. Each phase ends with something that works end to end
 
 - [x] Pull views/likes/comments (YouTube, Instagram Insights, TikTok) into the store
 - [x] Feed top and weakest performers back into the trend scout
-- [ ] Retention curves (YouTube Analytics API) → scriptwriter learns where viewers drop
-- [x] Trend inputs: Google Trends, Reddit, RSS · [ ] YouTube trending, TikTok Creative Center
+- [x] Average % watched per video (YouTube Analytics) → the playbook → hooks and scripts · [ ] full retention curves (where viewers drop)
+- [x] Trend inputs: Google Trends, Reddit, RSS, Wikipedia most-read, YouTube's chart · [ ] TikTok Creative Center
 - [ ] Prompt evals: a fixed idea set scored by the critic to compare prompt/model changes
 
 ## Phase 6: Scale and operations

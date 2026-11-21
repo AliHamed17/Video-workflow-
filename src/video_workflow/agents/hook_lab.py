@@ -8,9 +8,12 @@ class HookLab(Agent):
     role = "hook specialist: you write openings that stop the scroll without lying"
     task = "hooks"
 
-    def generate(self, idea: Idea, count: int = 5) -> HookSet:
+    def generate(self, idea: Idea, count: int = 5, lessons: str = "") -> HookSet:
         prompt = load_prompt("hooks").substitute(count=count, title=idea.title, hook=idea.hook,
                                                  angle=idea.angle)
+        if lessons:
+            prompt += ("\n\nWhat our own results say about hooks and openings (weigh strong rules most when "
+                       "you pick best_index):\n" + lessons)
         result = self.ask(prompt, HookSet)
         if not result.hooks:
             raise ValueError("Hook lab returned no hooks")

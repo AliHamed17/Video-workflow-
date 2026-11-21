@@ -197,6 +197,13 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     idea = item.idea
     source = (f"<p class=meta>Source: <a href='{e(item.source_url)}' rel=noreferrer target=_blank>"
               f"{e(item.source_url)}</a></p>") if item.source_url else ""
+    if item.follow_up_of:
+        source += (f"<p>🔁 Follow-up of our hit <a href='/item/{e(item.follow_up_of)}'>{e(item.follow_up_of)}</a>"
+                   "</p>")
+    sequels = [i for i in pipeline.store.list() if i.follow_up_of == item.id]
+    if sequels:
+        source += "<p>🔁 Followed up by " + ", ".join(
+            f"<a href='/item/{i.id}'>{e(i.idea.title[:60])}</a>" for i in sequels) + "</p>"
     parts.append(_section("Idea", source + f"<p><b>Hook:</b> {e(idea.hook)}</p><p><b>Angle:</b> {e(idea.angle)}</p>"
                  f"<p class=meta>Pillar {e(idea.pillar)} · predicted {idea.predicted_score:.1f}/10 · "
                  f"{e(idea.why_it_will_perform)}</p>"))
@@ -280,8 +287,14 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
 
         rows = "".join(publish_row(r) for r in item.publishes)
         stats = "".join(f"<tr><td>{e(k)}</td><td colspan=2>{v.views or 0:,} views · {v.likes or 0:,} likes · "
-                        f"{v.comments or 0:,} comments · {v.shares or 0:,} shares</td></tr>" for k, v in item.metrics.items())
+                        f"{v.comments or 0:,} comments · {v.shares or 0:,} shares"
+                        + (f" · {v.avg_view_pct:.0f}% watched on average" if v.avg_view_pct is not None else "")
+                        + "</td></tr>" for k, v in item.metrics.items())
         parts.append(_section("Publishing & stats", f"<table>{rows}{stats}</table>"))
+    if item.comments:
+        said = "".join(f"<tr><td>{e(c.text[:300])}<div class=meta>{e(c.author)} · {e(c.platform)} · {c.likes} likes"
+                       "</div></td></tr>" for c in item.comments[:12])
+        parts.append(_section(f"🗣 Comments ({len(item.comments)})", f"<table>{said}</table>"))
     parts.append(_section("💰 Cost &amp; earnings", money_html(pipeline, item)))
     parts.append(_section("Timeline (every step, oldest first)", timeline_html(pipeline, item)))
     history = "".join(f"<tr><td>{ev.at:%Y-%m-%d %H:%M}</td><td>{e(ev.stage.value)}</td><td>{e(ev.note)}</td></tr>"
@@ -790,3 +803,119 @@ def render_money(pipeline, st: dict, flash: str = "") -> str:
             f"cash and runway. Updated {e((snap.get('at') or '')[:16].replace('T', ' '))} UTC.</p>"
             + warn + f"<div class=kpis>{kpi_html}</div>" + form + chart + videos + categories + ledger)
     return page("Money", body, st, "/money", every_ms=15000)
+
+
+def _idx(value) -> str:
+    """A performance index (views ÷ our median) as a number and a small bar."""
+    if value is None:
+        return "<span class=meta>too new</span>"
+    tone = "ok" if value >= 1.5 else "bad" if value < 0.67 else ""
+    width = max(4, min(100, round(value / 3 * 100)))
+    return (f"<b class='{tone}'>{value:.2f}×</b><div class=bar style='width:{width}%;margin-top:3px'></div>")
+
+
+def render_growth(pipeline, st: dict, flash: str = "") -> str:
+    from ..growth import DIMENSIONS
+
+    store, gc = pipeline.store, pipeline.config.growth
+    g = store.kv_get("growth") or {}
+    busy = store.kv_get("growth_running")
+
+    def num(v, suffix=""):
+        return "–" if v is None else f"{v:,.0f}{suffix}" if v >= 100 else f"{v:g}{suffix}"
+
+    head = ("<p class=meta>What our own results say. Every video gets a performance index — its views ÷ our "
+            f"median — once it is {gc.mature_hours} h old, so young and old videos compare fairly. Once "
+            f"{gc.min_videos}+ videos are mature, the growth analyst reads the numbers and the comments and writes "
+            "the playbook below; ideas, hooks and scripts follow it, and the autopilot makes a follow-up of every "
+            "hit.</p>")
+    if not gc.enabled:
+        head += "<p class=warn>Growth learning is off (growth.enabled: false).</p>"
+    kpis = [(g.get("published", 0), "published"), (g.get("mature", 0), f"mature (≥{gc.mature_hours}h)"),
+            (num(g.get("median_views")), "median views"), (num(g.get("median_engagement"), "%"), "median engagement"),
+            (num(g.get("median_retention"), "%"), "median watched"), (len(g.get("winners", [])), "hits")]
+    kpi_html = "<div class=kpis>" + "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>"
+                                             for v, label in kpis) + "</div>"
+    button = ("<p class=warn>Working on it…</p>" if busy else
+              "<div class=actions><form method=post action='/growth/refresh'><button class=primary>📈 Re-read our "
+              "results</button></form></div>")
+    errors = "".join(f"<p class=meta>⚠ {e(k)}: {e(v)}</p>" for k, v in (g.get("errors") or {}).items())
+
+    pb = g.get("playbook")
+    if pb:
+        conf = {"strong": "ok", "medium": "gated", "weak": "skipped"}
+        rules = "".join(f"<tr><td>{pill(r['confidence'], conf.get(r['confidence'], ''))}</td><td><b>{e(r['do'])}</b>"
+                        f"<div class=meta>{e(r['evidence'])}</div></td></tr>" for r in pb.get("rules", []))
+        avoid = "".join(f"<li>{e(a)}</li>" for a in pb.get("avoid", []))
+        playbook = _section(f"📘 Playbook <span class=meta>· written {e((g.get('playbook_at') or '')[:10])} from "
+                            f"{g.get('playbook_basis', 0)} videos</span>",
+                            f"<p>{e(pb.get('summary', ''))}</p><table>{rules}</table>"
+                            + (f"<h4>Avoid</h4><ul>{avoid}</ul>" if avoid else "")
+                            + (f"<p><b>This week's experiment:</b> {e(pb['next_experiment'])}</p>"
+                               if pb.get("next_experiment") else ""))
+    else:
+        need = max(0, gc.min_videos - g.get("mature", 0))
+        playbook = _section("📘 Playbook", f"<p class=meta>Not written yet: {need} more mature video(s) needed "
+                                          f"(each must be {gc.mature_hours} h old with its stats read).</p>")
+
+    rows = {r["id"]: r for r in g.get("rows", [])}
+    followers = {i.follow_up_of: i for i in store.list() if i.follow_up_of}
+    hits = []
+    for w in g.get("winners", []):
+        follow = followers.get(w["id"])
+        action = (f"<a href='/item/{follow.id}'>follow-up: {e(follow.idea.title[:50])}</a>" if follow else
+                  f"<form method=post action='/growth/follow-up'><input type=hidden name=id value='{e(w['id'])}'>"
+                  "<button>🔁 Make a follow-up</button></form>")
+        hits.append(f"<tr><td><a href='/item/{e(w['id'])}'>{e(w['title'])}</a><div class=meta>{e(w['hook'])}</div></td>"
+                    f"<td class=num>{w['views']:,}</td><td class=num>{_idx(w['index'])}</td><td>{action}</td></tr>")
+    hits_html = _section("🏆 Hits", (f"<div class=scrollx><table><tr><th>Video</th><th class=num>Views</th>"
+                                     f"<th class=num>Index</th><th></th></tr>{''.join(hits)}</table></div>"
+                                     f"<p class=meta>A hit: ≥{gc.winner_factor:g}× our median and ≥{gc.winner_min_views:,} "
+                                     "views. " + ("The autopilot follows up one a day." if gc.follow_ups else "")
+                                     + "</p>") if hits else
+                         f"<p class=meta>No hits yet (≥{gc.winner_factor:g}× our median views).</p>")
+
+    used = set(store.kv_get("audience_used", []))
+    asks = []
+    for n, a in enumerate((pb or {}).get("audience_requests", [])):
+        action = ("<span class=meta>pitched ✓</span>" if a["idea"] in used else
+                  f"<form method=post action='/growth/request'><input type=hidden name=index value={n}>"
+                  "<button>🎬 Make it</button></form>")
+        asks.append(f"<tr><td><b>{e(a['idea'])}</b><div class=meta>{e(a['evidence'])}</div></td><td>{action}</td></tr>")
+    asks_html = _section("💬 Viewers asked for", f"<table>{''.join(asks)}</table>") if asks else ""
+
+    tables = []
+    for key, label in DIMENSIONS.items():
+        groups = (g.get("breakdowns") or {}).get(key) or []
+        if not groups:
+            continue
+        body = "".join(f"<tr><td>{e(x['value'])}<div class=meta>{x['n']} video{'s' if x['n'] != 1 else ''} · "
+                       f"{num(x['views'])} views · eng {num(x['engagement'], '%')} · {num(x['retention'], '%')} "
+                       f"watched</div></td><td class=num style='width:34%'>{_idx(x['index'])}</td></tr>"
+                       for x in groups[:10])
+        tables.append(f"<h4>{e(label)}</h4><table>{body}</table>")
+    slots = g.get("best_slots") or []
+    slot_line = (f"<p class=meta>Best posting times so far: <b>{e(', '.join(slots))}</b> "
+                 + ("(used for new posts: growth.learn_slots is on)" if gc.learn_slots else
+                    "(set growth.learn_slots: true to post at these times automatically)") + "</p>") if slots else ""
+    what = _section("🧪 What works", slot_line + "".join(tables)) if tables else ""
+
+    vids = "".join(
+        f"<tr><td><a href='/item/{e(r['id'])}'>{e(r['title'][:70])}</a><div class=meta>{r['views']:,} views · eng "
+        f"{num(r['engagement'], '%')} · {num(r['retention'], '%')} watched · {e(r['weekday'])} {e(r['hour'])}</div>"
+        f"<div class=meta>{e(r['source'])}{' · ' + e(r['format']) if r['format'] else ''}"
+        f"{' · ' + e(r['hook_technique']) if r['hook_technique'] else ''}</div></td>"
+        f"<td class=num style='width:30%'>{_idx(r['index'])}</td></tr>" for r in list(rows.values())[:40])
+    videos = _section("🎞 Every video", f"<table>{vids}</table>") if vids else ""
+
+    quotes = []
+    for item in store.list(Stage.PUBLISHED):
+        quotes += [(c.likes, item, c) for c in item.comments[:5]]
+    quotes.sort(key=lambda x: -x[0])
+    said = "".join(f"<tr><td>{e(c.text[:240])}<div class=meta>{e(c.author)} · {e(c.platform)} · {c.likes} likes · "
+                   f"<a href='/item/{item.id}'>{e(item.idea.title[:50])}</a></div></td></tr>" for _, item, c in quotes[:15])
+    comments = _section("🗣 Top comments", f"<table>{said}</table>") if said else ""
+
+    body = (_flash(flash) + "<h2>Growth</h2>" + head + kpi_html + button + errors + playbook + hits_html + asks_html
+            + what + videos + comments)
+    return page("Growth", body, st, "/growth", every_ms=3000 if busy else 30000)

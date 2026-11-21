@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from ..models import ContentItem, RenderPlan, Stage
 from .common import BUDGET_HOLDS, STOP_STAGES
@@ -123,17 +123,30 @@ class AutopilotFlow:
         return report
 
     def _pitch_for_today(self, need: int, today: str) -> list[ContentItem]:
-        """The source order: a trending topic told in a format going viral → a straight viral remix →
-        the content calendar. Each step only runs if the one before came up short."""
-        ap = self.config.autopilot
+        """The source order: a follow-up of one of our own hits → a trending topic told in a format going
+        viral → a straight viral remix → the content calendar. Each step only runs if the one before came
+        up short."""
+        ap, gc = self.config.autopilot, self.config.growth
         items: list[ContentItem] = []
+        if gc.enabled and gc.follow_ups and self.store.kv_get("last_follow_up") != today:
+            try:
+                hits = self.winners_to_follow()
+                if hits:
+                    made = self.follow_up(hits[0]["id"])
+                    self.store.kv_set("last_follow_up", today)
+                    items += [made] if made else []
+            except Exception as exc:
+                log.warning("autopilot follow-up failed: %s", exc)
+                self.tracer.event("autopilot.growth", "warn", detail=f"follow-up failed: {exc}"[:300])
+        if len(items) >= need:
+            return items
         if ap.source == "mix" and self.config.trends.enabled:
             try:
                 if self.store.kv_get("last_viral") != today and self.config.viral.enabled:
                     self.viral_scout()       # refresh the formats that are working today
                     self.store.kv_set("last_viral", today)
                 if [t for t in self.trend_radar().get("topics", []) if t["fit"] >= 6]:
-                    items = self.ideate(need)
+                    items += self.ideate(need - len(items))
             except Exception as exc:
                 log.warning("autopilot trend fusion failed: %s", exc)
                 self.tracer.event("autopilot.trends", "warn", detail=f"trend fusion failed: {exc}"[:300])
@@ -150,6 +163,19 @@ class AutopilotFlow:
             items += self.ideate(need - len(items))
         return items
 
+    def refresh_stats(self, force: bool = False) -> bool:
+        """Views, retention and comments for recent posts, at most every `runtime.stats_every_hours`."""
+        last = self.store.kv_get("last_stats")
+        due = force or not last or \
+            self.clock() - datetime.fromisoformat(last) >= timedelta(hours=self.config.runtime.stats_every_hours)
+        if not (self.publishers and due):
+            return False
+        self.refresh_metrics()
+        if self.config.growth.comments:
+            self.refresh_comments()
+        self.store.kv_set("last_stats", self.clock().isoformat())
+        return True
+
     def refresh_readiness(self) -> dict:
         from .. import readiness
         from ..config import Secrets
@@ -161,6 +187,12 @@ class AutopilotFlow:
     def autopilot_day(self) -> dict:
         """One full automatic cycle: fill today's ideas, then push everything as far as it goes."""
         self.refresh_readiness()
+        if self.config.growth.enabled:
+            try:
+                self.refresh_stats()      # scheduled runs have no daemon: read the numbers here
+                self.growth_report()      # learn from what's out already, before writing more
+            except Exception as exc:
+                log.warning("growth report failed: %s", exc)
         report = self.autopilot_fill()
         if report["active"]:
             moved = self.run()

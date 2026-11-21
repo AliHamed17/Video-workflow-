@@ -15,7 +15,7 @@ Read `README.md` and `docs/ARCHITECTURE.md` before larger changes.
 - `src/video_workflow/publishers/` — YouTube, Instagram, TikTok over plain `httpx`.
 - `src/video_workflow/pipeline.py` — the stage machine; every step persists to SQLite, items run
   in parallel under per-item leases (`store.lease`). The jobs around it live in `flows/` (trends,
-  viral, autopilot, sound, reporting) and are mixed into `Pipeline`; add a new job there, not here.
+  viral, autopilot, growth, sound, reporting) and are mixed into `Pipeline`; add a new job there, not here.
 - `voice.py`, `schedule.py`, `trends.py`, `notify.py`, `telegram_bot.py`, `daemon.py`,
   `dashboard.py`, `health.py` — narration, posting slots, trend signals, notifications,
   phone approvals, the always-on loop, the web UI, live connection checks.

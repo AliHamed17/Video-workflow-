@@ -450,6 +450,54 @@ def trends(refresh: Annotated[bool, typer.Option("--refresh", help="Read the sou
 
 
 @app.command()
+def growth(refresh: Annotated[bool, typer.Option("--refresh", help="Rewrite the playbook now")] = False,
+           stats: Annotated[bool, typer.Option("--stats", help="Read views, retention and comments first")] = False,
+           follow_up: Annotated[str | None, typer.Option("--follow-up", help="Pitch a follow-up of this hit (id)")] = None,
+           request: Annotated[int | None, typer.Option("--request", help="Pitch viewer request N")] = None,
+           config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """What our own results say: the playbook, hits worth a follow-up, and what viewers ask for."""
+    pipe = _setup(config, data, publishers=stats)
+    if stats:
+        console.print(f"{pipe.refresh_metrics()} post(s) updated, {pipe.refresh_comments()} comment(s) read")
+    if follow_up:
+        item = pipe.follow_up(follow_up)
+        console.print(f"[green]Follow-up pitched:[/] {item.id} {item.idea.title}" if item else "[yellow]No idea pitched[/]")
+        return
+    if request is not None:
+        item = pipe.pitch_request(request - 1)
+        console.print(f"[green]Pitched:[/] {item.id} {item.idea.title}" if item else "[yellow]No idea pitched[/]")
+        return
+    g = pipe.growth_report(force=refresh)
+    for name, err in g.get("errors", {}).items():
+        console.print(f"[yellow]{name}: {err}[/]")
+    console.print(f"{g['published']} published · {g['mature']} mature · median views {g.get('median_views') or 0:,.0f}"
+                  + (f" · {g['median_retention']}% watched" if g.get("median_retention") is not None else ""))
+    pb = g.get("playbook")
+    if pb:
+        console.print(f"\n[bold]Playbook[/] ({(g.get('playbook_at') or '')[:10]}): {pb['summary']}")
+        table = Table("confidence", "do", "evidence")
+        for r in pb["rules"]:
+            table.add_row(r["confidence"], r["do"], r["evidence"][:160])
+        console.print(table)
+        for a in pb["avoid"]:
+            console.print(f"[red]avoid[/] {a}")
+        for n, a in enumerate(pb["audience_requests"], 1):
+            console.print(f"[cyan]viewers asked ({n})[/] {a['idea']} — {a['evidence'][:120]}")
+        console.print(f"[magenta]experiment[/] {pb['next_experiment']}")
+    else:
+        console.print(f"[dim]No playbook yet: it needs {pipe.config.growth.min_videos} mature videos.[/]")
+    hits = pipe.winners_to_follow()
+    if hits:
+        table = Table("hit", "title", "views", "index")
+        for w in hits:
+            table.add_row(w["id"], w["title"][:60], f"{w['views']:,}", f"{w['index']}×")
+        console.print("\n[bold]Hits without a follow-up[/] (vw growth --follow-up <id>)")
+        console.print(table)
+    if g.get("best_slots"):
+        console.print(f"Best posting times so far: {', '.join(g['best_slots'])}")
+
+
+@app.command()
 def digest(send: Annotated[bool, typer.Option("--send", help="Also send it to the notify channels")] = False,
            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Summary: what is waiting for you, what's scheduled, views and spend."""
@@ -532,7 +580,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 20:
+    if passed != len(results) or len(results) < 21:
         raise typer.Exit(1)
 
 

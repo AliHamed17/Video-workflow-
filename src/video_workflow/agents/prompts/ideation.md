@@ -17,6 +17,10 @@ when a story is developing, say only what is confirmed.
 How our published videos are performing:
 $performance
 
+OUR PLAYBOOK — what our own results say works, what to avoid, and what viewers are asking for
+(follow strong rules; an audience request that fits the channel is a great idea on its own):
+$playbook
+
 Recent titles to avoid repeating (same topic or same angle):
 $recent
 

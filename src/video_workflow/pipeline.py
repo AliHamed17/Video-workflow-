@@ -36,6 +36,7 @@ from .agents import (
     Critic,
     Director,
     FactChecker,
+    GrowthAnalyst,
     HookLab,
     Packager,
     Scriptwriter,
@@ -48,7 +49,7 @@ from .agents import (
 from .agents.fact_checker import summarize as summarize_fact_check
 from .agents.planner import Planner
 from .config import AppConfig
-from .flows import AutopilotFlow, ReportingFlow, SoundFlow, TrendFlow, ViralFlow
+from .flows import AutopilotFlow, GrowthFlow, ReportingFlow, SoundFlow, TrendFlow, ViralFlow
 from .flows.common import BUDGET_HOLDS, ORDER, STOP_STAGES, split_usage
 from .llm import LLMError, LLMRouter, usage
 from .models import Clip, ContentItem, PublishResult, RenderPlan, ShotReview, Stage, Usage
@@ -66,7 +67,7 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 
 @dataclass
-class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
+class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, SoundFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -93,6 +94,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
         self.planner = Planner(self.config, self.router)
         self.viral_analyst = ViralAnalyst(self.config, self.router)
         self.trend_analyst = TrendAnalyst(self.config, self.router)
+        self.growth_analyst = GrowthAnalyst(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -160,7 +162,8 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
             with usage.tracking(shared):
                 ideas = self.scout.pitch(count + extra, seeds=seeds, avoid_titles=self.store.recent_titles(),
                                          trends=signals, performance=self.performance_summary(), keep=count,
-                                         source=source_text, formats_now=formats_now)
+                                         source=source_text, formats_now=formats_now,
+                                         playbook=self.playbook_lines())
             items = [ContentItem(channel=self.config.channel.name, idea=idea, source_url=source_url)
                      for idea in ideas]
             split_usage(shared, items)    # one ideation call, shared across its ideas
@@ -188,9 +191,10 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
         self._expect(item, Stage.IDEA)
         cc = self.config.content
         with self.tracer.bind(item.id), usage.tracking(item.usage):
+            lessons = self.lessons()   # what our own results say works (the growth playbook)
             if cc.hook_variants > 0:
                 with self.tracer.span("develop.hooks", item.id) as span:
-                    hooks = self.hook_lab.generate(item.idea, cc.hook_variants)
+                    hooks = self.hook_lab.generate(item.idea, cc.hook_variants, lessons=lessons)
                     item.hook_options = hooks.hooks
                     best = hooks.hooks[hooks.best_index]
                     if best.text.strip() and best.text.strip() != item.idea.hook.strip():
@@ -205,7 +209,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
             for round_ in range(rounds):
                 with self.tracer.span("develop.write", item.id, round=round_ + 1) as span:
                     script = self.writer.write(item.idea, previous=script, review=review, corrections=corrections,
-                                               inspiration=brief)
+                                               inspiration=brief, lessons=lessons)
                     span.detail = f"draft {round_ + 1}: {len(script.shots)} shots"
                 # Fact-check and critic read the same draft independently: run them side by side.
                 def factcheck(script=script, round_=round_):
@@ -532,7 +536,10 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
         with self._slot_lock:
             taken = [i.scheduled_for for i in self.store.list()
                      if i.scheduled_for and i.id != item.id and i.stage in (Stage.EDITED, Stage.PUBLISHED)]
-            item.scheduled_for = schedule.next_slot(self.config.publish.schedule, taken, self.clock())
+            sched = self.config.publish.schedule
+            if self.learned_slots():   # growth.learn_slots: post when our videos have done best
+                sched = sched.model_copy(update={"slots": self.learned_slots()})
+            item.scheduled_for = schedule.next_slot(sched, taken, self.clock())
             self.store.save(item)
         if item.scheduled_for:
             local = item.scheduled_for.astimezone(self.tz)

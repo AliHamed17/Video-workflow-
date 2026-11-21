@@ -30,7 +30,7 @@ from .config import AppConfig, Secrets, TrendsConfig
 from .daemon import Daemon
 from .health import check_notify, check_publishers, check_trends
 from .llm import LLMRouter
-from .models import ShotQA, Stage
+from .models import ContentItem, PostMetrics, PublishResult, ShotQA, Stage
 from .monitor import scan
 from .notify import Dispatcher, MemoryNotifier, TelegramNotifier
 from .pipeline import Pipeline
@@ -239,6 +239,38 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         assert f"{item.total_views:,} views" in pipe.performance_summary()
         return f"{item.total_views:,} views collected from 3 platforms and fed back to the trend scout"
 
+    def growth():
+        # A channel with a history: four older posts with very different results.
+        made = state["item"]
+        history = [("A mantis shrimp punches at 80 km/h", 96_000, 71.0), ("Why the sky is blue", 9_000, 38.0),
+                   ("How geckos stick to glass", 12_000, 44.0), ("The coldest place in space", 7_500, 35.0)]
+        for n, (title, views, watched) in enumerate(history):
+            old = ContentItem(channel=made.channel, idea=made.idea.model_copy(update={"title": title}),
+                              script=made.script, hook_options=made.hook_options,
+                              created_at=datetime.now(UTC) - timedelta(days=5 + n))
+            old.publishes.append(PublishResult(platform="youtube", ok=True, post_id=f"old{n}"))
+            old.metrics["youtube"] = PostMetrics(views=views, likes=views // 20, comments=views // 400,
+                                                 avg_view_pct=watched)
+            old.move(Stage.PUBLISHED, "youtube")
+            old.history[-1].at = datetime.now(UTC) - timedelta(days=4 + n)
+            store.save(old)
+        read = pipe.refresh_comments()
+        assert read >= 4, f"only {read} comments read"
+        report = pipe.growth_report(force=True)
+        assert report["mature"] == 4 and report["playbook"], report.get("errors")
+        hit = report["winners"][0]
+        assert hit["title"].startswith("A mantis shrimp") and hit["index"] > 2, hit
+        follow = pipe.follow_up(hit["id"])
+        assert follow and follow.follow_up_of == hit["id"] and not pipe.winners_to_follow()
+        llm = pipe.router._providers["fake"]
+        pitch = next(prompt for schema, prompt in reversed(llm.calls) if schema == "IdeaBatch")
+        rule = report["playbook"]["rules"][0]["do"]
+        assert "OUR PLAYBOOK" in pitch and rule in pitch and "FOLLOW-UP to our hit" in pitch
+        asked = report["playbook"]["audience_requests"][0]["idea"]
+        return (f"{read} comments read · playbook from {report['mature']} videos (\"{rule[:48]}…\") · hit "
+                f"'{hit['title'][:30]}' ({hit['index']}× median) → follow-up '{follow.idea.title[:40]}' · viewers asked "
+                f"for '{asked[:40]}'")
+
     def alerts():
         store.kv_set("daemon_heartbeat", {"at": (datetime.now(UTC) - timedelta(hours=2)).isoformat()})
         store.kv_set("higgsfield_balance", {"credits": 4, "plan": "free", "at": datetime.now(UTC).isoformat()})
@@ -264,20 +296,23 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
             with httpx.Client(base_url=base, timeout=20, params={"token": "selftest"}) as web:
                 assert httpx.get(base + "/", timeout=10).status_code == 401  # token required
                 pages = {p: web.get(p) for p in ("/", "/activity", "/workflow", "/metrics", "/health",
-                                                 "/selftest", f"/item/{item.id}")}
+                                                 "/selftest", "/growth", f"/item/{item.id}")}
                 bad = {p: r.status_code for p, r in pages.items() if r.status_code != 200}
                 assert not bad, bad
                 assert "Visual QA" in pages[f"/item/{item.id}"].text and "Timeline" in pages[f"/item/{item.id}"].text
+                assert "Playbook" in pages["/growth"].text and "Viewers asked for" in pages["/growth"].text
                 status = web.get("/api/status").json()
                 events = web.get("/api/events", params={"after": 0, "token": "selftest"}).json()
                 prom = web.get("/api/metrics").text
                 video = web.get(f"/media/{item.id}/final.mp4", headers={"Range": "bytes=0-99"})
-                assert status["counts"].get("published") == 1 and events and "vw_items{" in prom
+                live = sum(1 for i in store.list() if i.stage == Stage.PUBLISHED)
+                assert status["counts"].get("published") == live and events and "vw_items{" in prom
                 assert video.status_code == 206 and len(video.content) == 100
         finally:
             server.shutdown()
             server.server_close()
-        return "board, activity, workflow map, metrics, health, self-test and item pages + JSON/Prometheus APIs over HTTP"
+        return ("board, activity, workflow map, growth, metrics, health, self-test and item pages + JSON/Prometheus "
+                "APIs over HTTP")
 
     def health():
         secrets = Secrets(_env_file=None, telegram_bot_token="TOKEN", telegram_chat_id="42")
@@ -411,6 +446,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Approve final → render → edit → QA", final_render),
         ("Publish to YouTube + Instagram + TikTok", publish),
         ("Stats → feedback into ideas", stats_feedback),
+        ("Growth: learn from results → follow up the hit", growth),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

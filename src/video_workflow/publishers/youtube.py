@@ -5,16 +5,18 @@ A vertical video of 3 minutes or less is classified as a Short automatically.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from ..config import YouTubeConfig
-from ..models import ContentItem, PostMetrics, PublishResult
+from ..models import Comment, ContentItem, PostMetrics, PublishResult
 from .base import HTTPPublisher, PublishError, to_int
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 — a URL, not a secret
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 
 
 class YouTubePublisher(HTTPPublisher):
@@ -96,3 +98,44 @@ class YouTubePublisher(HTTPPublisher):
         stats = items[0].get("statistics", {}) if items else {}
         return PostMetrics(views=to_int(stats.get("viewCount")), likes=to_int(stats.get("likeCount")),
                            comments=to_int(stats.get("commentCount")))
+
+    def fetch_retention(self, video_ids: list[str], start: str, end: str) -> dict[str, dict]:
+        """{video_id: {"avg_view_pct", "avg_view_s"}} from YouTube Analytics — how much of each video people
+        watch, the clearest signal of whether a hook and pacing work. Same scope as revenue (`vw auth-youtube`)."""
+        if not video_ids:
+            return {}
+        resp = self._send("GET", ANALYTICS_URL, "YouTube retention",
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          params={"ids": "channel==MINE", "startDate": start, "endDate": end,
+                                  "metrics": "averageViewPercentage,averageViewDuration", "dimensions": "video",
+                                  "filters": "video==" + ",".join(video_ids[:200]), "maxResults": 200})
+        body = resp.json()
+        names = [h.get("name") for h in body.get("columnHeaders", [])]
+        out = {}
+        for row in body.get("rows") or []:
+            rec = dict(zip(names, row, strict=False))
+            out[str(rec.get("video"))] = {"avg_view_pct": float(rec.get("averageViewPercentage") or 0),
+                                          "avg_view_s": float(rec.get("averageViewDuration") or 0)}
+        return out
+
+    def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
+        """Top-level comments, most relevant first (youtube.readonly scope)."""
+        resp = self._send("GET", COMMENTS_URL, "YouTube comments",
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          params={"part": "snippet", "videoId": post_id, "order": "relevance",
+                                  "textFormat": "plainText", "maxResults": min(limit, 100)})
+        out = []
+        for thread in resp.json().get("items") or []:
+            sn = thread.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+            if sn.get("textDisplay"):
+                out.append(Comment(platform=self.name, author=sn.get("authorDisplayName", ""),
+                                   text=sn["textDisplay"][:500], likes=to_int(sn.get("likeCount")) or 0,
+                                   at=_iso(sn.get("publishedAt"))))
+        return out
+
+
+def _iso(value: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    except ValueError:
+        return None

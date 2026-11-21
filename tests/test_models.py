@@ -2,9 +2,12 @@ import pytest
 
 from video_workflow.llm.base import LLMError, extract_json, parse_into
 from video_workflow.models import (
+    AudienceRequest,
     Idea,
     IdeaBatch,
     Packaging,
+    Playbook,
+    PlaybookRule,
     RenderPlan,
     Review,
     Script,
@@ -19,7 +22,8 @@ from video_workflow.models import (
 )
 
 LLM_SCHEMAS = [Idea, IdeaBatch, Shot, Script, ShotPrompt, RenderPlan, Review, YouTubeMeta,
-               SocialMeta, Packaging, ViralConcept, ViralAnalysis, TrendTopic, TrendRadar]
+               SocialMeta, Packaging, ViralConcept, ViralAnalysis, TrendTopic, TrendRadar, Playbook,
+               PlaybookRule, AudienceRequest]
 
 
 @pytest.mark.parametrize("schema", LLM_SCHEMAS, ids=lambda s: s.__name__)

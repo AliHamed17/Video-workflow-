@@ -341,6 +341,20 @@ class MoneyConfig(BaseModel):
     youtube_revenue: bool = True   # pull estimated revenue per video (YouTube Analytics, monetized channels)
 
 
+class GrowthConfig(BaseModel):
+    """Learn from our own results: what works, which videos to follow up, what viewers ask for."""
+
+    enabled: bool = True
+    mature_hours: int = 48           # a video's numbers are compared with the others once it is this old
+    min_videos: int = 3              # mature videos needed before the analyst writes a playbook
+    refresh_days: int = 7            # rewrite the playbook weekly (sooner when 3+ new videos matured)
+    winner_factor: float = 2.0       # a "winner" gets at least this × our median views ...
+    winner_min_views: int = 1000     # ... and at least this many views
+    follow_ups: bool = True          # the autopilot makes a follow-up of each new winner (one a day)
+    comments: bool = True            # read viewers' comments (YouTube, Instagram): questions become ideas
+    learn_slots: bool = False        # post at the hours that performed best (needs 2+ videos per hour)
+
+
 class NotifyConfig(BaseModel):
     channels: list[Literal["telegram", "slack", "discord", "webhook", "log"]] = Field(
         default_factory=lambda: ["log"])
@@ -372,6 +386,7 @@ class AppConfig(BaseModel):
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     viral: ViralConfig = Field(default_factory=ViralConfig)
     money: MoneyConfig = Field(default_factory=MoneyConfig)
+    growth: GrowthConfig = Field(default_factory=GrowthConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)

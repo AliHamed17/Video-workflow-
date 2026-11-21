@@ -11,7 +11,7 @@ class TrendScout(Agent):
     def pitch(self, count: int = 5, seeds: list[str] | None = None,
               avoid_titles: list[str] | None = None, trends: list[str] | None = None,
               performance: str = "", keep: int | None = None, source: str = "",
-              formats_now: list[str] | None = None) -> list[Idea]:
+              formats_now: list[str] | None = None, playbook: list[str] | None = None) -> list[Idea]:
         seed_text = (
             "Build on these seeds from the producer:\n" + "\n".join(f"- {s}" for s in seeds)
             if seeds else "No seeds given — choose the strongest topics yourself."
@@ -26,6 +26,7 @@ class TrendScout(Agent):
                      + "\n".join(f"- {f}" for f in self.config.content.formats))
             if self.config.content.formats else "",
             formats_now="\n".join(f"- {f}" for f in (formats_now or [])) or "- (no viral scan today)",
+            playbook="\n".join(f"- {line}" for line in (playbook or [])) or "- (no playbook yet: too few videos)",
         )
         if source:
             prompt += ("\n\nSOURCE MATERIAL — base every idea on facts stated in this text and nothing "

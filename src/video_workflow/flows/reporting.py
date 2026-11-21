@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from ..models import ContentItem, Stage
+from ..models import ContentItem, PostMetrics, Stage
 from ..notify import Notice
 from .common import published_at
 
@@ -51,8 +51,35 @@ class ReportingFlow:
                         self.tracer.event("stats.fetch", "error", item.id, f"{result.platform}: {exc}"[:500])
                 if changed:
                     self.store.save(item)
-            span.detail = f"{updated} post(s) updated"
+            retention = self._refresh_retention(cutoff)
+            span.detail = f"{updated} post(s) updated" + (f", retention for {retention}" if retention else "")
         return updated
+
+    def _refresh_retention(self, cutoff) -> int:
+        """How much of each YouTube Short people watch (YouTube Analytics; lags a day or two)."""
+        fetch = getattr(self.publishers.get("youtube"), "fetch_retention", None)
+        if fetch is None:
+            return 0
+        posts = {}
+        for item in self.store.list(Stage.PUBLISHED):
+            post_id = item.post_id("youtube")
+            if post_id and item.created_at >= cutoff:
+                posts[post_id] = item
+        if not posts:
+            return 0
+        try:
+            data = fetch(list(posts), cutoff.date().isoformat(), self.clock().date().isoformat())
+        except Exception as exc:   # analytics scope missing or not available yet
+            self.tracer.event("stats.retention", "warn", None, f"YouTube retention: {exc}"[:300])
+            return 0
+        for post_id, values in data.items():
+            item = posts.get(post_id)
+            if item is None:
+                continue
+            m = item.metrics.setdefault("youtube", PostMetrics())
+            m.avg_view_pct, m.avg_view_s = values.get("avg_view_pct"), values.get("avg_view_s")
+            self.store.save(item)
+        return len(data)
 
     # ---- the daily digest -----------------------------------------------------------------
     def digest(self) -> Notice:
@@ -94,6 +121,14 @@ class ReportingFlow:
         balance = (self.store.kv_get("higgsfield_balance") or {}).get("credits")
         if balance is not None:
             lines.append(f"Higgsfield balance: {balance:.0f} credits")
+        grown = self.store.kv_get("growth") or {}
+        if grown.get("mature"):
+            fresh_winners = self.winners_to_follow()
+            rule = next(iter((grown.get("playbook") or {}).get("rules", [])), None)
+            lines.append(f"Growth: median {grown.get('median_views') or 0:,.0f} views over {grown['mature']} videos"
+                         + (f", {len(grown.get('winners', []))} hit(s)" if grown.get("winners") else "")
+                         + (f" ({len(fresh_winners)} to follow up)" if fresh_winners else "")
+                         + (f" · top rule: {rule['do'][:90]}" if rule else ""))
         trending = self.top_trends(3)
         if trending:
             lines.append("Trending for us: " + "; ".join(f"{t['topic']} ({t['momentum']})" for t in trending))

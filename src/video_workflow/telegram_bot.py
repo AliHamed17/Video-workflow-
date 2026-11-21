@@ -4,7 +4,8 @@ Only messages from the configured TELEGRAM_CHAT_ID are obeyed. The bot long-poll
 (no public webhook needed) and remembers its offset in the store.
 
 Commands: /list · /status <id> · /approve <id> · /reject <id> · /ideas [n] [topic] · /digest ·
-/money · /trends · /viral · /remix <n> · /ready · /autopilot · /pause · /resume · /help
+/money · /trends · /viral · /remix <n> · /insights · /followup <n> · /ask <n> · /ready · /autopilot ·
+/pause · /resume · /help
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, wit
         "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n"
         "/viral — today's top AI videos · /remix <n> — make our version of number n\n"
         "/trends [refresh] — what's trending for this channel\n/money — this month, cash, runway, best videos\n"
+        "/insights — what works on our channel, our hits, what viewers ask for\n"
+        "/followup <n> — a follow-up of hit n · /ask <n> — make what viewers asked for (n from /insights)\n"
         "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
         "/alerts · /plan — the content calendar · /digest — summary now\n"
         "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
@@ -126,6 +129,10 @@ class TelegramBot:
             self.say(self.viral_text())
         elif command == "/remix":
             self.say(self.remix(rest.strip()))
+        elif command == "/insights":
+            self.say(self.insights_text())
+        elif command in ("/followup", "/ask"):
+            self.say(self.queue_growth(command, rest.strip()))
         elif command == "/ready":
             self.say(self.ready_text())
         elif command == "/autopilot":
@@ -267,6 +274,58 @@ class TelegramBot:
         self.store.kv_set("pending_requests", requests)
         self.on_change()
         return f"🎬 Queued: our own version of \"{v.get('title', '')[:60]}\". The script is written on the next cycle."
+
+    def insights_text(self) -> str:
+        g = self.store.kv_get("growth") or {}
+        gc = self.pipeline.config.growth
+        if not g.get("published"):
+            return "Nothing published yet: insights start once videos are out and their stats are read."
+        lines = [f"📈 {g['published']} published, {g['mature']} old enough to judge · median "
+                 f"{g.get('median_views') or 0:,.0f} views"
+                 + (f", {g['median_retention']:.0f}% watched" if g.get("median_retention") is not None else "")]
+        pb = g.get("playbook")
+        if pb:
+            lines.append(pb.get("summary", ""))
+            icon = {"strong": "✅", "medium": "➕", "weak": "❔"}
+            lines += [f"{icon.get(r['confidence'], '•')} {r['do']}" for r in pb.get("rules", [])[:5]]
+            lines += [f"🚫 {a}" for a in pb.get("avoid", [])[:2]]
+            if pb.get("next_experiment"):
+                lines.append(f"🧪 This week: {pb['next_experiment']}")
+        else:
+            lines.append(f"Playbook after {gc.min_videos} videos are {gc.mature_hours}h old.")
+        hits = self.pipeline.winners_to_follow()
+        if hits:
+            lines.append("🏆 Hits to follow up (/followup <n>):")
+            lines += [f"  {n}. {w['title'][:50]} — {w['views']:,} views, {w['index']}× median"
+                      for n, w in enumerate(hits[:5], 1)]
+        used = set(self.store.kv_get("audience_used", []))
+        asks = [a for a in (pb or {}).get("audience_requests", [])]
+        if asks:
+            lines.append("💬 Viewers asked for (/ask <n>):")
+            lines += [f"  {n}. {a['idea'][:70]}{' ✓' if a['idea'] in used else ''}" for n, a in enumerate(asks, 1)]
+        if g.get("best_slots"):
+            lines.append(f"⏰ Best posting times so far: {', '.join(g['best_slots'])}")
+        return "\n".join(lines)
+
+    def queue_growth(self, command: str, arg: str) -> str:
+        if command == "/followup":
+            hits = self.pipeline.winners_to_follow()
+            if not arg.isdigit() or not 1 <= int(arg) <= len(hits):
+                return f"Usage: /followup <n>, n from 1 to {len(hits)} (see /insights)" if hits else \
+                    "No hits waiting for a follow-up."
+            hit = hits[int(arg) - 1]
+            args, what = {"op": "follow_up", "id": hit["id"]}, f"a follow-up of \"{hit['title'][:60]}\""
+        else:
+            asks = ((self.store.kv_get("growth") or {}).get("playbook") or {}).get("audience_requests", [])
+            if not arg.isdigit() or not 1 <= int(arg) <= len(asks):
+                return f"Usage: /ask <n>, n from 1 to {len(asks)} (see /insights)" if asks else \
+                    "No viewer requests yet."
+            args, what = {"op": "request", "index": int(arg) - 1}, f"\"{asks[int(arg) - 1]['idea'][:60]}\""
+        requests = self.store.kv_get("pending_requests", [])
+        requests.append({"growth": args})
+        self.store.kv_set("pending_requests", requests)
+        self.on_change()
+        return f"🎬 Queued: {what}. The script is written on the next cycle."
 
     def ready_text(self) -> str:
         result = self.pipeline.refresh_readiness()

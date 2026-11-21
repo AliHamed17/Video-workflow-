@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from .models import (
+    AudienceRequest,
     Claim,
     ContentPlan,
     ContentPlanDay,
@@ -24,6 +25,8 @@ from .models import (
     Localization,
     LocalizedShot,
     Packaging,
+    Playbook,
+    PlaybookRule,
     RenderPlan,
     Review,
     Script,
@@ -126,6 +129,18 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                        signal_indices=[0, 1]),
             TrendTopic(topic="College football scores", why_now="game day", momentum="peaking", shelf_life_hours=12,
                        fit=1.0, angle="(not for this channel)", signal_indices=[2])]),
+        Playbook: Playbook(
+            summary="Animal superpowers shown up close beat everything else 3 to 1; the opening second decides it.",
+            rules=[PlaybookRule(do="Open on the impossible visual and say the number in the first second",
+                                evidence="the mantis shrimp video (9.1× our median, 71% watched) vs slow intros (38%)",
+                                confidence="strong"),
+                   PlaybookRule(do="Keep it under 30 seconds", evidence="20-30s videos 1.2× vs 31-45s 0.7×",
+                                confidence="medium")],
+            avoid=["Explainers with no moving subject [sky colour: 0.86×, 38% watched]"],
+            audience_requests=[AudienceRequest(
+                idea="The pistol shrimp's bubble that is hotter than the Sun's surface",
+                evidence="'Do the pistol shrimp next!!' (120 likes) on the mantis shrimp video")],
+            next_experiment="Post the next two videos at 18:00 instead of 09:00; judge on 48-hour views."),
         ViralAnalysis: ViralAnalysis(concepts=[ViralConcept(
             source_index=0, is_ai_generated=True, format="impossible object sliced open (ASMR)",
             why_it_works="satisfying slow reveal + a 'how is that inside?' question that makes people rewatch",
@@ -224,6 +239,23 @@ class FakePlatforms:
             return httpx.Response(200 if "tiktok" in path else 502, json=self.viral["tiktok"] if "tiktok" in path else {})
         if host == "i.ytimg.com":
             return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"\xff\xd8\xff\xd9")
+        if host == "www.googleapis.com" and path == "/youtube/v3/commentThreads":
+            return httpx.Response(200, json={"items": [
+                {"snippet": {"topLevelComment": {"snippet": {
+                    "textDisplay": "Do the pistol shrimp next!!", "authorDisplayName": "@reefnerd", "likeCount": 120,
+                    "publishedAt": "2026-11-20T10:00:00Z"}}}},
+                {"snippet": {"topLevelComment": {"snippet": {
+                    "textDisplay": "wait which heart stops when it swims??", "authorDisplayName": "@curious",
+                    "likeCount": 41, "publishedAt": "2026-11-20T11:00:00Z"}}}}]})
+        if host == "youtubeanalytics.googleapis.com" and path == "/v2/reports":
+            ids = req.url.params.get("filters", "").removeprefix("video==").split(",")
+            if "averageViewPercentage" in req.url.params.get("metrics", ""):
+                return httpx.Response(200, json={
+                    "columnHeaders": [{"name": "video"}, {"name": "averageViewPercentage"},
+                                      {"name": "averageViewDuration"}],
+                    "rows": [[vid, 64.5, 12.9] for vid in ids if vid]})
+            return httpx.Response(200, json={"columnHeaders": [{"name": "video"}, {"name": "estimatedRevenue"},
+                                                               {"name": "views"}], "rows": []})
         if host == "www.googleapis.com" and path == "/youtube/v3/videos":
             return httpx.Response(200, json={"items": [{"statistics": {"viewCount": "12400", "likeCount": "910",
                                                                        "commentCount": "64"}}]})
@@ -234,6 +266,10 @@ class FakePlatforms:
             if path.endswith("/media_publish"):
                 self.counters["instagram"] += 1
                 return httpx.Response(200, json={"id": f"ig{self.counters['instagram']}"})
+            if path.endswith("/comments"):
+                return httpx.Response(200, json={"data": [{"text": "My kid made me watch this 6 times 😂",
+                                                           "like_count": 15, "username": "reels_mom",
+                                                           "timestamp": "2026-11-20T09:30:00+0000"}]})
             if path.endswith("/insights"):
                 return httpx.Response(200, json={"data": [{"name": "views", "values": [{"value": 8300}]},
                                                           {"name": "likes", "values": [{"value": 450}]}]})

@@ -1,6 +1,7 @@
 from .critic import Critic
 from .director import Director
 from .fact_checker import FactChecker
+from .growth_analyst import GrowthAnalyst
 from .hook_lab import HookLab
 from .packager import Packager
 from .scriptwriter import Scriptwriter
@@ -10,5 +11,5 @@ from .trend_scout import TrendScout
 from .viral_analyst import ViralAnalyst
 from .visual_qa import VisualQA
 
-__all__ = ["Critic", "Director", "FactChecker", "HookLab", "Packager", "Scriptwriter", "Translator",
+__all__ = ["Critic", "Director", "FactChecker", "GrowthAnalyst", "HookLab", "Packager", "Scriptwriter", "Translator",
            "TrendAnalyst", "TrendScout", "ViralAnalyst", "VisualQA"]

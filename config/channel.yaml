@@ -225,6 +225,20 @@ viral:
     actor: apify~instagram-hashtag-scraper
     hashtags: [aivideo, aiart, veo3]
 
+growth:
+  # Learn from our own results. Once videos are old enough to compare, the growth analyst reads their
+  # numbers (views vs our median, engagement, % watched) and the viewers' comments and writes a weekly
+  # playbook that ideas, hooks and scripts follow. Hits get a follow-up; viewer requests become ideas.
+  enabled: true
+  mature_hours: 48          # compare a video with the others once it is this old
+  min_videos: 3             # mature videos before the first playbook
+  refresh_days: 7           # rewrite weekly (sooner when 3+ new videos matured)
+  winner_factor: 2.0        # a hit: at least 2x our median views ...
+  winner_min_views: 1000    # ... and at least this many views
+  follow_ups: true          # the autopilot makes a follow-up of each new hit (one a day)
+  comments: true            # read YouTube + Instagram comments (Instagram needs the comments permission)
+  learn_slots: false        # true: post at the hours that performed best (2+ videos per hour needed)
+
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)
   channels: [log, telegram]

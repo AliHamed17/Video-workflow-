@@ -131,6 +131,35 @@ def run_viral(pipeline, args: dict) -> str | None:
     return None
 
 
+def run_growth(pipeline, args: dict) -> tuple[bool, str]:
+    """refresh | follow_up (id) | request (index) — shared by the dashboard, Telegram and cloud commands."""
+    store = pipeline.store
+    store.kv_set("growth_running", True)
+    try:
+        op = args.get("op", "refresh")
+        if op == "refresh":
+            report = pipeline.growth_report(force=True)
+            pb = report.get("playbook")
+            if report.get("errors"):
+                return False, "playbook not rewritten: " + "; ".join(report["errors"].values())
+            return True, (f"{len(pb['rules'])} rules from {report['mature']} videos" if pb else
+                          f"{report['mature']} mature video(s): the playbook needs {pipeline.config.growth.min_videos}")
+        if op == "follow_up":
+            item = pipeline.follow_up(args["id"])
+            return (True, f"follow-up {item.id}: {item.idea.title[:70]}") if item else (False, "no idea pitched")
+        if op == "request":
+            item = pipeline.pitch_request(int(args["index"]))
+            return (True, f"idea {item.id}: {item.idea.title[:70]}") if item else (False, "no idea pitched")
+        return False, f"unknown growth op {op}"
+    except (KeyError, ValueError) as exc:
+        return False, str(exc)[:300]
+    except Exception as exc:
+        log.exception("growth %s failed", args.get("op"))
+        return False, f"{type(exc).__name__}: {exc}"[:300]
+    finally:
+        store.kv_set("growth_running", False)
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -192,6 +221,8 @@ def make_handler(pipeline, token: str | None = None):
                     return self._send(200, pages.render_trends(pipeline, data.status(pipeline), flash).encode())
                 if path == "/viral":
                     return self._send(200, pages.render_viral(pipeline, data.status(pipeline), flash).encode())
+                if path == "/growth":
+                    return self._send(200, pages.render_growth(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
                     return self._send(200, pages.render_calendar(pipeline, data.status(pipeline), flash).encode())
                 m = re.fullmatch(r"/item/([0-9a-f]+)/kit", path)
@@ -370,6 +401,27 @@ def make_handler(pipeline, token: str | None = None):
                     msg = {"scout": "Scouting…", "remix": "Studying the video and writing our version…",
                            "add": "Added — studying it and writing our version…"}[op]
                 return self._redirect(f"/viral?flash={quote(msg)}")
+            if path in ("/growth/refresh", "/growth/follow-up", "/growth/request"):
+                op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request"}[path.rsplit("/", 1)[1]]
+                args = {"op": op}
+                if op == "follow_up":
+                    if not re.fullmatch(r"[0-9a-f]{6,32}", form.get("id", "")):
+                        return self._redirect(f"/growth?flash={quote('Unknown video.')}")
+                    args["id"] = form["id"]
+                if op == "request":
+                    if not form.get("index", "").isdigit():
+                        return self._redirect(f"/growth?flash={quote('Unknown request.')}")
+                    args["index"] = int(form["index"])
+                if cloud:
+                    store.enqueue("growth", None, args, source="cloud dashboard")
+                    msg = "Sent to your worker — it appears here after its next sync."
+                else:
+                    if not store.kv_get("growth_running"):
+                        _background("growth", lambda: run_growth(pipeline, args))
+                    msg = {"refresh": "Reading our results and rewriting the playbook…",
+                           "follow_up": "Writing a follow-up of the hit…",
+                           "request": "Pitching what the viewers asked for…"}[op]
+                return self._redirect(f"/growth?flash={quote(msg)}")
             if path == "/plan":
                 if cloud:
                     store.enqueue("plan", None, {"days": 7}, source="cloud dashboard")
