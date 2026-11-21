@@ -209,7 +209,7 @@ class CloudStore:
         return len(results)
 
     def recent_commands(self, limit: int = 20) -> list[dict]:
-        rows = self.db.all("SELECT id, at, action, item_id, source, status, result, done_at FROM vw_commands "
+        rows = self.db.all("SELECT id, at, action, item_id, source, status, result, done_at, args FROM vw_commands "
                            "ORDER BY id DESC LIMIT ?", (limit,))
         return [{"id": int(r[0]), "at": r[1], "action": r[2], "item_id": r[3], "source": r[4], "status": r[5],
-                 "result": r[6], "done_at": r[7]} for r in rows]
+                 "result": r[6], "done_at": r[7], "args": json.loads(r[8] or "{}")} for r in rows]

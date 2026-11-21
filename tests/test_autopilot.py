@@ -187,3 +187,25 @@ def test_a_fresh_machine_continues_where_the_last_one_stopped(tmp_path, cloud):
     empty, *_ = _autopilot(tmp_path / "empty")
     CloudSync(empty, CloudClient(cloud, "s")).sync()
     assert CloudClient(cloud, "s").export()["items"], "cloud items survived an empty worker's sync"
+
+
+@requires_ffmpeg
+def test_commands_wait_for_the_worker_that_has_the_video(tmp_path, cloud):
+    real, *_ = _autopilot(tmp_path / "real")
+    real.viral_scout()
+    real_sync = CloudSync(real, CloudClient(cloud, "s"))
+    real_sync.sync()
+    with httpx.Client(base_url=cloud, timeout=20, cookies={"vw_token": "pw"}) as web:
+        web.post("/viral/remix", data={"key": "youtube:vGlass01"}, follow_redirects=False)
+    # A fresh, empty worker doesn't have that video: it leaves the command queued.
+    empty, *_ = _autopilot(tmp_path / "empty")
+    empty_sync = CloudSync(empty, CloudClient(cloud, "s"))
+    assert empty_sync.poll() == 0 and len(CloudClient(cloud, "s").commands()) == 1
+    assert {e["status"] for e in empty.store.events(step_prefix="cloud.")} == {"skipped"}
+    # The worker that has the video makes our version.
+    assert real_sync.poll() == 1
+    made = [i for i in real.store.list() if i.inspiration]
+    assert len(made) == 1 and made[0].inspiration.url.endswith("vGlass01")
+    with httpx.Client(base_url=cloud, timeout=20, cookies={"vw_token": "pw"}) as web:
+        health = web.get("/health").text
+    assert f"our version {made[0].id}" in health and "key=youtube:vGlass01" in health

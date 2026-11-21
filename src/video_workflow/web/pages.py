@@ -414,6 +414,10 @@ def readiness_html(pipeline, compact: bool = False) -> str:
             "</section>")
 
 
+def _args(args: dict | None) -> str:
+    return " ".join(f"{k}={v}" for k, v in (args or {}).items() if v not in (None, "") and k != "op")[:80]
+
+
 def render_health(pipeline, st: dict, flash: str = "") -> str:
     health = pipeline.store.kv_get("health_last")
     running = pipeline.store.kv_get("health_running")
@@ -439,9 +443,9 @@ def render_health(pipeline, st: dict, flash: str = "") -> str:
     recent = getattr(pipeline.store, "recent_commands", None)
     if recent:
         rows_c = "".join(f"<tr><td class=meta>{c['at'][5:16].replace('T', ' ')}</td><td><b>{e(c['action'])}</b></td>"
-                         f"<td>{e(c['item_id'] or '')}</td><td>{e(c['source'])}</td><td>{pill(c['status'], 'ok' if c['status'] == 'done' else 'error' if c['status'] == 'failed' else 'gated')}</td>"
+                         f"<td>{e(c['item_id'] or _args(c.get('args')))}</td><td>{e(c['source'])}</td><td>{pill(c['status'], 'ok' if c['status'] == 'done' else 'error' if c['status'] == 'failed' else 'gated')}</td>"
                          f"<td class=meta>{e(c['result'] or '')}</td></tr>" for c in recent())
-        commands = (f"<h2>Requests sent to the worker</h2><section><table><tr><th>When</th><th>Action</th><th>Item</th>"
+        commands = (f"<h2>Requests sent to the worker</h2><section><table><tr><th>When</th><th>Action</th><th>For</th>"
                     f"<th>From</th><th>Status</th><th>Result</th></tr>{rows_c or '<tr><td colspan=6 class=meta>none yet</td></tr>'}"
                     f"</table></section>")
     body = (_flash(flash) + readiness_html(pipeline) + "<h2>Alerts</h2>"

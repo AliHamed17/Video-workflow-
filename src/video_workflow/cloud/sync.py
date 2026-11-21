@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -138,8 +138,27 @@ def web_preview(src: Path, dest: Path) -> Path:
     return dest
 
 
-def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
-    """Run one command from the cloud dashboard on this worker."""
+COMMAND_PATIENCE = timedelta(days=7)   # how long a command waits for a worker that has its item
+
+
+def _not_here(cmd: dict, what: str) -> tuple[bool, str] | None:
+    """A command about something this worker doesn't have: leave it queued for one that does
+    (e.g. the real worker, after a restore) — but not forever."""
+    try:
+        queued = datetime.fromisoformat(cmd.get("at") or "")
+    except ValueError:
+        queued = datetime.now(UTC)
+    if datetime.now(UTC) - queued < COMMAND_PATIENCE:
+        return None
+    return False, f"{what} not found on any worker within {COMMAND_PATIENCE.days} days"
+
+
+def apply_command(pipeline, cmd: dict) -> tuple[bool, str] | None:
+    """Run one command from the cloud dashboard on this worker.
+
+    Returns (ok, detail), or None when the command is about an item / video this worker doesn't
+    have: it then stays queued for the worker that does.
+    """
     action, store = cmd["action"], pipeline.store
     try:
         if action == "ideas":
@@ -155,9 +174,18 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
             args = cmd.get("args") or {}
             if args.get("op") not in ("scout", "remix", "add"):
                 return False, f"unknown viral op {args.get('op')}"
-            run_viral(pipeline, args)
+            if args["op"] == "remix":
+                known = {f"{v['platform']}:{v['id']}" for v in (store.kv_get("viral_last") or {}).get("videos", [])}
+                if args.get("key") not in known:
+                    return _not_here(cmd, f"viral video {args.get('key')}")
+            before = {i.id for i in store.list()}
+            error = run_viral(pipeline, args)
+            if error:
+                return False, f"viral {args['op']} failed: {error}"
+            made = [i for i in store.list() if i.id not in before]
             last = store.kv_get("viral_last") or {}
-            return True, f"viral {args['op']} done · {len(last.get('videos', []))} videos listed"
+            return True, (f"viral {args['op']} done · " + (f"our version {made[0].id}: {made[0].idea.title[:60]}"
+                                                           if made else f"{len(last.get('videos', []))} videos listed"))
         if action == "autopilot":
             paused = bool((cmd.get("args") or {}).get("paused"))
             pipeline.set_autopilot_paused(paused, by="cloud dashboard")
@@ -165,7 +193,10 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str]:
         if action == "plan":
             days = pipeline.plan(int((cmd.get("args") or {}).get("days", 7)))
             return True, f"planned through {days[-1]['date'] if days else '?'}"
-        item = store.get(cmd["item_id"])
+        try:
+            item = store.get(cmd["item_id"])
+        except KeyError:
+            return _not_here(cmd, f"item {cmd['item_id']}")
         if action == "approve":
             pipeline.approve(item, note="approved in the cloud dashboard")
         elif action == "final":
@@ -244,11 +275,20 @@ class CloudSync:
 
     def apply(self, commands: list[dict]) -> list[dict]:
         results = []
+        seen = set(self.store.kv_get("cloud_skipped", []))
         for cmd in commands:
-            ok, detail = apply_command(self.pipeline, cmd)
+            outcome = apply_command(self.pipeline, cmd)
+            if outcome is None:   # not this worker's: leave it queued, note it once
+                if cmd["id"] not in seen:
+                    seen.add(cmd["id"])
+                    self.pipeline.tracer.event(f"cloud.{cmd['action']}", "skipped", cmd.get("item_id"),
+                                               "left in the queue: this worker doesn't have that item/video yet")
+                continue
+            ok, detail = outcome
             self.pipeline.tracer.event(f"cloud.{cmd['action']}", "ok" if ok else "error", cmd.get("item_id"),
                                        f"from {cmd.get('source', 'cloud')}: {detail}")
             results.append({"id": cmd["id"], "ok": ok, "detail": detail})
+        self.store.kv_set("cloud_skipped", sorted(seen)[-500:])
         self.client.ack(results)
         return results
 

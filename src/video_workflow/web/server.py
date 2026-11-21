@@ -70,8 +70,11 @@ def run_plan(pipeline, days: int = 7) -> None:
         store.kv_set("planning_running", False)
 
 
-def run_viral(pipeline, args: dict) -> None:
-    """scout | remix (key) | add (url, title, views) — shared by the dashboard and cloud commands."""
+def run_viral(pipeline, args: dict) -> str | None:
+    """scout | remix (key) | add (url, title, views) — shared by the dashboard and cloud commands.
+
+    Returns None on success, else what went wrong.
+    """
     store = pipeline.store
     store.kv_set("viral_running", True)
     try:
@@ -83,10 +86,12 @@ def run_viral(pipeline, args: dict) -> None:
         elif op == "add":
             video = pipeline.viral_add(args["url"], args.get("title", ""), views=args.get("views"))
             pipeline.viral_remix(1, keys=[f"{video['platform']}:{video['id']}"])
-    except Exception:
+    except Exception as exc:
         log.exception("viral %s failed", args.get("op"))
+        return f"{type(exc).__name__}: {exc}"[:300]
     finally:
         store.kv_set("viral_running", False)
+    return None
 
 
 def make_handler(pipeline, token: str | None = None):
