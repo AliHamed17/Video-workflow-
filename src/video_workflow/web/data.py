@@ -56,9 +56,8 @@ def status(pipeline, now: datetime | None = None) -> dict:
     else:
         daemon = {"state": "not started", "last": "never", "next": None}
     balance = store.kv_get("higgsfield_balance")
-    hf = cfg.video.higgsfield
-    shots = max(1, -(-cfg.video.target_duration_s // hf.shot_duration_s))
-    per_video = hf.estimate(shots)
+    from ..readiness import _estimate_per_video
+    per_video = _estimate_per_video(cfg)  # shots + keyframes + narration + music
     alerts = scan(store, cfg, now)
     health = store.kv_get("health_last")
     counts: dict[str, int] = defaultdict(int)
