@@ -8,12 +8,23 @@ from typing import Protocol
 import httpx
 from pydantic import BaseModel, Field
 
-from ..config import HiggsfieldConfig
+from ..config import HiggsfieldConfig, MusicConfig, VideoConfig, VoiceConfig
 from ..models import Clip, ContentItem, RenderPlan, ShotPrompt
+
+
+class AudioAsset(BaseModel):
+    """A narration line or a music track generated alongside the shots."""
+
+    kind: str                      # "voice" | "music"
+    index: int | None = None       # shot index (voice)
+    url: str | None = None
+    path: str | None = None
+    job: str | None = None
 
 
 class RenderResult(BaseModel):
     clips: list[Clip] = Field(default_factory=list)
+    audio: list[AudioAsset] = Field(default_factory=list)
     pending: bool = False   # True when rendering was handed off and clips arrive later
     note: str = ""
     credits: float = 0.0    # credits spent (estimate)
@@ -31,13 +42,67 @@ def full_prompt(plan: RenderPlan, index: int) -> str:
 
 
 KEYFRAME_PLACEHOLDER = "<KEYFRAME_JOB_ID>"
+REFERENCE_PLACEHOLDER = "<REFERENCE_KEYFRAME_JOB_ID>"
 
 
-def keyframe_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: ShotPrompt) -> dict:
-    """A still that becomes the first frame of the shot: same subject, framing and look."""
+def keyframe_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: ShotPrompt,
+                    reference_job: str | None = None) -> dict:
+    """A still that becomes the first frame of the shot: same subject, framing and look.
+
+    With ``reference_job`` (the first shot's keyframe) the still is drawn from that reference, so
+    the subject, character design, palette and world match across every shot.
+    """
     prompt = (f"Opening frame of a vertical video shot, photographic still, no text or watermark. "
               f"{shot.prompt.strip()} {plan.style_anchor.strip()}")
-    return {"model": hf.keyframe_model, "prompt": prompt, "aspect_ratio": aspect, **hf.keyframe_params}
+    params = {"model": hf.keyframe_model, "prompt": prompt, "aspect_ratio": aspect, **hf.keyframe_params}
+    if reference_job:
+        params["prompt"] += (" Keep exactly the same subject, character design, colours, lighting and world as "
+                             "the reference image; only the framing and action change.")
+        params["medias"] = [{"role": hf.reference_role, "value": reference_job}]
+    return params
+
+
+def reference_shot(hf: HiggsfieldConfig, plan: RenderPlan) -> int | None:
+    """Index of the shot whose keyframe anchors the others (None when consistency is off)."""
+    return plan.shots[0].index if hf.consistent_subject and len(plan.shots) > 1 else None
+
+
+# ---- sound: narration and music generated with Higgsfield --------------------------------
+
+def narration_params(voice: VoiceConfig, text: str) -> dict:
+    return {"model": "text2speech_v2", "prompt": text, "variant": voice.model or "elevenlabs",
+            "voice_type": "preset", "voice_id": voice.voice}
+
+
+def music_params(music: MusicConfig, item: ContentItem, seconds: float) -> dict:
+    mood = (item.script.music_mood if item.script else "") or "curious, cinematic"
+    return {"model": music.model, "force_instrumental": True, "duration": int(round(seconds)) + 2,
+            "prompt": (f"{mood}. Instrumental score for a {int(round(seconds))}-second vertical short video "
+                       f"titled '{item.idea.title}'. No vocals. A hook in the first second, builds to a payoff "
+                       "near the end, and an ending that loops back to the start.")}
+
+
+def pending_audio(item: ContentItem, video: VideoConfig) -> tuple[list[tuple[int, str]], bool]:
+    """(narration lines still to generate as [(shot, text)], whether the music track is missing)."""
+    from ..voice import text_hash
+
+    lines: list[tuple[int, str]] = []
+    if video.voice.provider == "higgsfield" and item.script:
+        have = {(v.shot_index, v.text_hash) for v in item.voice_clips if Path(v.path).exists()}
+        for shot in item.script.shots:
+            text = shot.voiceover.strip()
+            if text and (shot.index, text_hash("higgsfield", video.voice.voice, text)) not in have:
+                lines.append((shot.index, text))
+    music = video.music.generate and not (item.music_generated and Path(item.music_generated).exists())
+    return lines, music
+
+
+def audio_requests(item: ContentItem, video: VideoConfig) -> tuple[list[dict], dict | None]:
+    """generate_audio params: ([{index, params} per narration line], music params or None)."""
+    lines, music = pending_audio(item, video)
+    seconds = sum(s.duration_s for s in item.script.shots) if item.script else video.target_duration_s
+    return ([{"index": i, "params": narration_params(video.voice, text)} for i, text in lines],
+            music_params(video.music, item, seconds) if music else None)
 
 
 def video_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: ShotPrompt, phase: str,

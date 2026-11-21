@@ -28,6 +28,8 @@ clips_app = typer.Typer(help="Register rendered clips (handoff flow)")
 app.add_typer(clips_app, name="clips")
 cloud_app = typer.Typer(help="Cloud control room on Vercel: deploy it, sync this worker to it")
 app.add_typer(cloud_app, name="cloud")
+audio_app = typer.Typer(help="Narration lines and music tracks generated with Higgsfield")
+app.add_typer(audio_app, name="audio")
 autopilot_app = typer.Typer(help="Fully automatic production: viral formats → videos → published, no clicks")
 app.add_typer(autopilot_app, name="autopilot")
 console = Console()
@@ -231,6 +233,23 @@ def clips_add(item_id: str, shot_index: int, source: str,
     """Attach a rendered clip (https URL or local file) to a shot."""
     pipe = _setup(config, data, publishers=False)
     _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url)])
+
+
+@audio_app.command("add")
+def audio_add(item_id: str,
+              kind: Annotated[str, typer.Argument(help="voice (one narration line) or music (the track)")],
+              source: Annotated[str, typer.Argument(help="https URL or local file")],
+              shot: Annotated[int | None, typer.Option("--shot", help="Shot index (voice)")] = None,
+              job: Annotated[str | None, typer.Option(help="Higgsfield job id")] = None,
+              config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Attach a generated narration line or music track (from the Higgsfield render step)."""
+    if kind == "voice" and shot is None:
+        raise typer.BadParameter("voice needs --shot <index>")
+    pipe = _setup(config, data, publishers=False)
+    local = None if source.startswith(("http://", "https://")) else source
+    item = pipe.add_audio(pipe.store.get(item_id), kind, None if local else source, shot, job, local)
+    console.print(f"{item.id}: {len(item.voice_clips)} narration line(s)"
+                  + (", original music track" if item.music_generated else ""))
 
 
 @app.command("approve-final")
@@ -590,6 +609,26 @@ def autopilot_run(config: ConfigOpt = None, data: DataOpt = Path("data"),
     _table(sorted(pipe.store.list(), key=lambda i: i.updated_at, reverse=True)[:10])
     if cloud is not None:
         console.print(f"Synced to the cloud: {cloud.sync()}")
+
+
+@autopilot_app.command("ready")
+def autopilot_ready(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """What the autopilot still needs to make and post videos by itself (with how to fix each)."""
+    from rich.table import Table as RichTable
+
+    from . import readiness
+
+    pipe = _setup(config, data, publishers=False)
+    needs = readiness.check(pipe.config, pipe.secrets or Secrets(), pipe.store)
+    pipe.refresh_readiness()
+    table = RichTable("", "need", "status", "how to fix")
+    for n in needs:
+        mark = {"ok": "[green]✓[/]", "missing": "[red]✗[/]", "optional": "[yellow]·[/]"}[n.status]
+        table.add_row(mark, n.name, n.detail, n.fix)
+    console.print(table)
+    missing = [n.name for n in needs if n.status == "missing"]
+    console.print("[green]Ready: the autopilot can make and post videos by itself.[/]" if not missing
+                  else f"[red]Not ready:[/] {', '.join(missing)}")
 
 
 @autopilot_app.command("status")

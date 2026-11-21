@@ -346,14 +346,26 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         auto.config.viral.enabled = True
         auto.secrets = Secrets(_env_file=None, youtube_api_key=SecretStr("selftest"))
         auto.config.autopilot.enabled, auto.config.autopilot.max_credits_per_day = True, 5000
+        # Production sound: Higgsfield narration + an original track (simulated by the mock renderer).
+        from .voice import HiggsfieldVoice, text_hash
+        auto.config.video.voice.provider, auto.config.video.voice.voice = "higgsfield", "selftest-voice"
+        auto.config.video.music.generate = True
+        auto.voice = HiggsfieldVoice("selftest-voice", auto.voice)
+        auto.generator.video = auto.config.video
         report = auto.autopilot_day()
         done = [i for i in auto.store.list() if i.stage == Stage.PUBLISHED]
         assert report.get("published") == 1 and done, report
-        assert done[0].published_platforms() == {"youtube", "instagram", "tiktok"}
+        video = done[0]
+        assert video.published_platforms() == {"youtube", "instagram", "tiktok"}
+        lines = {s.index: s.voiceover.strip() for s in video.script.shots}
+        assert all(v.text_hash == text_hash("higgsfield", "selftest-voice", lines[v.shot_index])
+                   for v in video.voice_clips), "narration must come from Higgsfield, not the fallback"
+        assert video.music_generated and video.music_track == video.music_generated
         auto.set_autopilot_paused(True, by="selftest")
         assert not auto.autopilot_active
-        return (f"viral remix '{done[0].idea.title[:40]}' scripted, approved, drafted, QA'd, final-rendered and "
-                "posted to YouTube + Instagram + TikTok with no clicks; pause stops it")
+        return (f"viral remix '{video.idea.title[:40]}' scripted, approved, drafted, QA'd, final-rendered with "
+                f"Higgsfield narration ({len(video.voice_clips)} lines) + an original track, and posted to "
+                "YouTube + Instagram + TikTok with no clicks; pause stops it")
 
     def cloud():
         from .cloud.app import make_cloud_handler

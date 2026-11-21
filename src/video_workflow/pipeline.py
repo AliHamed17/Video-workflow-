@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import hashlib
 import logging
@@ -73,6 +74,11 @@ ORDER = [Stage.IDEA, Stage.REVIEWED, Stage.APPROVED, Stage.AWAITING_RENDER,
          Stage.RENDERED, Stage.EDITED, Stage.PUBLISHED]
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
 BUDGET_HOLDS = ("Daily credit cap reached", "Not enough Higgsfield credits")
+
+
+def _ext(url: str | None) -> str:
+    suffix = Path((url or "").split("?")[0]).suffix.lower()
+    return suffix if suffix in AUDIO_EXT else ".mp3"
 
 
 @dataclass
@@ -177,6 +183,14 @@ class Pipeline:
             span.detail = f"kept {len(items)} of {count + extra} pitched ideas, {len(signals)} trend signals"
         return items
 
+    @staticmethod
+    def _parallel(*fns):
+        """Run independent steps at the same time, each in a copy of the caller's context (so the
+        trace binding and the item's cost ledger follow it into its thread)."""
+        with ThreadPoolExecutor(max_workers=len(fns)) as pool:
+            futures = [pool.submit(contextvars.copy_context().run, fn) for fn in fns]
+            return [f.result() for f in futures]
+
     def performance_summary(self, top: int = 5) -> str:
         scored = [i for i in self.store.list() if i.metrics]
         if not scored:
@@ -216,21 +230,29 @@ class Pipeline:
                     script = self.writer.write(item.idea, previous=script, review=review, corrections=corrections,
                                                inspiration=brief)
                     span.detail = f"draft {round_ + 1}: {len(script.shots)} shots"
-                check = None
-                if cc.fact_check:
+                # Fact-check and critic read the same draft independently: run them side by side.
+                def factcheck(script=script, round_=round_):
                     with self.tracer.span("develop.factcheck", item.id, round=round_ + 1) as span:
                         source_file = self.store.item_dir(item.id) / "source.txt"
-                        check = self.fact_checker.check(
+                        result = self.fact_checker.check(
                             item.idea, script, source_file.read_text("utf-8") if source_file.exists() else "")
-                        flagged = [c for c in check.claims if c.verdict != "solid"]
-                        span.detail = f"{len(check.claims)} claims, {len(flagged)} flagged → {check.overall}"
-                        span.status = "ok" if check.overall == "pass" else "warn"
+                        flagged = [c for c in result.claims if c.verdict != "solid"]
+                        span.detail = f"{len(result.claims)} claims, {len(flagged)} flagged → {result.overall}"
+                        span.status = "ok" if result.overall == "pass" else "warn"
+                    return result
+
+                def critique(script=script, round_=round_):
+                    with self.tracer.span("develop.review", item.id, round=round_ + 1) as span:
+                        result = self.critic.review(item.idea, script, None, inspiration=brief,
+                                                    checked_in_parallel=cc.fact_check)
+                        span.detail = f"{result.verdict} {result.score:.1f}/10 (hook {result.hook_strength:.0f})"
+                        span.status = "ok" if result.verdict == "approve" else "warn"
+                    return result
+
+                check, review = self._parallel(factcheck if cc.fact_check else (lambda: None), critique)
+                if check is not None:
                     item.fact_check = check
                     corrections = summarize_fact_check(check) if check.overall == "fix" else ""
-                with self.tracer.span("develop.review", item.id, round=round_ + 1) as span:
-                    review = self.critic.review(item.idea, script, check, inspiration=brief)
-                    span.detail = f"{review.verdict} {review.score:.1f}/10 (hook {review.hook_strength:.0f})"
-                    span.status = "ok" if review.verdict == "approve" else "warn"
                 item.script, item.review, item.revisions = script, review, round_
                 self.store.save(item)
                 log.info("item %s round %d: %s %.1f", item.id, round_, review.verdict, review.score)
@@ -256,12 +278,19 @@ class Pipeline:
                     why += ", fact-check still flags claims"
                 item.attention = f"The critic still wanted changes after {rounds} drafts ({why}). Your call."
 
-            with self.tracer.span("develop.direct", item.id) as span:
-                item.render_plan = self.director.plan(item.script, inspiration=brief)
-                span.detail = f"{len(item.render_plan.shots)} Higgsfield prompts"
-            with self.tracer.span("develop.package", item.id) as span:
-                item.packaging = self.packager.package(item.script)
-                span.detail = item.packaging.youtube.title
+            def direct():
+                with self.tracer.span("develop.direct", item.id) as span:
+                    plan = self.director.plan(item.script, inspiration=brief)
+                    span.detail = f"{len(plan.shots)} Higgsfield prompts"
+                return plan
+
+            def package():
+                with self.tracer.span("develop.package", item.id) as span:
+                    packaging = self.packager.package(item.script)
+                    span.detail = packaging.youtube.title
+                return packaging
+
+            item.render_plan, item.packaging = self._parallel(direct, package)
         item.move(Stage.REVIEWED, f"score {item.review.score:.1f}")
         self.store.save(item)
 
@@ -357,6 +386,11 @@ class Pipeline:
             if result.pending:
                 span.status = "gated"
         item.usage.credits += result.credits
+        for asset in result.audio:   # narration / music generated alongside the shots
+            try:
+                item = self.add_audio(item, asset.kind, asset.url, asset.index, asset.job, asset.path)
+            except Exception as exc:
+                self.tracer.event(f"audio.{asset.kind}", "warn", item.id, f"not registered: {exc}"[:300])
         if result.pending:
             item.move(Stage.AWAITING_RENDER, result.note)
             self.store.save(item)
@@ -472,6 +506,9 @@ class Pipeline:
             if prev and prev.text_hash == digest and Path(prev.path).exists():
                 return prev
             path = self.voice.synthesize(text, out_dir / f"shot_{shot.index:02d}.{self.voice.ext}")
+            if self.voice.name == "higgsfield":
+                # Spoken by the offline fallback: mark it so the next render asks Higgsfield again.
+                digest = text_hash("fallback", vc.voice, text)
             return VoiceClip(shot_index=shot.index, path=str(path), text_hash=digest,
                              duration=probe(path)["duration"])
 
@@ -480,7 +517,31 @@ class Pipeline:
         item.voice_clips = clips
         return clips
 
+    def add_audio(self, item: ContentItem, kind: str, url: str | None = None, shot: int | None = None,
+                  job: str | None = None, path: str | Path | None = None) -> ContentItem:
+        """Register a narration line (kind="voice", per shot) or the video's music track (kind="music")."""
+        audio_dir = self.store.item_dir(item.id) / "audio"
+        if kind == "voice":
+            line = next((s for s in (item.script.shots if item.script else []) if s.index == shot), None)
+            if line is None or not line.voiceover.strip():
+                raise ValueError(f"Item {item.id} has no narration for shot {shot}")
+            dest = Path(path) if path else download(url, audio_dir / f"voice_{shot:02d}{_ext(url)}", self.http)
+            digest = text_hash("higgsfield", self.config.video.voice.voice, line.voiceover.strip())
+            item.voice_clips = [v for v in item.voice_clips if v.shot_index != shot] + [
+                VoiceClip(shot_index=shot, path=str(dest), text_hash=digest, duration=probe(dest)["duration"])]
+            item.voice_clips.sort(key=lambda v: v.shot_index)
+        elif kind == "music":
+            dest = Path(path) if path else download(url, audio_dir / f"music{_ext(url)}", self.http)
+            item.music_generated = str(dest)
+        else:
+            raise ValueError(f"Unknown audio kind {kind!r} (voice | music)")
+        self.tracer.event(f"audio.{kind}", "ok", item.id, f"{kind}{'' if shot is None else f' shot {shot + 1}'}"
+                          f" · {probe(dest)['duration']:.1f}s" + (f" · job {job}" if job else ""))
+        return self.store.save(item)
+
     def pick_music(self, item: ContentItem) -> Path | None:
+        if item.music_generated and Path(item.music_generated).exists():
+            return Path(item.music_generated)   # the original track made for this video
         folder = self.config.video.music.dir
         if not folder or not Path(folder).is_dir():
             return None
@@ -509,6 +570,14 @@ class Pipeline:
                 with self.tracer.span("edit.voice", item.id, provider=self.voice.name) as span:
                     clips = self.synthesize_voice(item)
                     span.detail = f"{len(clips)} narration clip(s) via {self.voice.name}"
+                    lines = {s.index: s.voiceover.strip() for s in item.script.shots}
+                    voice_id = self.config.video.voice.voice
+                    fallback = [v for v in clips
+                                if v.text_hash == text_hash("fallback", voice_id, lines.get(v.shot_index, ""))]
+                    if fallback:
+                        span.status = "warn"
+                        span.detail += (f"; shots {[v.shot_index + 1 for v in fallback]} used the offline voice "
+                                        "(Higgsfield narration not generated yet)")
             music = self.pick_music(item)
             item.music_track = str(music) if music else None
             with self.tracer.span("edit.assemble", item.id, phase=phase) as span:
@@ -776,6 +845,10 @@ class Pipeline:
         estimate = hf.estimate(shots, phase)
         if hf.keyframes and (phase == "draft" or not hf.draft_preview):  # keyframes come with the first pass
             estimate += shots * hf.unit_costs.keyframe
+        if phase == "draft" or not hf.draft_preview:                       # so do narration and music
+            video = self.config.video
+            estimate += (shots * hf.unit_costs.narration if video.voice.provider == "higgsfield" else 0) \
+                + (hf.unit_costs.music if video.music.generate else 0)
         return estimate
 
     def _budget_block(self, item: ContentItem, plan: RenderPlan) -> str | None:
@@ -831,8 +904,13 @@ class Pipeline:
             report["skipped"] = (f"budget: spent {spent:.0f}/{cap:.0f} today, balance "
                                  f"{'?' if balance is None else f'{balance:.0f}'}, a new video needs ≈{first:.0f} to start"
                                  + (f", {len(held)} video(s) already waiting for credits" if held else ""))
-            self.tracer.event("autopilot.fill", "skipped", detail=report["skipped"])
-            return report
+            waiting = [i for i in self.store.list() if i.stage not in STOP_STAGES]
+            if not (ap.prepare_when_blocked and not waiting and spent + first <= cap):
+                self.tracer.event("autopilot.fill", "skipped", detail=report["skipped"])
+                return report
+            # Nothing queued: write one video now, so it renders the moment credits arrive.
+            need = 1
+            report["prepared_for_top_up"] = True
         with self.tracer.span("autopilot.fill", None, need=need) as span:
             items: list[ContentItem] = []
             if ap.source == "viral":
@@ -850,8 +928,17 @@ class Pipeline:
                            f"target {ap.videos_per_day})")
         return report
 
+    def refresh_readiness(self) -> dict:
+        from . import readiness
+        from .config import Secrets
+
+        result = readiness.summary(readiness.check(self.config, self.secrets or Secrets(), self.store))
+        self.store.kv_set("readiness", {**result, "at": self.clock().isoformat()})
+        return result
+
     def autopilot_day(self) -> dict:
         """One full automatic cycle: fill today's ideas, then push everything as far as it goes."""
+        self.refresh_readiness()
         report = self.autopilot_fill()
         if report["active"]:
             moved = self.run()

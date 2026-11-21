@@ -129,7 +129,7 @@ def render_board(pipeline, st: dict, flash: str = "") -> str:
                          f"<span class=meta>{ap['per_day']} video(s) a day, made and posted without clicks · "
                          f"spend cap {ap['cap']:.0f} credits/day</span>"
                          "<form method=post action='/autopilot/pause'><button>⏸ Pause everything</button></form></div>")
-    body = (_flash(flash) + autopilot + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
+    body = (_flash(flash) + autopilot + readiness_html(pipeline, compact=True) + alerts_html(st) + f"<div class=kpis>{kpi_html}</div>" + ideas_form
             + f"<h2>Pipeline</h2><div class=board>{''.join(cols)}</div>")
     return page(pipeline.config.channel.name, body, st, "/")
 
@@ -392,6 +392,28 @@ def render_metrics(pipeline, st: dict) -> str:
     return page("Metrics", body, st, "/metrics")
 
 
+def readiness_html(pipeline, compact: bool = False) -> str:
+    """The autopilot's setup checklist (computed by the worker on every autopilot run)."""
+    ready = pipeline.store.kv_get("readiness")
+    if not ready or not pipeline.config.autopilot.enabled:
+        return ""
+    if compact:
+        if ready["ready"]:
+            return ""
+        return (f"<div class=flash><b>Autopilot setup:</b> {len(ready['missing'])} thing(s) missing — "
+                f"{e(', '.join(ready['missing']))}. <a href='/health'>See how to fix →</a></div>")
+    rows = "".join(
+        f"<tr><td>{pill({'ok': 'ok', 'missing': 'missing', 'optional': 'optional'}[c['status']], {'ok': 'ok', 'missing': 'error', 'optional': 'skipped'}[c['status']])}</td>"
+        f"<td><b>{e(c['name'])}</b></td><td>{e(c['detail'])}</td><td class=meta>{e(c['fix'])}</td></tr>"
+        for c in ready["checks"])
+    head = ("<p class=ok>Ready: the autopilot can make and post videos by itself.</p>" if ready["ready"] else
+            f"<p class=warn>Not ready yet: {e(', '.join(ready['missing']))}.</p>")
+    return (f"<h2>Autopilot setup</h2><section>{head}<table><tr><th></th><th>Need</th><th>Status</th>"
+            f"<th>How to fix</th></tr>{rows}</table><p class=meta>Checked "
+            f"{e((ready.get('at') or '')[:16].replace('T', ' '))} UTC by the worker (<code>vw autopilot ready</code>).</p>"
+            "</section>")
+
+
 def render_health(pipeline, st: dict, flash: str = "") -> str:
     health = pipeline.store.kv_get("health_last")
     running = pipeline.store.kv_get("health_running")
@@ -422,7 +444,8 @@ def render_health(pipeline, st: dict, flash: str = "") -> str:
         commands = (f"<h2>Requests sent to the worker</h2><section><table><tr><th>When</th><th>Action</th><th>Item</th>"
                     f"<th>From</th><th>Status</th><th>Result</th></tr>{rows_c or '<tr><td colspan=6 class=meta>none yet</td></tr>'}"
                     f"</table></section>")
-    body = (_flash(flash) + "<h2>Alerts</h2>" + (alerts_html(st) or "<p class=ok>No alerts. All good.</p>")
+    body = (_flash(flash) + readiness_html(pipeline) + "<h2>Alerts</h2>"
+            + (alerts_html(st) or "<p class=ok>No alerts. All good.</p>")
             + f"<h2>Connections</h2><section>{bal}<p class=meta>{when}</p>{buttons}<table>{rows}</table></section>"
             + commands)
     return page("Health", body, st, "/health", every_ms=4000 if running else 5000)

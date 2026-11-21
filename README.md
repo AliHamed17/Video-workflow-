@@ -22,7 +22,8 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Any LLM, with fallbacks** | Claude, ChatGPT/GPT, Gemini, OpenRouter/Groq/Ollama, or the Claude Code / Codex / Gemini **CLIs** on a subscription |
 | **Better scripts** | Ideas over-generated and ranked; a hook lab writes 5 openings and keeps the strongest; an independent fact-checker and a critic from another model family send drafts back until they're right |
 | **Higgsfield via MCP, quality-first** | Keyframe still per shot → animated with image-to-video → cheap 480p draft preview → **you approve** → finals rendered from the drafts. Live price + balance check before any credit is spent |
-| **Visual QA** | A vision model inspects frames of every rendered shot and re-renders weak ones automatically (on cheap drafts) |
+| **Visual QA** | A vision model inspects frames of every rendered shot and re-renders weak ones automatically — works with no API key through the Claude Code CLI |
+| **Production sound + consistency** | Natural narration (ElevenLabs voices via Higgsfield, ≈0.3 credits a line) and an original music track per video (≈3 credits); the first shot's keyframe anchors every other shot so the subject looks the same throughout |
 | **Technical QA** | Every cut is checked (resolution, fps, duration, loudness, black/frozen frames, dead air, bitrate, captions, narration pace); failures block publishing |
 | **Finished edit** | 1080x1920, narration (OpenAI / ElevenLabs / free offline flite) fitted to each shot, word-by-word captions with a headline, music ducked under the voice, −14 LUFS |
 | **Synchronized publishing** | Posting slots per timezone; YouTube + Instagram + TikTok go out in parallel; failed platforms retry alone |
@@ -108,7 +109,8 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 |---|---|
 | `vw selftest [--full-hd]` | Run every component together offline and report each step (20 checks) |
 | `vw cloud deploy [--skip-secrets]` · `vw cloud sync` · `vw cloud status` | Deploy the cloud dashboard to Vercel · push state + apply cloud commands now · check the connection |
-| `vw autopilot run\|status\|pause\|resume` | Fully automatic daily production and its stop button |
+| `vw autopilot run\|ready\|status\|pause\|resume` | Fully automatic daily production, its setup checklist and its stop button |
+| `vw audio add <id> voice\|music <url>` | Register Higgsfield narration / music (the render skill does this) |
 | `vw cloud restore` | Continue on a fresh machine (state, today's spend, rotated tokens) |
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
 | `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
@@ -159,6 +161,7 @@ src/video_workflow/
   cloud/         Vercel app, Postgres store, worker sync, REST deployer
   kit.py         publish kit (zip)      sources.py    ideas from an article
   viral.py       viral scout (sources, AI detection, ranking)
+  readiness.py   autopilot setup checklist
   selftest.py    whole-system check
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
@@ -170,7 +173,7 @@ Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMIN
 
 ## Status
 
-Phases 0–3 are built and tested: 101 tests, plus `vw selftest` (20 end-to-end checks) in CI
+Phases 0–3 are built and tested: 107 tests, plus `vw selftest` (20 end-to-end checks) in CI
 and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 

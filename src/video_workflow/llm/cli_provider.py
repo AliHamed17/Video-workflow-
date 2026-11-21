@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from ..config import Effort
 from .base import LLMError, ProviderUnavailable, T, parse_into, schema_instructions
@@ -26,14 +27,24 @@ class CLIAgentProvider:
 
     def structured(self, *, model: str, system: str, prompt: str, schema: type[T],
                    effort: Effort = "high", images: list | None = None) -> T:
-        if images:
-            raise ProviderUnavailable("CLI agents are not used for image inputs")
         # For this provider the "model" part of the route names the CLI: cli:claude, cli:codex ...
         command = self._commands.get(model)
         if not command:
             raise ProviderUnavailable(f"No CLI agent named {model!r} in llm.cli_agents")
         if self._run is subprocess.run and shutil.which(command[0]) is None:
             raise ProviderUnavailable(f"{command[0]!r} is not installed / not on PATH")
+        if images:
+            # Claude Code can look at image files with its Read tool: give it the paths and only
+            # that tool. Other CLIs don't take images this way.
+            if Path(command[0]).name != "claude":
+                raise ProviderUnavailable(f"{model} CLI is not used for image inputs")
+            missing = [str(p) for p in images if not Path(p).exists()]
+            if missing:
+                raise LLMError(f"image files not found: {missing}")
+            command = [*command, "--allowedTools", "Read"]
+            prompt = (f"{prompt}\n\nImages to inspect — open EVERY file with your Read tool before answering "
+                      "(they are listed in order):\n"
+                      + "\n".join(f"- {Path(p).resolve()}" for p in images))
 
         full_prompt = f"{system}\n\n{prompt}\n\n{schema_instructions(schema)}"
         last_error: Exception | None = None

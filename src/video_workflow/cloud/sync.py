@@ -23,7 +23,7 @@ from ..models import ContentItem
 log = logging.getLogger(__name__)
 
 SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan",
-           "viral_last", "viral_running", "autopilot_paused")
+           "viral_last", "viral_running", "autopilot_paused", "readiness")
 # What a fresh worker needs to pick up where the last one stopped (`vw cloud restore`).
 RESTORE_KV = ("content_plan", "viral_last", "viral_used", "last_viral", "last_plan", "last_digest", "last_stats",
               "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault")

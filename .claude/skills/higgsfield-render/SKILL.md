@@ -21,9 +21,12 @@ may have another name — use whichever Higgsfield tools are available: `balance
      (remove `medias`) and, if the shot has a `keyframe`, `generate_image` with its `keyframe` params.
      Multiply by the number of shots.
    - If the total exceeds the balance or `max_credits`, **stop** and tell the user the numbers.
-3. **Keyframes** (only if shots have a `keyframe`): one `generate_image_batch` call with
-   `{index, params: shot.keyframe}` for every shot; `jobs_wait` (≤12 jobs, `timeout_seconds: 15`)
-   until all are terminal. Keep each keyframe's job id and image URL.
+3. **Keyframes** (only if shots have a `keyframe`): if `strategy.reference_shot` is set, render
+   that shot's keyframe FIRST (`generate_image`, then `jobs_wait`), then put its job id in place of
+   `<REFERENCE_KEYFRAME_JOB_ID>` in every other shot's `keyframe.medias` — that keeps the subject,
+   character and world identical across shots. Then one `generate_image_batch` call with
+   `{index, params: shot.keyframe}` for the remaining shots; `jobs_wait` (≤12 jobs,
+   `timeout_seconds: 15`) until all are terminal. Keep each keyframe's job id and image URL.
 4. **Video shots:** in each shot's `video.medias`, replace `<KEYFRAME_JOB_ID>` with that shot's
    keyframe job id. One `generate_video_batch` call with `{index, params: shot.video}` for every
    shot; `jobs_wait` until all are terminal. Never resubmit a shot whose outcome is unknown —
@@ -31,6 +34,12 @@ may have another name — use whichever Higgsfield tools are available: `balance
 5. **Register every finished shot** (the video job id is required to finalize drafts later):
    `vw clips add <id> <index> <video_url> --job <video_job_id> [--keyframe-job <id> --keyframe-url <url>]`
    If a job failed, tell the user which shot and why, and offer to retry only that shot.
+5b. **Sound** (when the request has `audio.narration` / `audio.music`): submit them while the
+   video shots render — `generate_audio_batch` with `{index, params}` for every narration line and
+   `generate_audio` with the music params — then `jobs_wait` and register each result BEFORE
+   continuing: `vw audio add <id> voice <url> --shot <index> --job <job_id>` and
+   `vw audio add <id> music <url> --job <job_id>`. A line that fails is spoken by the offline voice
+   and asked for again next time; never block the video on it.
 6. **Continue:** `vw run --until edited`. A `draft` phase ends with a low-res preview the user
    approves in the dashboard or Telegram ("Render final"), which queues the `final` phase:
    run this skill again for it. After the final phase, `vw run` publishes on schedule.

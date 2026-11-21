@@ -40,3 +40,27 @@ def test_cli_agent_survives_one_silent_crash():
     provider.retry_delay_s = 0
     with pytest.raises(LLMError, match="usage limit reached"):
         provider.structured(model="claude", system="s", prompt="p", schema=SocialMeta)
+
+
+def test_claude_cli_inspects_images_with_its_read_tool(tmp_path):
+    import pytest
+
+    from video_workflow.llm.base import ProviderUnavailable
+    from video_workflow.models import ShotQA
+
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"\xff\xd8\xff\xd9")
+    seen = []
+
+    def runner(cmd, input, **kw):
+        seen.append((cmd, input))
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"score": 8, "matches_brief": true, "issues": [], '
+                                                          '"rerender": false, "prompt_fix": ""}', stderr="")
+
+    provider = CLIAgentProvider({"claude": ["claude", "-p"], "codex": ["codex", "exec", "-"]}, runner=runner)
+    qa = provider.structured(model="claude", system="s", prompt="judge the frames", schema=ShotQA, images=[frame])
+    assert qa.score == 8
+    cmd, prompt = seen[0]
+    assert cmd == ["claude", "-p", "--allowedTools", "Read"] and str(frame.resolve()) in prompt
+    with pytest.raises(ProviderUnavailable):
+        provider.structured(model="codex", system="s", prompt="p", schema=ShotQA, images=[frame])

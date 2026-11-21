@@ -13,7 +13,15 @@ from pathlib import Path
 
 from ..config import VideoConfig
 from ..models import ContentItem, RenderPlan
-from .base import KEYFRAME_PLACEHOLDER, RenderResult, keyframe_params, video_params
+from .base import (
+    KEYFRAME_PLACEHOLDER,
+    REFERENCE_PLACEHOLDER,
+    RenderResult,
+    audio_requests,
+    keyframe_params,
+    reference_shot,
+    video_params,
+)
 
 
 class HandoffGenerator:
@@ -26,34 +34,55 @@ class HandoffGenerator:
         hf, phase = self.video.higgsfield, item.render_phase
         drafts = {c.shot_index: c.source for c in item.clips if c.phase == "draft"}
         use_keyframes = hf.keyframes and not (phase == "final" and drafts)
+        ref = reference_shot(hf, plan) if use_keyframes else None
+        # A re-render of some shots keeps the existing reference keyframe when there is one.
+        existing_ref = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job), None) \
+            if ref is not None else None
         shots = []
         for shot in plan.shots:
             draft_job = drafts.get(shot.index) if phase == "final" else None
+            anchor = None if shot.index == ref or ref is None else (existing_ref or REFERENCE_PLACEHOLDER)
             shots.append({
                 "index": shot.index,
-                "keyframe": keyframe_params(hf, self.video.aspect_ratio, plan, shot) if use_keyframes else None,
+                "keyframe": keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor)
+                if use_keyframes else None,
                 "video": video_params(hf, self.video.aspect_ratio, plan, shot, phase,
                                       keyframe_job=KEYFRAME_PLACEHOLDER if use_keyframes else None,
                                       draft_job=draft_job, use_unlim=hf.use_unlim),
             })
+        narration, music = audio_requests(item, self.video)
         unit = hf.unit_costs
         per_shot = (unit.keyframe if use_keyframes else 0) + (unit.draft if phase == "draft" else unit.final)
+        estimate = per_shot * len(plan.shots) + unit.narration * len(narration) + (unit.music if music else 0)
         steps = []
-        if use_keyframes:
+        if use_keyframes and ref is not None and any(s["index"] == ref for s in shots):
+            steps.append(f"generate_image with shot {ref}'s `keyframe` params FIRST; jobs_wait; it is the "
+                         f"reference: replace {REFERENCE_PLACEHOLDER} in the other shots' keyframe.medias "
+                         "with its job_id")
+            steps.append("generate_image_batch with the other shots' `keyframe` params; jobs_wait")
+        elif use_keyframes:
             steps.append("generate_image_batch with every shot's `keyframe` params; jobs_wait; keep each job_id")
+        if use_keyframes:
             steps.append(f"replace {KEYFRAME_PLACEHOLDER} in each shot's video.medias with that shot's keyframe job_id")
         steps.append("generate_video_batch with every shot's `video` params; jobs_wait")
         steps.append("for each finished shot: vw clips add <item> <index> <video_url> --job <video_job_id>"
                      + (" --keyframe-job <id> --keyframe-url <url>" if use_keyframes else ""))
+        if narration:
+            steps.append("generate_audio_batch with every `audio.narration` line's params; jobs_wait; for each: "
+                         "vw audio add <item> voice <url> --shot <index> --job <job_id>")
+        if music:
+            steps.append("generate_audio with `audio.music`; jobs_wait; vw audio add <item> music <url> --job <job_id>")
         return {
             "item_id": item.id,
             "title": item.idea.title,
             "phase": phase,
-            "strategy": {"keyframes": use_keyframes, "draft_preview": hf.draft_preview},
-            "estimated_credits": per_shot * len(plan.shots),
+            "strategy": {"keyframes": use_keyframes, "draft_preview": hf.draft_preview,
+                         "reference_shot": ref, "narration_lines": len(narration), "music": bool(music)},
+            "estimated_credits": estimate,
             "max_credits": hf.max_credits_per_video,
             "steps": steps,
             "shots": shots,
+            "audio": {"narration": narration, "music": music},
         }
 
     def render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:

@@ -25,12 +25,30 @@ Turn it on in `config/channel.yaml` (`autopilot.enabled: true`, already on for t
 | Originality | Remixes keep the format and energy, never the original's footage, audio, characters, names or script, and skip videos built on real people, brands or copyrighted characters. Platforms bury re-uploads and near-copies (YouTube "reused content", TikTok/Instagram "unoriginal content"), so this also protects the account |
 | AI labels | `ai_disclosure: true` labels every post as AI-generated where the platform supports it |
 
+## Production quality, built in
+
+| | What | Cost |
+|---|---|---|
+| One subject across shots | Shot 1's keyframe is drawn first; every other keyframe uses it as a reference image | free (same keyframe price) |
+| Natural narration | ElevenLabs voices through Higgsfield (`video.voice.provider: higgsfield`); a missing line is spoken by the offline voice and requested again | ≈0.3 credits per line |
+| Original music | An instrumental made for each video (`video.music.generate: true`), ducked under the voice | ≈3.2 credits |
+| Visual QA | Every shot is judged on sampled frames; weak shots are re-rendered with a corrected prompt. Works through the Claude CLI, no API key | LLM only |
+| Speed | Fact-check and critic run side by side, and so do shot prompts and posting copy (≈30% less waiting per script on real runs) | — |
+
+## Setup checklist
+
+`vw autopilot ready` (also on the dashboard's Health page and as a banner on the board) lists
+what the autopilot still needs — Higgsfield connector and credits, writers, viral sources, each
+platform's credentials, cloud memory, Telegram — with how to fix each one. Every autopilot run
+refreshes it. While credits are short, the autopilot still prepares ONE video (script, fact-check,
+shot prompts) so it renders the moment you top up.
+
 ## What you need to set up (once)
 
 Create the accounts, then put each value where your worker runs (see "Where it runs").
 
 ### 1. Higgsfield credits
-A 20-second video (4 shots: keyframe + 1080p shot each) costs about **330 credits**. A video a
+A 20-second video (4 shots: keyframe + 1080p shot each, narration and music) costs about **332 credits**. A video a
 day is ~10,000 credits a month. Top up or pick a plan in Higgsfield; the autopilot reads the
 balance before every render.
 

@@ -99,9 +99,36 @@ class ElevenLabsVoice:
         return dest
 
 
+class HiggsfieldVoice:
+    """Natural voices generated with Higgsfield credits during the render step.
+
+    The renderer (headless) or the render skill (handoff) creates one line per shot and
+    registers it (`vw audio add ... voice`). Editing reuses those files by text hash; a line
+    that is missing is spoken by the offline fallback (flite) so a shot never goes silent.
+    """
+
+    name = "higgsfield"
+
+    def __init__(self, voice: str, fallback: VoiceProvider | None = None):
+        self.voice = voice
+        self.fallback = fallback
+        self.ext = fallback.ext if fallback else "wav"
+        self.fallback_used: list[str] = []
+
+    def synthesize(self, text: str, dest: Path) -> Path:
+        if self.fallback is None:
+            raise VoiceError("Higgsfield narration for this line was not generated and no offline fallback exists")
+        self.fallback_used.append(text)
+        return self.fallback.synthesize(text, dest)
+
+
 def build_voice(config: VoiceConfig, secrets: Secrets, http: httpx.Client | None = None) -> VoiceProvider | None:
     if config.provider == "none":
         return None
+    if config.provider == "higgsfield":
+        if not config.voice:
+            raise VoiceError("video.voice.provider=higgsfield needs video.voice.voice (a Higgsfield voice_id)")
+        return HiggsfieldVoice(config.voice, FliteVoice())
     if config.provider == "flite":
         return FliteVoice(config.voice)
     if config.provider == "openai":

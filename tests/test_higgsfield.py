@@ -35,8 +35,10 @@ class FakeCaller:
             return {"cost": {"credits": self.image_credits}}
         if name == "balance":
             return {"credits": self.balance, "subscription_plan_type": "pro"}
-        if name in ("generate_video_batch", "generate_image_batch"):
-            kind = "img" if name == "generate_image_batch" else "vid"
+        if name == "generate_audio":
+            return {"job": {"job_id": "music-track-1", "status": "queued"}}
+        if name in ("generate_video_batch", "generate_image_batch", "generate_audio_batch"):
+            kind = {"generate_image_batch": "img", "generate_audio_batch": "aud"}.get(name, "vid")
             return {"jobs": [{"index": r["index"], "job_id": f"{kind}-{r['index']}", "status": "queued"}
                              for r in arguments["requests"]]}
         if name == "jobs_wait":
@@ -48,14 +50,15 @@ class FakeCaller:
                 elif j["index"] == self.fail_job and j["job_id"].startswith("vid"):
                     jobs.append({**j, "status": "failed", "error": "nsfw"})
                 else:
-                    ext = "jpg" if j["job_id"].startswith("img") else "mp4"
+                    ext = "jpg" if j["job_id"].startswith("img") else \
+                        "mp3" if j["job_id"].startswith(("aud", "music")) else "mp4"
                     jobs.append({**j, "status": "completed",
                                  "results": [{"url": f"https://cdn.example/{j['job_id']}.{ext}"}]})
             return {"jobs": jobs, "all_terminal": self.polls > 1}
         raise AssertionError(name)
 
 
-def _gen(caller, **cfg):
+def _gen(caller, video=None, **cfg):
     @asynccontextmanager
     async def factory():
         yield caller
@@ -65,7 +68,7 @@ def _gen(caller, **cfg):
         lambda req: httpx.Response(200, content=b"DATA" + req.url.path.encode())))
     config = HiggsfieldConfig(max_credits_per_video=500, params={"resolution": "1080p"}, **cfg)
     gen = HiggsfieldMCPGenerator(config, "9:16", factory, http=http, poll_interval_s=0,
-                                 on_balance=lambda c, p: seen.append((c, p)))
+                                 on_balance=lambda c, p: seen.append((c, p)), video=video)
     return gen, seen
 
 

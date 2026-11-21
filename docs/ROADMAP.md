@@ -41,6 +41,15 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.0: Production quality ✅
+
+- [x] Consistent subject: reference keyframe for every shot
+- [x] Higgsfield narration (ElevenLabs voices) + an original score per video, offline fallback
+- [x] Visual QA without API keys (Claude CLI reads the frames)
+- [x] Fact-check ‖ critic and director ‖ packager in parallel (≈30% faster scripting)
+- [x] Setup checklist (`vw autopilot ready`, dashboard); one video prepared while credits are short
+- [ ] Series: recurring characters and episode memory for formats that become shows
+
 ## Phase 1.9: Autopilot ✅
 
 - [x] Daily production with no clicks: viral remix → script → render → QA → publish
@@ -69,9 +78,9 @@ We build this step by step. Each phase ends with something that works end to end
 ## Phase 2: Sound and presence
 
 - [x] Voiceover from the script (OpenAI / ElevenLabs / flite)
-- [ ] Higgsfield voices (`generate_audio`, `seed_audio`) as a voice provider
+- [x] Higgsfield voices (`text2speech_v2`) as a voice provider
 - [x] Music bed by mood with ducking under narration (local library)
-- [ ] Generated music per video (Higgsfield `suno_music`)
+- [x] Generated music per video (Higgsfield `elevenlabs_music_v2_5`)
 - [ ] Consistent on-screen host/character (Higgsfield AI influencer + reference images)
 - [x] Word-level captions timed to the voiceover (true word timestamps via forced alignment next)
 

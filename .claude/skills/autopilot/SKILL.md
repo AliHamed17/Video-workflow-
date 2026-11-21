@@ -13,9 +13,11 @@ questions during a scheduled run — if something blocks, stop that part and rep
 ## 0. Setup
 
 ```bash
-cd <repo> && . .venv/bin/activate     # the environment's setup script installs it; else:
-# uv venv && . .venv/bin/activate && uv pip install -e ".[all,dev]"
-vw autopilot status
+# A fresh scheduled session may not have the repo yet:
+[ -d Video-workflow- ] || git clone https://github.com/AliHamed17/Video-workflow-.git
+cd Video-workflow- && (. .venv/bin/activate 2>/dev/null || (uv venv -q && . .venv/bin/activate \
+  && uv pip install -q -e ".[all,dev]"))
+vw autopilot ready      # the setup checklist: what is still missing (also shown on the dashboard)
 ```
 
 If `VW_CLOUD_URL` / `VW_CLOUD_SECRET` are set, every `vw autopilot run` below uses
@@ -23,9 +25,12 @@ If `VW_CLOUD_URL` / `VW_CLOUD_SECRET` are set, every `vw autopilot run` below us
 
 ## 1. Balance first
 
-Call the Higgsfield `balance` tool and record it: `vw higgsfield-balance <credits> --plan <plan>`.
-The autopilot refuses to start a video the balance or `autopilot.max_credits_per_day` can't cover —
-that is expected, not an error. If it says so, skip to step 6 and report it.
+If the Higgsfield tools (`balance`, `generate_image`, ...) are available: call `balance` and record
+it: `vw higgsfield-balance <credits> --plan <plan>`. If they are NOT available (the connector isn't
+enabled for this scheduled task), still do steps 2–3: the script, fact-check and shot prompts are
+prepared and parked at `awaiting_render`, so the video renders as soon as Higgsfield is connected.
+The autopilot never starts a render the balance or `autopilot.max_credits_per_day` can't cover;
+when credits are short it still prepares ONE video so a top-up starts rendering right away.
 
 ## 2. Today's viral videos
 

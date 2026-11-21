@@ -343,6 +343,7 @@ class ContentItem(BaseModel):
     source_url: str | None = None      # the article/page the idea was drawn from
     inspiration: Inspiration | None = None   # the viral video whose format this remixes
     music_track: str | None = None
+    music_generated: str | None = None  # an original track made for this video (Higgsfield)
     final_video: str | None = None
     thumbnail: str | None = None
     scheduled_for: datetime | None = None

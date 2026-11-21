@@ -47,7 +47,8 @@ def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None
         url, token = secrets.higgsfield_mcp_url, _s(secrets.higgsfield_mcp_token)
         return HiggsfieldMCPGenerator(config.video.higgsfield, config.video.aspect_ratio,
                                       caller_factory=lambda: MCPToolCaller(url, token),
-                                      on_balance=balance_recorder(store) if store else None)
+                                      on_balance=balance_recorder(store) if store else None,
+                                      video=config.video)
     raise ValueError(f"Unknown video generator {name!r}")
 
 

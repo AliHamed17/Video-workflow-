@@ -22,9 +22,17 @@ from typing import Any, Protocol
 
 import httpx
 
-from ..config import HiggsfieldConfig
+from ..config import HiggsfieldConfig, VideoConfig
 from ..models import Clip, ContentItem, RenderPlan
-from .base import RenderResult, download, keyframe_params, video_params
+from .base import (
+    AudioAsset,
+    RenderResult,
+    audio_requests,
+    download,
+    keyframe_params,
+    reference_shot,
+    video_params,
+)
 
 DONE = {"completed", "succeeded", "success", "done", "finished"}
 FAILED = {"failed", "error", "canceled", "cancelled", "lookup_failed", "nsfw", "rejected", "timeout"}
@@ -138,6 +146,15 @@ def extract_states(payload: Any) -> dict[str, dict]:
     return states
 
 
+def extract_job_id(payload: Any) -> str | None:
+    """The job id of a single generate_* call."""
+    for d in _walk(payload):
+        for key in ("job_id", "id"):
+            if isinstance(d.get(key), str) and len(d[key]) >= 8:
+                return d[key]
+    return None
+
+
 def extract_credits(payload: Any) -> float | None:
     for d in _walk(payload):
         for key in ("credits_exact", "credits"):
@@ -160,7 +177,9 @@ class HiggsfieldMCPGenerator:
     def __init__(self, config: HiggsfieldConfig, aspect_ratio: str,
                  caller_factory: Callable[[], AbstractAsyncContextManager[ToolCaller]],
                  http: httpx.Client | None = None, poll_interval_s: float = 10.0,
-                 on_balance: Callable[[float, str | None], None] | None = None):
+                 on_balance: Callable[[float, str | None], None] | None = None,
+                 video: VideoConfig | None = None):
+        self.video = video          # for narration / music generated alongside the shots
         self.config = config
         self.aspect_ratio = aspect_ratio
         self.caller_factory = caller_factory
@@ -239,30 +258,60 @@ class HiggsfieldMCPGenerator:
                         f"Higgsfield balance is {credits:.0f} credits ({plan_type or 'unknown plan'}); "
                         f"this {phase} render needs ≈{estimate:.0f}. Top up, then retry.")
 
-            # 2. Keyframes.
+            # 2. Keyframes: the reference shot first, then every other shot drawn from it.
             keyframe_jobs: dict[int, str] = {}
             keyframe_paths: dict[int, Path] = {}
             if use_keyframes:
-                requests = [{"index": s.index, "params": keyframe_params(hf, self.aspect_ratio, plan, s)
-                             | {"use_unlim": hf.use_unlim}} for s in plan.shots]
-                keyframe_jobs = await self._batch(caller, "generate_image_batch", requests)
-                states = await self._wait(caller, keyframe_jobs)
-                self._raise_failures(states, "keyframes")
-                for index, job in keyframe_jobs.items():
-                    url = states[job]["url"]
-                    if url:
-                        keyframe_paths[index] = download(url, out_dir / f"keyframe_{index:02d}.jpg", self.http)
+                ref = reference_shot(hf, plan)
+                ref_job = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job),
+                               None) if ref is not None else None
+                waves = [[s for s in plan.shots if s.index == ref], [s for s in plan.shots if s.index != ref]] \
+                    if ref is not None else [list(plan.shots)]
+                for wave in waves:
+                    if not wave:
+                        continue
+                    requests = [{"index": s.index, "params": keyframe_params(
+                        hf, self.aspect_ratio, plan, s,
+                        reference_job=None if s.index == ref else ref_job) | {"use_unlim": hf.use_unlim}}
+                        for s in wave]
+                    jobs = await self._batch(caller, "generate_image_batch", requests)
+                    states = await self._wait(caller, jobs)
+                    self._raise_failures(states, "keyframes")
+                    keyframe_jobs |= jobs
+                    if ref is not None and ref in jobs:
+                        ref_job = jobs[ref]
+                    for index, job in jobs.items():
+                        url = states[job]["url"]
+                        if url:
+                            keyframe_paths[index] = download(url, out_dir / f"keyframe_{index:02d}.jpg", self.http)
 
-            # 3. Video shots.
+            # 3. Video shots, with the narration and music submitted alongside so they finish together.
             requests = [{"index": s.index, "params": video_params(
                 hf, self.aspect_ratio, plan, s, phase, keyframe_job=keyframe_jobs.get(s.index),
                 draft_job=drafts.get(s.index) if phase == "final" else None, use_unlim=hf.use_unlim)}
                 for s in plan.shots]
             video_jobs = await self._batch(caller, "generate_video_batch", requests)
+            narration, music = audio_requests(item, self.video) if self.video else ([], None)
+            voice_jobs = await self._batch(caller, "generate_audio_batch", narration) if narration else {}
+            music_job = None
+            if music:
+                music_job = extract_job_id(await caller.call("generate_audio", {"params": music, "context": CONTEXT}))
             states = await self._wait(caller, video_jobs)
             self._raise_failures(states, f"{phase} shots")
+            sound_jobs = dict(voice_jobs) | ({-1: music_job} if music_job else {})
+            sound_states = await self._wait(caller, sound_jobs) if sound_jobs else {}
 
-        # 4. Download.
+        # 4. Download. Sound is best effort: a failed narration line falls back to the offline voice.
+        audio: list[AudioAsset] = []
+        audio_dir = out_dir.parent / "audio"
+        for index, job in sound_jobs.items():
+            state = sound_states.get(job, {})
+            if state.get("status") not in DONE or not state.get("url"):
+                continue
+            kind = "music" if index == -1 else "voice"
+            name = "music.mp3" if kind == "music" else f"voice_{index:02d}.mp3"
+            audio.append(AudioAsset(kind=kind, index=None if kind == "music" else index, url=state["url"], job=job,
+                                    path=str(download(state["url"], audio_dir / name, self.http))))
         clips = []
         for index, job_id in sorted(video_jobs.items()):
             url = states[job_id]["url"]
@@ -272,6 +321,9 @@ class HiggsfieldMCPGenerator:
             clips.append(Clip(shot_index=index, source=job_id, url=url, path=str(path), phase=phase,
                               keyframe=str(keyframe_paths[index]) if index in keyframe_paths else None,
                               keyframe_job=keyframe_jobs.get(index)))
-        return RenderResult(clips=clips, credits=estimate,
+        sound_credits = (hf.unit_costs.narration * sum(1 for a in audio if a.kind == "voice")
+                         + hf.unit_costs.music * sum(1 for a in audio if a.kind == "music"))
+        return RenderResult(clips=clips, audio=audio, credits=estimate + sound_credits,
                             note=f"{len(clips)} {phase} shot(s) on {hf.model}"
-                                 + (" from keyframes" if use_keyframes else ""))
+                                 + (" from keyframes" if use_keyframes else "")
+                                 + (f", {len(audio)} sound file(s)" if audio else ""))

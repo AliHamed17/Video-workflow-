@@ -70,7 +70,12 @@ def test_spending_is_capped_and_resumes_after_a_top_up(tmp_path):
     pipe, _, memory = _autopilot(tmp_path)
     pipe.store.kv_set("higgsfield_balance", {"credits": 4, "plan": "free"})
     first = pipe.autopilot_day()
-    assert first["pitched"] == 0 and "balance 4" in first["skipped"]        # no script it can't render
+    # Out of credits: ONE video is written and parked, ready to render the moment you top up.
+    assert first["pitched"] == 1 and first["prepared_for_top_up"] and "balance 4" in first["skipped"]
+    parked = pipe.store.list()[0]
+    assert parked.stage == Stage.APPROVED and parked.attention.startswith("Not enough Higgsfield credits")
+    assert pipe.autopilot_day()["pitched"] == 0                              # one waiting video is enough
+    assert not any(e["step"].startswith("render") for e in pipe.store.events(limit=1000))
     pipe.store.kv_set("higgsfield_balance", {"credits": 100, "plan": "plus"})  # enough for drafts, not finals
     pipe.autopilot_day()
     item = pipe.store.list()[0]

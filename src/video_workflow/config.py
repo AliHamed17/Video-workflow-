@@ -80,6 +80,8 @@ class UnitCosts(BaseModel):
     keyframe: float = 2      # one keyframe still
     draft: float = 15        # one 480p draft shot
     final: float = 80        # one full-resolution shot
+    narration: float = 0.3   # one narration line (Higgsfield text-to-speech)
+    music: float = 3.2       # one original music track (~20 s)
 
 
 class HiggsfieldConfig(BaseModel):
@@ -95,6 +97,10 @@ class HiggsfieldConfig(BaseModel):
     keyframe_params: dict = Field(default_factory=lambda: {"resolution": "2k"})
     keyframe_video_params: dict = Field(default_factory=lambda: {"mode": "omni_reference"})
     keyframe_role: str = "start_image"
+    # Consistency: the first shot's keyframe is drawn first and every other keyframe is drawn
+    # with it as a reference image, so the subject, palette and world stay the same across shots.
+    consistent_subject: bool = True
+    reference_role: str = "image_references"
     draft_preview: bool = True    # render cheap drafts, approve the preview, then finalize full-res
     draft_params: dict = Field(default_factory=lambda: {"draft": True})
     unit_costs: UnitCosts = Field(default_factory=UnitCosts)
@@ -119,9 +125,12 @@ class CaptionConfig(BaseModel):
 
 
 class VoiceConfig(BaseModel):
-    provider: Literal["none", "flite", "openai", "elevenlabs"] = "none"
-    voice: str = ""                # openai voice / elevenlabs voice_id / flite voice (slt, kal, awb, rms)
-    model: str = ""                # openai: gpt-4o-mini-tts, elevenlabs: eleven_multilingual_v2
+    # higgsfield: natural voices generated with your Higgsfield credits during the render step
+    # (≈0.3 credits per line, no extra API key); flite is the free offline fallback.
+    provider: Literal["none", "flite", "openai", "elevenlabs", "higgsfield"] = "none"
+    voice: str = ""                # openai voice / elevenlabs voice_id / flite voice / higgsfield voice_id
+    model: str = ""                # openai: gpt-4o-mini-tts, elevenlabs: eleven_multilingual_v2,
+    #                                higgsfield: TTS engine (elevenlabs, minimax, seed_speech, ...)
     instructions: str = ""         # openai only: delivery style
     max_speedup: float = 1.3       # speed narration up to this factor to fit a shot
     voices: dict[str, str] = Field(default_factory=dict)  # per-language voice, e.g. {"es": "nova"}
@@ -131,6 +140,8 @@ class MusicConfig(BaseModel):
     dir: str | None = None         # folder of royalty-free tracks (mp3/wav/m4a/ogg/flac)
     volume_db: float = -16
     duck: bool = True              # lower the music under the voiceover
+    generate: bool = False         # an original instrumental per video with Higgsfield (≈3 credits)
+    model: str = "elevenlabs_music_v2_5"
 
 
 class VideoConfig(BaseModel):
@@ -205,6 +216,7 @@ class AutopilotConfig(BaseModel):
     approve_finals: bool = True        # after a preview passes QA, pay for the final render automatically
     min_visual_score: float = 7.0      # average visual-QA score the preview needs (when visual QA ran)
     max_credits_per_day: float = 500   # hard stop: no render starts past this daily Higgsfield spend
+    prepare_when_blocked: bool = True  # out of credits: still write ONE video so it renders the moment you top up
 
 
 class YouTubeConfig(BaseModel):
