@@ -23,10 +23,10 @@ from ..models import ContentItem
 log = logging.getLogger(__name__)
 
 SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_last", "content_plan",
-           "viral_last", "viral_running", "autopilot_paused", "readiness")
+           "viral_last", "viral_running", "autopilot_paused", "readiness", "trend_radar", "trends_running")
 # What a fresh worker needs to pick up where the last one stopped (`vw cloud restore`).
 RESTORE_KV = ("content_plan", "viral_last", "viral_used", "last_viral", "last_plan", "last_digest", "last_stats",
-              "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault")
+              "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault", "trend_radar")
 MEDIA_ITEMS = 40              # media is kept for the most recent items
 MAX_UPLOAD = 4_300_000        # stay under Vercel's 4.5 MB request limit
 
@@ -186,6 +186,15 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str] | None:
             last = store.kv_get("viral_last") or {}
             return True, (f"viral {args['op']} done · " + (f"our version {made[0].id}: {made[0].idea.title[:60]}"
                                                            if made else f"{len(last.get('videos', []))} videos listed"))
+        if action == "trends":
+            from ..web.server import run_trends
+
+            error = run_trends(pipeline)
+            if error:
+                return False, f"trend radar failed: {error}"
+            radar = store.kv_get("trend_radar") or {}
+            top = radar.get("topics") or []
+            return True, f"{len(top)} trend topics" + (f"; top: {top[0]['topic'][:60]}" if top else "")
         if action == "autopilot":
             paused = bool((cmd.get("args") or {}).get("paused"))
             pipeline.set_autopilot_paused(paused, by="cloud dashboard")

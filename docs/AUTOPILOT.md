@@ -25,6 +25,16 @@ Turn it on in `config/channel.yaml` (`autopilot.enabled: true`, already on for t
 | Originality | Remixes keep the format and energy, never the original's footage, audio, characters, names or script, and skip videos built on real people, brands or copyrighted characters. Platforms bury re-uploads and near-copies (YouTube "reused content", TikTok/Instagram "unoriginal content"), so this also protects the account |
 | AI labels | `ai_disclosure: true` labels every post as AI-generated where the platform supports it |
 
+## What it makes each day
+
+`autopilot.source: mix` (this channel): the **trend radar** reads today's signals — Wikipedia's
+most-read pages and how fast they climbed, Google News science, Google Trends (plus YouTube's
+chart with a key) — and Claude turns them into topics scored for the channel (fit × momentum),
+each with how long it stays timely and a ready, fact-careful angle. The idea writer then **fuses**
+the best topic with a format that is going viral in AI shorts today (from the viral scout). If
+no topic fits, it remixes today's strongest viral format instead. Dashboard → **Trends** shows
+the radar with a 🎬 Make a video button per topic.
+
 ## Production quality, built in
 
 | | What | Cost |

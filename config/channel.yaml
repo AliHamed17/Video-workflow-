@@ -152,7 +152,8 @@ autopilot:
   enabled: true
   videos_per_day: 1
   max_attempts_per_day: 3     # ideas tried per day (some fail the critic or QA)
-  source: viral               # viral remixes (falls back to the content calendar) | calendar
+  source: mix                 # mix: a trending topic told in a format going viral (falls back to a
+                              # viral remix) | viral | calendar
   min_script_score: 7.5       # critic score to approve a script without you (fact-check must pass too)
   approve_finals: true        # render the final automatically when the preview passes QA
   min_visual_score: 7.0
@@ -175,17 +176,26 @@ publish:
     max_per_day: 2
 
 trends:
-  enabled: false
+  # The trend radar: today's signals → topics scored for this channel (fit × momentum) with our
+  # angle. The idea writer fuses the best topics with formats going viral right now.
+  enabled: true
   max_items: 25
+  refresh_hours: 12
   sources:
+    - type: wikipedia            # yesterday's most-read pages + how fast they climbed (free)
+      limit: 15
+    - type: rss
+      name: Google News science
+      url: "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en-US&gl=US&ceid=US:en"
+      limit: 15
     - type: google_trends
       geo: US
-      limit: 10
-    - type: reddit
-      subreddits: [science, space, Damnthatsinteresting]
-      limit: 8
-    # - type: rss
-    #   url: "https://www.sciencedaily.com/rss/top/science.xml"
+      limit: 15
+    # - type: youtube_popular    # YouTube's most-popular chart (needs YOUTUBE_API_KEY); 28 = Science & Tech
+    #   geo: US
+    #   category: "28"
+    # - type: reddit             # often blocked from cloud servers
+    #   subreddits: [science, space, Damnthatsinteresting]
 
 viral:
   # Every day: find the best-performing AI-generated shorts, learn WHY they work (hook, format,

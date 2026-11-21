@@ -211,7 +211,9 @@ class AutopilotConfig(BaseModel):
     enabled: bool = False
     videos_per_day: int = 1            # new videos to produce each day
     max_attempts_per_day: int = 3      # ideas tried per day (some fail the critic or QA)
-    source: Literal["viral", "calendar"] = "viral"   # viral remixes first, or the content calendar
+    # mix: a trending topic told in a format going viral (falls back to a viral remix);
+    # viral: remix today's best AI short; calendar: the planned theme
+    source: Literal["mix", "viral", "calendar"] = "viral"
     min_script_score: float = 7.5      # critic score to approve a script without you (fact-check must pass)
     approve_finals: bool = True        # after a preview passes QA, pay for the final render automatically
     min_visual_score: float = 7.0      # average visual-QA score the preview needs (when visual QA ran)
@@ -249,10 +251,15 @@ class PublishConfig(BaseModel):
 
 
 class TrendSourceConfig(BaseModel):
-    type: Literal["google_trends", "reddit", "rss"]
-    geo: str = "US"                                   # google_trends
+    # wikipedia: yesterday's most-read articles + how fast they climbed (free, no key)
+    # youtube_popular: YouTube's most-popular chart for a category (needs YOUTUBE_API_KEY)
+    type: Literal["google_trends", "reddit", "rss", "wikipedia", "youtube_popular"]
+    geo: str = "US"                                   # google_trends, youtube_popular (region)
     subreddits: list[str] = Field(default_factory=list)  # reddit
     url: str = ""                                     # rss
+    name: str = ""                                    # rss: label shown in the radar, e.g. "Google News science"
+    project: str = "en.wikipedia"                     # wikipedia
+    category: str = "28"                              # youtube_popular: 28 Science & Tech, 24 Entertainment ...
     limit: int = 10
 
 
@@ -260,6 +267,8 @@ class TrendsConfig(BaseModel):
     enabled: bool = False
     sources: list[TrendSourceConfig] = Field(default_factory=list)
     max_items: int = 25
+    radar: bool = True            # cluster + score the signals into topics with an angle (one LLM call a day)
+    refresh_hours: int = 12       # how long a radar stays fresh
 
 
 class ViralYouTubeConfig(BaseModel):

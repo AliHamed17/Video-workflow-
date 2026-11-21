@@ -612,3 +612,43 @@ def render_viral(pipeline, st: dict, flash: str = "") -> str:
             "(APIFY_TOKEN), then press Scout now — or paste a video you found above.</p>")
     body = _flash(flash) + "<h2>Viral AI videos</h2>" + head + actions + add + grid
     return page("Viral", body, st, "/viral", every_ms=3000 if busy else 10000)
+
+
+def render_trends(pipeline, st: dict, flash: str = "") -> str:
+    radar = pipeline.store.kv_get("trend_radar") or {}
+    busy = pipeline.store.kv_get("trends_running")
+    tc = pipeline.config.trends
+    when = (radar.get("at") or "")[:16].replace("T", " ")
+    errors = "".join(f"<p class=meta>⚠ {e(k)}: {e(v)}</p>" for k, v in (radar.get("errors") or {}).items())
+    head = ("<p class=meta>What people are searching for and reading today — Google Trends, Wikipedia's most-read "
+            "pages, news feeds, Reddit, YouTube's chart — clustered into topics and scored for our channel "
+            "(fit × momentum). The idea writer fuses the best of them with formats going viral right now.</p>"
+            + (f"<p class=meta>Last radar: {e(when)} UTC · {len(radar.get('signals', []))} signals · refreshes every "
+               f"{tc.refresh_hours}h</p>" if when else "<p class=meta>No radar yet.</p>")
+            + ("" if tc.enabled else "<p class=warn>Trend signals are off (trends.enabled: false).</p>") + errors)
+    button = ("<p class=warn>Reading today's trends…</p>" if busy else
+              "<div class=actions><form method=post action='/trends/refresh'><button class=primary>📡 Refresh radar"
+              "</button></form></div>")
+    rows = []
+    for t in radar.get("topics", []):
+        tone = "ok" if t["fit"] >= 7 else "gated" if t["fit"] >= 5 else "skipped"
+        fit_label = f"{t['fit']:.0f}/10"
+        links = " ".join(f"<a href='{e(u, quote=True)}' target=_blank rel='noopener noreferrer'>source</a>"
+                         for u in t.get("links", []))
+        make = ("<form method=post action='/ideas'><input type=hidden name=count value=1>"
+                f"<input type=hidden name=topic value='{e((t['topic'] + ': ' + t['angle'])[:200], quote=True)}'>"
+                "<button>🎬 Make a video</button></form>") if t["fit"] >= 5 else ""
+        rows.append(f"<tr><td class=num><b>{t['score']:.1f}</b></td><td><b>{e(t['topic'])}</b>"
+                    f"<div class=meta>{e(t['why_now'])}</div><div class=meta>{e(', '.join(t.get('sources', [])))} {links}"
+                    f"</div></td><td>{pill(t['momentum'], 'ok' if t['momentum'] == 'rising' else 'gated')}</td>"
+                    f"<td class=num>{pill(fit_label, tone)}</td><td class=num>~{t['shelf_life_hours']}h</td>"
+                    f"<td>{e(t['angle'])}</td><td>{make}</td></tr>")
+    table = (f"<section><table><tr><th class=num>Score</th><th>Topic</th><th>Momentum</th><th class=num>Fit</th>"
+             f"<th class=num>Timely for</th><th>Our angle</th><th></th></tr>{''.join(rows)}</table></section>"
+             if rows else "<p class=meta>No topics yet — press Refresh radar.</p>")
+    signals = "".join(f"<tr><td class=meta>{e(sg['source'])}</td><td>{e(sg['title'])}</td><td class=meta>"
+                      f"{e(sg.get('detail', ''))}</td></tr>" for sg in radar.get("signals", [])[:40])
+    raw = (f"<details><summary class=meta>Raw signals ({len(radar.get('signals', []))})</summary><section><table>"
+           f"{signals}</table></section></details>" if signals else "")
+    body = _flash(flash) + "<h2>Trend radar</h2>" + head + button + table + raw
+    return page("Trends", body, st, "/trends", every_ms=3000 if busy else 15000)

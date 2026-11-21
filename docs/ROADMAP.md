@@ -41,6 +41,14 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.1: Trend radar ✅
+
+- [x] Wikipedia most-read (with climb), Google News, Google Trends, Reddit, YouTube chart signals
+- [x] Claude clusters signals into topics: momentum, fit, shelf life, fact-careful angle
+- [x] Ideas fuse a trending topic with a format going viral; autopilot `source: mix`
+- [x] Trends page with Make a video; cloud refresh command
+- [ ] Shelf-life-aware posting (short-lived topics jump the queue)
+
 ## Phase 2.0: Production quality ✅
 
 - [x] Consistent subject: reference keyframe for every shot

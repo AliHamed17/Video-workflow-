@@ -5,9 +5,10 @@ from .hook_lab import HookLab
 from .packager import Packager
 from .scriptwriter import Scriptwriter
 from .translator import Translator
+from .trend_analyst import TrendAnalyst
 from .trend_scout import TrendScout
 from .viral_analyst import ViralAnalyst
 from .visual_qa import VisualQA
 
 __all__ = ["Critic", "Director", "FactChecker", "HookLab", "Packager", "Scriptwriter", "Translator",
-           "TrendScout", "ViralAnalyst", "VisualQA"]
+           "TrendAnalyst", "TrendScout", "ViralAnalyst", "VisualQA"]

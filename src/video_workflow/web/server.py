@@ -70,6 +70,19 @@ def run_plan(pipeline, days: int = 7) -> None:
         store.kv_set("planning_running", False)
 
 
+def run_trends(pipeline) -> str | None:
+    store = pipeline.store
+    store.kv_set("trends_running", True)
+    try:
+        pipeline.trend_radar(force=True)
+    except Exception as exc:
+        log.exception("trend radar failed")
+        return f"{type(exc).__name__}: {exc}"[:300]
+    finally:
+        store.kv_set("trends_running", False)
+    return None
+
+
 def run_viral(pipeline, args: dict) -> str | None:
     """scout | remix (key) | add (url, title, views) — shared by the dashboard and cloud commands.
 
@@ -149,6 +162,8 @@ def make_handler(pipeline, token: str | None = None):
                 if path == "/activity":
                     return self._send(200, pages.render_activity(
                         pipeline, data.status(pipeline), q.get("status", [None])[0], q.get("item", [None])[0]).encode())
+                if path == "/trends":
+                    return self._send(200, pages.render_trends(pipeline, data.status(pipeline), flash).encode())
                 if path == "/viral":
                     return self._send(200, pages.render_viral(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
@@ -264,6 +279,15 @@ def make_handler(pipeline, token: str | None = None):
                 about = f" from {url}" if url else f" about {topic}" if topic else ""
                 msg = f"{count} idea(s){about} requested — pitched on the next cycle."
                 return self._redirect(f"/?flash={quote(msg)}")
+            if path == "/trends/refresh":
+                if cloud:
+                    store.enqueue("trends", None, {"op": "refresh"}, source="cloud dashboard")
+                    msg = "Sent to your worker — the new radar appears here after its next sync."
+                else:
+                    if not store.kv_get("trends_running"):
+                        _background("trends", lambda: run_trends(pipeline))
+                    msg = "Reading today's trends…"
+                return self._redirect(f"/trends?flash={quote(msg)}")
             if path in ("/autopilot/pause", "/autopilot/resume"):
                 paused = path.endswith("pause")
                 if cloud:

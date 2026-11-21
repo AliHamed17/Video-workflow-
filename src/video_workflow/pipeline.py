@@ -40,6 +40,7 @@ from .agents import (
     Packager,
     Scriptwriter,
     Translator,
+    TrendAnalyst,
     TrendScout,
     ViralAnalyst,
     VisualQA,
@@ -108,6 +109,7 @@ class Pipeline:
         self.translator = Translator(self.config, self.router)
         self.planner = Planner(self.config, self.router)
         self.viral_analyst = ViralAnalyst(self.config, self.router)
+        self.trend_analyst = TrendAnalyst(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -157,16 +159,17 @@ class Pipeline:
                          f"pillar: {planned['pillar']})"]
         with self.tracer.span("ideate", None, count=count) as span:
             with self.tracer.span("trends", None) as tspan:
-                signals = trends.collect(self.config.trends, self.http)
-                tspan.detail = f"{len(signals)} signals"
+                signals = self.trend_lines()
+                tspan.detail = f"{len(signals)} trend topics/signals"
                 if not self.config.trends.enabled:
                     tspan.status = "skipped"
+            formats_now = self.viral_formats()
             shared = Usage()
             extra = max(0, self.config.content.idea_overgenerate)
             with usage.tracking(shared):
                 ideas = self.scout.pitch(count + extra, seeds=seeds, avoid_titles=self.store.recent_titles(),
                                          trends=signals, performance=self.performance_summary(), keep=count,
-                                         source=source_text)
+                                         source=source_text, formats_now=formats_now)
             items = []
             for idea in ideas:
                 item = ContentItem(channel=self.config.channel.name, idea=idea, source_url=source_url)
@@ -681,7 +684,7 @@ class Pipeline:
         """Plan the next `days` days (theme, pillar, format per day); merged into the saved plan."""
         start_date = (start or self.clock()).astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date()
         with self.tracer.span("plan", None, days=days) as span:
-            plan = self.planner.plan(start_date, days, trends.collect(self.config.trends, self.http),
+            plan = self.planner.plan(start_date, days, self.trend_lines(),
                                      self.performance_summary(), self.store.recent_titles())
             saved = {d["date"]: d for d in self.store.kv_get("content_plan", [])}
             for day in plan.days:
@@ -695,6 +698,68 @@ class Pipeline:
     def todays_plan(self) -> dict | None:
         today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
         return next((d for d in self.store.kv_get("content_plan", []) if d["date"] == today), None)
+
+    # ---- trend radar ----------------------------------------------------------------------
+    MOMENTUM = {"rising": 1.2, "peaking": 1.0, "steady": 0.8}
+
+    def trend_radar(self, force: bool = False) -> dict:
+        """Today's trend topics for this channel: signals from every source, clustered and scored.
+
+        Cached for `trends.refresh_hours`; one LLM call per refresh."""
+        tc = self.config.trends
+        cached = self.store.kv_get("trend_radar")
+        if cached and not force:
+            age = self.clock() - datetime.fromisoformat(cached["at"])
+            if age < timedelta(hours=tc.refresh_hours):
+                return cached
+        with self.tracer.span("trends.radar", None) as span:
+            key = self.secrets.youtube_api_key.get_secret_value() if self.secrets and self.secrets.youtube_api_key \
+                else None
+            sigs, errors = trends.collect_signals(tc, self.http, key, self.clock())
+            topics: list[dict] = []
+            if sigs and tc.radar:
+                lines = [s.line() for s in sigs[:80]]
+                try:
+                    radar = self.trend_analyst.radar(lines)
+                    for t in radar.topics:
+                        d = t.model_dump()
+                        d["score"] = round(t.fit * self.MOMENTUM.get(t.momentum, 1.0), 2)
+                        d["sources"] = sorted({sigs[i].source for i in t.signal_indices if 0 <= i < len(sigs)})
+                        d["links"] = [sigs[i].url for i in t.signal_indices if 0 <= i < len(sigs) and sigs[i].url][:3]
+                        topics.append(d)
+                    topics.sort(key=lambda d: d["score"], reverse=True)
+                except LLMError as exc:
+                    errors["radar"] = str(exc)[:300]
+            report = {"at": self.clock().isoformat(), "topics": topics, "errors": errors,
+                      "signals": [s.model_dump() for s in sigs[:80]]}
+            self.store.kv_set("trend_radar", report)
+            span.detail = (f"{len(sigs)} signals from {len(tc.sources) - len(errors)} source(s) → {len(topics)} topics"
+                           + (f"; top: {topics[0]['topic']} ({topics[0]['score']})" if topics else ""))
+            if errors:
+                span.status = "warn"
+        return report
+
+    def trend_lines(self, min_fit: float = 6.0, top: int = 8) -> list[str]:
+        """What the idea writer and planner see: radar topics with our angle, else raw signals."""
+        if not self.config.trends.enabled:
+            return []
+        radar = self.trend_radar()
+        topics = [t for t in radar.get("topics", []) if t["fit"] >= min_fit][:top]
+        if topics:
+            return [f"{t['topic']} — why now: {t['why_now']} ({t['momentum']}, timely for ~{t['shelf_life_hours']}h, "
+                    f"fit {t['fit']:.0f}/10). Our angle: {t['angle']}" for t in topics]
+        return [trends.Signal(**s).line() for s in radar.get("signals", [])[:25]]
+
+    def viral_formats(self, top: int = 5) -> list[str]:
+        """Formats that are going viral right now (from the viral scout's analyses)."""
+        concepts = (self.store.kv_get("viral_last") or {}).get("concepts", {})
+        seen, out = set(), []
+        for c in concepts.values():
+            if c.get("format") and c["format"].lower() not in seen and c.get("is_ai_generated", True):
+                seen.add(c["format"].lower())
+                out.append(f"{c['format']} — why it works: {c.get('why_it_works', '')[:220]} "
+                           f"Motion: {c.get('motion_notes', '')[:160]}")
+        return out[:top]
 
     # ---- viral scout ----------------------------------------------------------------------
     def viral_scout(self) -> dict:
@@ -913,10 +978,20 @@ class Pipeline:
             report["prepared_for_top_up"] = True
         with self.tracer.span("autopilot.fill", None, need=need) as span:
             items: list[ContentItem] = []
-            if ap.source == "viral":
+            if ap.source == "mix" and self.config.trends.enabled:
+                # Today's best bet: a topic people are searching for now, told in a format going viral.
+                try:
+                    if self.store.kv_get("last_viral") != today.isoformat() and self.config.viral.enabled:
+                        self.viral_scout()       # refresh the formats that are working today
+                        self.store.kv_set("last_viral", today.isoformat())
+                    if [t for t in self.trend_radar().get("topics", []) if t["fit"] >= 6]:
+                        items = self.ideate(need)
+                except Exception as exc:
+                    log.warning("autopilot trend fusion failed: %s", exc)
+            if ap.source in ("viral", "mix") and len(items) < need:
                 try:
                     rescout = self.store.kv_get("last_viral") != today.isoformat()
-                    items = self.viral_remix(need, rescout=rescout)
+                    items += self.viral_remix(need - len(items), rescout=rescout)
                     if rescout:
                         self.store.kv_set("last_viral", today.isoformat())
                 except Exception as exc:  # no sources / analyst down: fall back to the calendar

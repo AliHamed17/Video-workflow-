@@ -147,6 +147,20 @@ class ContentPlan(BaseModel):
     days: list[ContentPlanDay]
 
 
+class TrendTopic(BaseModel):
+    topic: str = Field(description="The topic in a few words, e.g. 'Voyager 1 reaches one light-day from Earth'")
+    why_now: str = Field(description="What is happening right now that makes people search for it")
+    momentum: Literal["rising", "peaking", "steady"]
+    shelf_life_hours: int = Field(description="How long a video on it stays timely (e.g. 24 for news, 168 for a week-long story)")
+    fit: float = Field(description="0-10: how well a short video on this fits OUR channel and audience")
+    angle: str = Field(description="Our specific, true, visual angle for a 20-40 s short — the hook idea, not a summary")
+    signal_indices: list[int] = Field(description="0-based indices of the signals that point to this topic")
+
+
+class TrendRadar(BaseModel):
+    topics: list[TrendTopic]
+
+
 class ViralConcept(BaseModel):
     source_index: int = Field(description="0-based index of the video in the list you were given")
     is_ai_generated: bool = Field(description="True if the video itself is clearly AI-generated")

@@ -6,7 +6,7 @@ import html
 
 e = html.escape
 
-NAV = [("/", "Board"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
+NAV = [("/", "Board"), ("/trends", "Trends"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
        ("/metrics", "Metrics"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """

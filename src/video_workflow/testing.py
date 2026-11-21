@@ -31,6 +31,8 @@ from .models import (
     ShotPrompt,
     ShotQA,
     SocialMeta,
+    TrendRadar,
+    TrendTopic,
     ViralAnalysis,
     ViralConcept,
     YouTubeMeta,
@@ -117,6 +119,13 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                                ("Plants that move fast", "one surprising fact"),
                                ("The coldest place in space", "countdown"),
                                ("How geckos stick", "myth vs fact")]]),
+        TrendRadar: TrendRadar(topics=[
+            TrendTopic(topic="Octopus intelligence study goes viral", why_now="a new study is in the news today",
+                       momentum="rising", shelf_life_hours=72, fit=8.6,
+                       angle="Show an octopus solving a puzzle box while its arms 'think' on their own",
+                       signal_indices=[0, 1]),
+            TrendTopic(topic="College football scores", why_now="game day", momentum="peaking", shelf_life_hours=12,
+                       fit=1.0, angle="(not for this channel)", signal_indices=[2])]),
         ViralAnalysis: ViralAnalysis(concepts=[ViralConcept(
             source_index=0, is_ai_generated=True, format="impossible object sliced open (ASMR)",
             why_it_works="satisfying slow reveal + a 'how is that inside?' question that makes people rewatch",
@@ -274,6 +283,16 @@ class FakePlatforms:
                 "two pump blood through the gills and one through the rest of the body.</p><p>Their blood is "
                 "blue because it uses copper-based hemocyanin to carry oxygen.</p></body></html>"))
         # Trends
+        if host == "wikimedia.org" and "/pageviews/top/" in path:
+            day = path.rstrip("/").split("/")[-1]
+            arts = [{"article": "Main_Page", "views": 4_000_000, "rank": 1},
+                    {"article": "Octopus", "views": 210_000, "rank": 4 if day.endswith(("1", "3", "5", "7", "9")) else 40},
+                    {"article": "Deaths_in_2026", "views": 150_000, "rank": 6}]
+            return httpx.Response(200, json={"items": [{"articles": arts}]})
+        if host == "news.google.com":
+            return httpx.Response(200, text="<rss><channel><title>Science</title><item><title>Octopuses can learn "
+                                            "by watching, new study finds - Science News</title><link>https://n.test/1"
+                                            "</link></item></channel></rss>")
         if host == "trends.google.com":
             return httpx.Response(200, text="<rss><channel><title>Trends</title><item><title>deep sea creatures"
                                             "</title></item><item><title>octopus intelligence</title></item>"

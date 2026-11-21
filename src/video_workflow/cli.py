@@ -429,15 +429,22 @@ def stats(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
 
 
 @app.command()
-def trends(config: ConfigOpt = None) -> None:
-    """Show the trend signals the trend scout would see right now."""
-    from . import trends as trend_mod
-
-    cfg = AppConfig.load(resolve_config_path(config))
-    if not cfg.trends.enabled:
+def trends(refresh: Annotated[bool, typer.Option("--refresh", help="Read the sources again now")] = False,
+           config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Today's trend radar: topics scored for the channel (fit × momentum) with our angle."""
+    pipe = _setup(config, data, publishers=False)
+    if not pipe.config.trends.enabled:
         console.print("Trends are disabled (set trends.enabled: true in the channel config).")
-    for line in trend_mod.collect(cfg.trends):
-        console.print(f"• {line}")
+        return
+    radar = pipe.trend_radar(force=refresh)
+    for name, err in radar.get("errors", {}).items():
+        console.print(f"[yellow]{name}: {err}[/]")
+    table = Table("score", "topic", "momentum", "fit", "timely", "our angle")
+    for t in radar.get("topics", []):
+        table.add_row(f"{t['score']:.1f}", t["topic"], t["momentum"], f"{t['fit']:.0f}", f"~{t['shelf_life_hours']}h",
+                      t["angle"][:160])
+    console.print(table)
+    console.print(f"[dim]{len(radar.get('signals', []))} signals · {radar.get('at', '')[:16]} UTC[/]")
 
 
 @app.command()

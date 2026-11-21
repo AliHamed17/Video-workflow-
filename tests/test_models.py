@@ -11,13 +11,15 @@ from video_workflow.models import (
     Shot,
     ShotPrompt,
     SocialMeta,
+    TrendRadar,
+    TrendTopic,
     ViralAnalysis,
     ViralConcept,
     YouTubeMeta,
 )
 
 LLM_SCHEMAS = [Idea, IdeaBatch, Shot, Script, ShotPrompt, RenderPlan, Review, YouTubeMeta,
-               SocialMeta, Packaging, ViralConcept, ViralAnalysis]
+               SocialMeta, Packaging, ViralConcept, ViralAnalysis, TrendTopic, TrendRadar]
 
 
 @pytest.mark.parametrize("schema", LLM_SCHEMAS, ids=lambda s: s.__name__)

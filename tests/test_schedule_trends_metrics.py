@@ -67,9 +67,15 @@ def test_ideation_sees_trends_and_performance(config, tmp_path):
     config.trends = TrendsConfig.model_validate({"enabled": True, "sources": [{"type": "rss", "url": "https://f.test"}]})
     pipe.http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(
         200, text="<rss><channel><title>F</title><item><title>giant squid seen</title></item></channel></rss>")))
+    from video_workflow.models import TrendRadar, TrendTopic
+    provider.responses[TrendRadar] = TrendRadar(topics=[TrendTopic(
+        topic="Giant squid caught on camera", why_now="footage everywhere today", momentum="rising",
+        shelf_life_hours=48, fit=8.5, angle="Show its eye, the size of a dinner plate", signal_indices=[0])])
     pipe.ideate(1)
+    radar_prompt = next(p for name, p in provider.calls if name == TrendRadar.__name__)
+    assert "[0] [news] giant squid seen" in radar_prompt                 # the analyst sees the raw signal
     prompt = next(p for name, p in provider.calls if name == IdeaBatch.__name__)
-    assert "giant squid seen" in prompt
+    assert "Giant squid caught on camera" in prompt and "the size of a dinner plate" in prompt  # topic + angle
     assert "125,000 views" in prompt and "#7" in prompt
 
 

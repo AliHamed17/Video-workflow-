@@ -18,7 +18,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 
 | | |
 |---|---|
-| **Ideas from what's trending** | Google Trends, Reddit and RSS signals, plus your own videos' stats: the trend scout leans into what works |
+| **Trend radar** | Google Trends, Wikipedia's most-read pages (and how fast they climb), news feeds, Reddit and YouTube's chart, clustered by Claude into topics scored for the channel (fit × momentum, how long each stays timely) with a ready angle; ideas fuse today's best topic with a format going viral right now |
 | **Any LLM, with fallbacks** | Claude, ChatGPT/GPT, Gemini, OpenRouter/Groq/Ollama, or the Claude Code / Codex / Gemini **CLIs** on a subscription |
 | **Better scripts** | Ideas over-generated and ranked; a hook lab writes 5 openings and keeps the strongest; an independent fact-checker and a critic from another model family send drafts back until they're right |
 | **Higgsfield via MCP, quality-first** | Keyframe still per shot → animated with image-to-video → cheap 480p draft preview → **you approve** → finals rendered from the drafts. Live price + balance check before any credit is spent |
@@ -122,7 +122,7 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 | `vw daemon [--once]` | Always-on loop + Telegram bot |
 | `vw serve` | Monitoring dashboard: board, calendar, activity feed, workflow map, metrics, health, self-test, item pages |
 | `vw bot` | Telegram bot only |
-| `vw ideas -n 5 -s "black holes"` · `vw ideas --from-url <url>` · `vw trends` | Pitch ideas (from a topic or a source article) · see current trend signals |
+| `vw ideas -n 5 -s "black holes"` · `vw ideas --from-url <url>` · `vw trends` (radar) | Pitch ideas (from a topic or a source article) · see current trend signals |
 | `vw develop <id>` · `vw approve <id>` · `vw reject <id>` | Step through an item by hand |
 | `vw render <id> [-g mock\|handoff\|higgsfield_mcp]` · `vw render-request <id>` · `vw clips add <id> <shot> <url>` | Rendering |
 | `vw edit <id> [--voiceover file]` | Build the final cut |
@@ -173,7 +173,7 @@ Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMIN
 
 ## Status
 
-Phases 0–3 are built and tested: 107 tests, plus `vw selftest` (20 end-to-end checks) in CI
+Phases 0–3 are built and tested: 111 tests, plus `vw selftest` (20 end-to-end checks) in CI
 and inside the Docker image. The cloud dashboard is live on Vercel. What's next is in [docs/ROADMAP.md](docs/ROADMAP.md); credentials are covered in
 [docs/SETUP.md](docs/SETUP.md) and day-to-day running in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
