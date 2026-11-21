@@ -46,6 +46,12 @@ stage.
 |---|---|---|
 | Config | `config.py` | `Secrets` from env/.env; `AppConfig` from `config/channel.yaml` |
 | State | `models.py`, `store.py` | `ContentItem` with full history, stored as JSON in SQLite |
+| Orchestration | `pipeline.py` | The stage machine: write → approve → render → visual QA → edit → schedule → publish, per-item leases, parallel runs |
+| | `flows/trends.py` | Trend radar (signals → clustered topics with momentum, fit and our angle) and the content calendar |
+| | `flows/viral.py` | Viral scout, concept analysis (with thumbnails), remixes with an inspiration brief |
+| | `flows/autopilot.py` | Daily target, source order (trend × viral format → remix → calendar), spend cap and balance checks, preview gate, pause |
+| | `flows/sound.py` | Narration per shot (Higgsfield or fallback), music track, extra-language versions |
+| | `flows/reporting.py` | Post stats, performance feedback for ideation, the daily digest (output, spend, trends, money, setup gaps, alerts) |
 | LLM | `llm/router.py` | Task → `[provider:model, ...]` with fallback and lazy provider construction |
 | | `llm/anthropic_provider.py` | Claude, native structured outputs (`messages.parse`), effort control, server-side refusal fallback |
 | | `llm/openai_provider.py` | OpenAI Responses API structured outputs; Chat Completions JSON mode for compatible endpoints |
@@ -60,14 +66,15 @@ stage.
 | Schedule | `schedule.py` | Next free posting slot per timezone and daily cap; every platform posts together |
 | Publish | `publishers/*.py` | YouTube resumable upload; Instagram resumable Reels; TikTok chunked FILE_UPLOAD (draft or direct); `fetch_metrics` on each |
 | Network | `net.py` | Retries with backoff and Retry-After; non-idempotent calls never retried after an ambiguous 5xx |
-| Trends | `trends.py` | Google Trends RSS, Reddit top posts, any RSS/Atom feed (fail-soft) |
+| Trends | `trends.py` | Wikipedia most-read, Google News/Trends RSS, Reddit, YouTube most-popular (fail-soft; feeds with a DTD are refused) |
 | Notify | `notify.py`, `telegram_bot.py` | Telegram (Approve/Reject buttons), Slack, Discord, webhook; bot commands from the owner chat only |
 | Ops | `daemon.py`, `dashboard.py`, `health.py` | Always-on loop with file lock; web UI; live connection checks |
 | Quality | `agents/hook_lab.py`, `agents/fact_checker.py`, `agents/visual_qa.py`, `quality.py` | Hook variants, claim-by-claim fact-check, vision QA of shot frames, technical QA of the cut |
 | Observability | `trace.py`, `monitor.py`, `web/` | Event log of every step (spans with duration/status/detail), alerts, dashboard pages + JSON/Prometheus APIs |
 | Cloud | `cloud/app.py`, `cloud/store.py`, `cloud/sync.py`, `cloud/deploy.py`, `api/index.py` | Vercel app over Postgres (same pages, read from synced state); worker push/pull sync with a command queue; REST deployer |
-| Viral | `viral.py`, `agents/viral_analyst.py`, `pipeline.viral_scout/remix/add` | Daily scout of top AI shorts → concept analysis → original idea with an inspiration brief for writer, critic, director |
-| Growth | `kit.py`, `sources.py`, `pipeline.localize/plan` | Publish kit zip; ideas from an article; language versions; content calendar |
+| Viral | `viral.py`, `agents/viral_analyst.py`, `flows/viral.py` | Daily scout of top AI shorts → concept analysis → original idea with an inspiration brief for writer, critic, director |
+| Money | `money.py` | Ledger (costs per video, subscriptions, revenue imports, invoices), P&L, cash, runway, per-video ROI |
+| Growth | `kit.py`, `sources.py`, `flows/sound.py` (`localize`), `flows/trends.py` (`plan`) | Publish kit zip; ideas from an article; language versions; content calendar |
 | Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |
 | Entry | `cli.py`, `factory.py` | `vw` commands; wiring from config |
 

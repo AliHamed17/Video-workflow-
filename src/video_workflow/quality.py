@@ -24,7 +24,7 @@ def analyze(path: str | Path) -> dict:
              "[0:a]ebur128=framelog=quiet,silencedetect=n=-45dB:d=1.5[a]")
     proc = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-filter_complex", graph,
                            "-map", "[v]", "-map", "[a]", "-f", "null", "-"],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, check=False)
     err = proc.stderr
     loud = re.findall(r"I:\s+(-?\d+(?:\.\d+)?) LUFS", err)
     return {

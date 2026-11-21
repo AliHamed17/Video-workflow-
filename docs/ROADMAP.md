@@ -41,6 +41,15 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.2: Hardening and the business on your phone ✅
+
+- [x] Pipeline split: the stage machine in `pipeline.py`; trends, viral, autopilot, sound and reporting in `flows/`
+- [x] Pause really stops spending: while paused nothing is written, rendered or posted (renders used to continue)
+- [x] Digest in the channel's timezone, now with autopilot spend, balance, trends, money and setup gaps
+- [x] Telegram `/money`, `/trends`, `/viral` + `/remix <n>`, `/autopilot`, `/ready`; money in `/status`
+- [x] Per-video books on every item page (live cost, earnings, profit, ROI, RPM) + record earnings there
+- [x] Board KPIs for this month's net and cash; trend/RSS feeds with a DTD refused (entity-expansion guard)
+
 ## Phase 2.1: Trend radar ✅
 
 - [x] Wikipedia most-read (with climb), Google News, Google Trends, Reddit, YouTube chart signals

@@ -87,13 +87,38 @@ def llm_cost(usage, prices: dict[str, list[float]]) -> float:
     return total
 
 
+def production_cost(item, config: MoneyConfig) -> tuple[float, float]:
+    """What one video cost to make: (Higgsfield credits, LLM tokens), in the books' currency."""
+    return item.usage.credits * config.credit_usd, llm_cost(item.usage, config.llm_prices)
+
+
+def for_item(store, item, config: MoneyConfig) -> dict:
+    """One video's books: production cost (live, from its usage), other costs and revenue booked against it,
+    profit, RPM and ROI, with the ledger entries behind them."""
+    rows = [e for e in ledger(store) if e.get("item_id") == item.id and e["kind"] in ("income", "expense")]
+    credits_cost, tokens_cost = production_cost(item, config)
+    paid = [e for e in rows if e["status"] == "paid"]
+    other = sum(e["amount"] for e in paid if e["kind"] == "expense" and e.get("key") != f"cost:{item.id}")
+    revenue = sum(e["amount"] for e in paid if e["kind"] == "income")
+    cost = credits_cost + tokens_cost + other
+    views = item.total_views
+    return {"currency": config.currency, "priced": config.credit_usd > 0 or bool(config.llm_prices),
+            "credits": item.usage.credits, "credits_cost": round(credits_cost, 2), "llm_cost": round(tokens_cost, 2),
+            "other_cost": round(other, 2), "cost": round(cost, 2), "revenue": round(revenue, 2),
+            "expected": round(sum(e["amount"] for e in rows if e["status"] == "expected" and e["kind"] == "income"), 2),
+            "profit": round(revenue - cost, 2), "views": views,
+            "rpm": round(revenue / views * 1000, 2) if views and revenue else None,
+            "roi": round((revenue - cost) / cost * 100, 0) if cost and revenue else None,
+            "entries": sorted((e for e in rows if e.get("key") != f"cost:{item.id}"),
+                              key=lambda e: e["date"], reverse=True)}
+
+
 def capture_costs(store, config: MoneyConfig, now: datetime | None = None) -> int:
     """One expense per video (refreshed as it is re-rendered) + monthly subscriptions. Returns entries touched."""
     now = now or datetime.now(UTC)
     touched = 0
     for item in store.list():
-        credits_usd = item.usage.credits * config.credit_usd
-        tokens_usd = llm_cost(item.usage, config.llm_prices)
+        credits_usd, tokens_usd = production_cost(item, config)
         if credits_usd + tokens_usd <= 0:
             continue
         add(store, "expense", credits_usd + tokens_usd, category="video production", item_id=item.id,

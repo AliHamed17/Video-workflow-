@@ -124,6 +124,8 @@ def watchdog(pipeline, store, now=None, http=None) -> dict:
                                           for a in fresh[:8]] + ["Dashboard: Health page"]))
             for a in fresh:
                 sent[a.key] = now.isoformat()
+            # Forget alerts last sent over a week ago (keys like "budget-month:2026-11" never recur).
+            sent = {k: v for k, v in sent.items() if now - datetime.fromisoformat(v) < timedelta(days=7)}
             store.kv_set("watchdog_sent", sent)
     result = {"at": now.isoformat(), "alerts": [{"severity": a.severity, "title": a.title} for a in alerts],
               "notified": len(fresh) if channels else 0, "channels": channels, "worker_sync_hours": hours}

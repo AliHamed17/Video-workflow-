@@ -11,7 +11,7 @@ from ..config import YouTubeConfig
 from ..models import ContentItem, PostMetrics, PublishResult
 from .base import HTTPPublisher, PublishError, to_int
 
-TOKEN_URL = "https://oauth2.googleapis.com/token"
+TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 — a URL, not a secret
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"

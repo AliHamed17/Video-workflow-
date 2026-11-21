@@ -188,6 +188,7 @@ class HiggsfieldMCPGenerator:
         self.on_balance = on_balance or (lambda credits, plan: None)
 
     def render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:
+        out_dir.mkdir(parents=True, exist_ok=True)
         return asyncio.run(self._render(item, plan, out_dir))
 
     async def balance(self) -> tuple[float | None, str | None]:
@@ -231,7 +232,6 @@ class HiggsfieldMCPGenerator:
         hf, phase = self.config, item.render_phase
         drafts = {c.shot_index: c.source for c in item.clips if c.phase == "draft"}
         use_keyframes = hf.keyframes and not (phase == "final" and drafts)
-        out_dir.mkdir(parents=True, exist_ok=True)
 
         async with self.caller_factory() as caller:
             # 1. Price and balance checks before spending anything.

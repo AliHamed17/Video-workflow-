@@ -37,9 +37,25 @@ class Signal(BaseModel):
         return f"[{self.source}] {self.title}" + (f" ({self.detail})" if self.detail else "")
 
 
+MAX_FEED_BYTES = 5_000_000
+
+
+def parse_feed(xml_text: str) -> ET.Element:
+    """Parse an RSS/Atom feed from the open web. Feeds never need a DTD, so any document declaring one
+    (the vector for entity-expansion "billion laughs" and external-entity attacks) is refused, and so is
+    anything implausibly large."""
+    if len(xml_text) > MAX_FEED_BYTES:
+        raise ValueError(f"feed too large ({len(xml_text)} bytes)")
+    root_tag = re.search(r"<[A-Za-z_]", xml_text)
+    prolog = xml_text[: root_tag.start()] if root_tag else xml_text   # a DTD can only appear before the root
+    if re.search(r"<!(DOCTYPE|ENTITY)", prolog, re.I):
+        raise ValueError("feed declares a DTD/entities; refusing to parse it")
+    return ET.fromstring(xml_text)  # noqa: S314 — guarded above
+
+
 def _rss_items(xml_text: str, limit: int) -> list[tuple[str, str, str]]:
     """(title, link, extra) per item; extra = Google Trends' approximate traffic when present."""
-    root = ET.fromstring(xml_text)
+    root = parse_feed(xml_text)
     out = []
     for el in root.iter():
         if el.tag.split("}")[-1] not in ("item", "entry"):
@@ -161,7 +177,7 @@ def collect_signals(config: TrendsConfig, http: httpx.Client | None = None, yout
 
 
 def _rss_titles(xml_text: str, limit: int) -> list[str]:
-    root = ET.fromstring(xml_text)
+    root = parse_feed(xml_text)
     titles = [el.text.strip() for el in root.iter() if el.tag.split("}")[-1] == "title" and el.text]
     # The first <title> of a feed is the feed's own name.
     return titles[1 : limit + 1] if len(titles) > 1 else titles[:limit]

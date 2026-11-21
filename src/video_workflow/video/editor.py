@@ -26,7 +26,7 @@ class EditorError(RuntimeError):
 
 
 def _run(args: list[str], cwd: Path | None = None) -> None:
-    proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise EditorError(f"{args[0]} failed ({proc.returncode}): {proc.stderr[-1500:]}")
 
@@ -61,7 +61,7 @@ class ShotTiming:
 
 
 def _ass_time(t: float) -> str:
-    cs = int(round(max(t, 0) * 100))
+    cs = round(max(t, 0) * 100)
     h, cs = divmod(cs, 360000)
     m, cs = divmod(cs, 6000)
     s, cs = divmod(cs, 100)

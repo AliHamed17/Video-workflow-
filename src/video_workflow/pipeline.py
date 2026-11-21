@@ -10,28 +10,28 @@
 * Every step persists the item, so a crash or a gate just pauses it.
 * Items run in parallel (``runtime.workers``) under per-item leases in SQLite.
 * Every step, LLM call, render, check and upload is recorded in the trace log (dashboard).
+
+This file is the stage machine itself (write → approve → render → edit → publish). The jobs around it —
+trend radar, viral scout, autopilot, sound and reporting — are mixed in from `flows/`.
 """
 
 from __future__ import annotations
 
 import contextvars
-import copy
-import hashlib
 import logging
-import math
 import shutil
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from . import quality, schedule, trends
+from . import quality, schedule
 from .agents import (
     Critic,
     Director,
@@ -48,42 +48,25 @@ from .agents import (
 from .agents.fact_checker import summarize as summarize_fact_check
 from .agents.planner import Planner
 from .config import AppConfig
+from .flows import AutopilotFlow, ReportingFlow, SoundFlow, TrendFlow, ViralFlow
+from .flows.common import BUDGET_HOLDS, ORDER, STOP_STAGES, split_usage
 from .llm import LLMError, LLMRouter, usage
-from .models import (
-    Clip,
-    ContentItem,
-    PublishResult,
-    RenderPlan,
-    ShotReview,
-    Stage,
-    Usage,
-    Version,
-    VoiceClip,
-)
+from .models import Clip, ContentItem, PublishResult, RenderPlan, ShotReview, Stage, Usage
 from .notify import Dispatcher, LogNotifier, Notice, needs_approval
 from .publishers import DURATION_LIMITS, Publisher
 from .store import ItemBusy, Store
 from .trace import Tracer
 from .video import Editor, VideoGenerator, probe
 from .video.base import download
-from .voice import VoiceProvider, text_hash
+from .voice import VoiceProvider
 
 log = logging.getLogger(__name__)
 
-STOP_STAGES = {Stage.PUBLISHED, Stage.REJECTED, Stage.FAILED}
-ORDER = [Stage.IDEA, Stage.REVIEWED, Stage.APPROVED, Stage.AWAITING_RENDER,
-         Stage.RENDERED, Stage.EDITED, Stage.PUBLISHED]
-AUDIO_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
-BUDGET_HOLDS = ("Daily credit cap reached", "Not enough Higgsfield credits")
-
-
-def _ext(url: str | None) -> str:
-    suffix = Path((url or "").split("?")[0]).suffix.lower()
-    return suffix if suffix in AUDIO_EXT else ".mp3"
+__all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 
 @dataclass
-class Pipeline:
+class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, SoundFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -125,6 +108,14 @@ class Pipeline:
     def notify(self, notice: Notice) -> None:
         self.tracer.event(f"notify.{notice.kind}", "ok", item_id=notice.item_id, detail=notice.title)
         self.notifier.send(notice)
+
+    @property
+    def tz(self) -> ZoneInfo:
+        """The channel's timezone (posting slots, "today", daily caps)."""
+        return ZoneInfo(self.config.publish.schedule.timezone)
+
+    def local_now(self) -> datetime:
+        return self.clock().astimezone(self.tz)
 
     def _final_size(self) -> tuple[int, int]:
         if self.editor:
@@ -170,18 +161,15 @@ class Pipeline:
                 ideas = self.scout.pitch(count + extra, seeds=seeds, avoid_titles=self.store.recent_titles(),
                                          trends=signals, performance=self.performance_summary(), keep=count,
                                          source=source_text, formats_now=formats_now)
-            items = []
-            for idea in ideas:
-                item = ContentItem(channel=self.config.channel.name, idea=idea, source_url=source_url)
+            items = [ContentItem(channel=self.config.channel.name, idea=idea, source_url=source_url)
+                     for idea in ideas]
+            split_usage(shared, items)    # one ideation call, shared across its ideas
+            for item in items:
+                idea = item.idea
                 if source_text:
                     (self.store.item_dir(item.id) / "source.txt").write_text(source_text, "utf-8")
-                for label, u in shared.llm.items():  # split the one ideation call across its ideas
-                    entry = item.usage.llm.setdefault(label, type(u)())
-                    entry.calls += 1
-                    entry.input_tokens += u.input_tokens // max(len(ideas), 1)
-                    entry.output_tokens += u.output_tokens // max(len(ideas), 1)
                 item.move(Stage.IDEA, f"pitched by trend scout (predicted {idea.predicted_score:.1f}/10)")
-                items.append(self.store.save(item))
+                self.store.save(item)
                 self.tracer.event("idea.pitched", "ok", item.id, f"{idea.title} · predicted {idea.predicted_score:.1f}")
             span.detail = f"kept {len(items)} of {count + extra} pitched ideas, {len(signals)} trend signals"
         return items
@@ -193,20 +181,6 @@ class Pipeline:
         with ThreadPoolExecutor(max_workers=len(fns)) as pool:
             futures = [pool.submit(contextvars.copy_context().run, fn) for fn in fns]
             return [f.result() for f in futures]
-
-    def performance_summary(self, top: int = 5) -> str:
-        scored = [i for i in self.store.list() if i.metrics]
-        if not scored:
-            return ""
-        scored.sort(key=lambda i: i.total_views, reverse=True)
-
-        def line(i: ContentItem) -> str:
-            return f"- {i.total_views:,} views — \"{i.idea.title}\" (hook: {i.idea.hook})"
-
-        out = ["Best:"] + [line(i) for i in scored[:top]]
-        if len(scored) > top + 2:
-            out += ["Weakest:"] + [line(i) for i in scored[-3:]]
-        return "\n".join(out)
 
     # ---- writing ------------------------------------------------------------------------
     def develop(self, item: ContentItem) -> ContentItem:
@@ -492,75 +466,6 @@ class Pipeline:
         return False
 
     # ---- editing ------------------------------------------------------------------------
-    def synthesize_voice(self, item: ContentItem) -> list[VoiceClip]:
-        if self.voice is None or item.script is None:
-            return []
-        out_dir = self.store.item_dir(item.id) / "voice"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        cached = {v.shot_index: v for v in item.voice_clips}
-        vc = self.config.video.voice
-
-        def one(shot) -> VoiceClip | None:
-            text = shot.voiceover.strip()
-            if not text:
-                return None
-            digest = text_hash(self.voice.name, vc.voice, text)
-            prev = cached.get(shot.index)
-            if prev and prev.text_hash == digest and Path(prev.path).exists():
-                return prev
-            path = self.voice.synthesize(text, out_dir / f"shot_{shot.index:02d}.{self.voice.ext}")
-            if self.voice.name == "higgsfield":
-                # Spoken by the offline fallback: mark it so the next render asks Higgsfield again.
-                digest = text_hash("fallback", vc.voice, text)
-            return VoiceClip(shot_index=shot.index, path=str(path), text_hash=digest,
-                             duration=probe(path)["duration"])
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            clips = [c for c in pool.map(one, item.script.shots) if c is not None]
-        item.voice_clips = clips
-        return clips
-
-    def add_audio(self, item: ContentItem, kind: str, url: str | None = None, shot: int | None = None,
-                  job: str | None = None, path: str | Path | None = None) -> ContentItem:
-        """Register a narration line (kind="voice", per shot) or the video's music track (kind="music")."""
-        audio_dir = self.store.item_dir(item.id) / "audio"
-        if kind == "voice":
-            line = next((s for s in (item.script.shots if item.script else []) if s.index == shot), None)
-            if line is None or not line.voiceover.strip():
-                raise ValueError(f"Item {item.id} has no narration for shot {shot}")
-            dest = Path(path) if path else download(url, audio_dir / f"voice_{shot:02d}{_ext(url)}", self.http)
-            digest = text_hash("higgsfield", self.config.video.voice.voice, line.voiceover.strip())
-            item.voice_clips = [v for v in item.voice_clips if v.shot_index != shot] + [
-                VoiceClip(shot_index=shot, path=str(dest), text_hash=digest, duration=probe(dest)["duration"])]
-            item.voice_clips.sort(key=lambda v: v.shot_index)
-        elif kind == "music":
-            dest = Path(path) if path else download(url, audio_dir / f"music{_ext(url)}", self.http)
-            item.music_generated = str(dest)
-        else:
-            raise ValueError(f"Unknown audio kind {kind!r} (voice | music)")
-        self.tracer.event(f"audio.{kind}", "ok", item.id, f"{kind}{'' if shot is None else f' shot {shot + 1}'}"
-                          f" · {probe(dest)['duration']:.1f}s" + (f" · job {job}" if job else ""))
-        return self.store.save(item)
-
-    def pick_music(self, item: ContentItem) -> Path | None:
-        if item.music_generated and Path(item.music_generated).exists():
-            return Path(item.music_generated)   # the original track made for this video
-        folder = self.config.video.music.dir
-        if not folder or not Path(folder).is_dir():
-            return None
-        tracks = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in AUDIO_EXT)
-        if not tracks:
-            return None
-
-        def words(text: str) -> set[str]:
-            return set(text.lower().replace("-", " ").replace("_", " ").split())
-
-        mood = words(item.script.music_mood if item.script else "")
-        best = sorted((t for t in tracks if mood & words(t.stem)), key=lambda t: -len(mood & words(t.stem)))
-        if best:
-            return best[0]
-        return tracks[int(hashlib.sha1(item.id.encode()).hexdigest(), 16) % len(tracks)]
-
     def edit(self, item: ContentItem, voiceover: Path | None = None) -> ContentItem:
         self._expect(item, Stage.RENDERED, Stage.EDITED)
         if self.editor is None:
@@ -573,13 +478,10 @@ class Pipeline:
                 with self.tracer.span("edit.voice", item.id, provider=self.voice.name) as span:
                     clips = self.synthesize_voice(item)
                     span.detail = f"{len(clips)} narration clip(s) via {self.voice.name}"
-                    lines = {s.index: s.voiceover.strip() for s in item.script.shots}
-                    voice_id = self.config.video.voice.voice
-                    fallback = [v for v in clips
-                                if v.text_hash == text_hash("fallback", voice_id, lines.get(v.shot_index, ""))]
+                    fallback = self.fallback_voice_shots(item)
                     if fallback:
                         span.status = "warn"
-                        span.detail += (f"; shots {[v.shot_index + 1 for v in fallback]} used the offline voice "
+                        span.detail += (f"; shots {[i + 1 for i in fallback]} used the offline voice "
                                         "(Higgsfield narration not generated yet)")
             music = self.pick_music(item)
             item.music_track = str(music) if music else None
@@ -625,409 +527,7 @@ class Pipeline:
         self._assign_slot(item)
         return self.store.save(item)
 
-    # ---- languages ----------------------------------------------------------------------
-    def _voice_for(self, item: ContentItem, language: str, texts: list[str]) -> list[VoiceClip]:
-        if self.voice is None or (self.voice.name == "flite" and not language.startswith("en")):
-            return []  # flite only speaks English: the version keeps captions + clip audio + music
-        provider = copy.copy(self.voice)
-        override = self.config.video.voice.voices.get(language)
-        if override and hasattr(provider, "voice"):
-            provider.voice = override
-        out_dir = self.store.item_dir(item.id) / "voice" / language
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        def one(pair) -> VoiceClip | None:
-            index, text = pair
-            if not text.strip():
-                return None
-            path = provider.synthesize(text.strip(), out_dir / f"shot_{index:02d}.{provider.ext}")
-            return VoiceClip(shot_index=index, path=str(path), text_hash=text_hash(provider.name, language, text),
-                             duration=probe(path)["duration"])
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            return [c for c in pool.map(one, enumerate(texts)) if c is not None]
-
-    def localize(self, item: ContentItem, music: Path | None = None) -> list[Version]:
-        """The same video in every extra language: translated narration, captions and posting copy."""
-        languages = [lang for lang in self.config.content.languages
-                     if lang and lang != self.config.channel.language]
-        if not languages or not (item.script and item.packaging and self.editor):
-            return []
-        versions = []
-        for lang in languages:
-            with self.tracer.span(f"localize.{lang}", item.id) as span:
-                try:
-                    loc = self.translator.localize(item.script, item.packaging, lang)
-                    clips = self._voice_for(item, lang, [s.voiceover for s in loc.shots])
-                    final, thumb = self.editor.assemble(
-                        item, self.store.item_dir(item.id), None, music, phase="final", variant=lang,
-                        texts=[(s.on_screen_text, s.voiceover) for s in loc.shots], voice_clips=clips)
-                    variant = item.model_copy(deep=True)
-                    for shot, loc_shot in zip(variant.script.shots, loc.shots, strict=True):
-                        shot.voiceover, shot.on_screen_text = loc_shot.voiceover, loc_shot.on_screen_text
-                    variant.voice_clips = clips
-                    report = quality.check_video(variant, self.config, final, self._final_size(),
-                                                 captions=final.parent / f"edit_{lang}" / "captions.ass")
-                    versions.append(Version(language=lang, localization=loc, voice_clips=clips,
-                                            final_video=str(final), thumbnail=str(thumb), quality=report))
-                    span.detail = (f"{loc.title[:60]} · {len(clips)} narration clip(s) · "
-                                   f"quality {report.score:.0f}/100")
-                except Exception as exc:  # one language failing must not block the video
-                    log.exception("localization %s failed for %s", lang, item.id)
-                    span.status, span.detail = "error", f"{type(exc).__name__}: {exc}"[:500]
-        item.versions = versions
-        self.store.save(item)
-        return versions
-
-    # ---- planning -----------------------------------------------------------------------
-    def plan(self, days: int = 7, start: datetime | None = None) -> list[dict]:
-        """Plan the next `days` days (theme, pillar, format per day); merged into the saved plan."""
-        start_date = (start or self.clock()).astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date()
-        with self.tracer.span("plan", None, days=days) as span:
-            plan = self.planner.plan(start_date, days, self.trend_lines(),
-                                     self.performance_summary(), self.store.recent_titles())
-            saved = {d["date"]: d for d in self.store.kv_get("content_plan", [])}
-            for day in plan.days:
-                saved[day.date] = {**day.model_dump(), "items": saved.get(day.date, {}).get("items", [])}
-            keep_from = (start_date - timedelta(days=30)).isoformat()
-            merged = sorted((d for d in saved.values() if d["date"] >= keep_from), key=lambda d: d["date"])
-            self.store.kv_set("content_plan", merged)
-            span.detail = f"{len(plan.days)} days planned from {start_date}"
-        return merged
-
-    def todays_plan(self) -> dict | None:
-        today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
-        return next((d for d in self.store.kv_get("content_plan", []) if d["date"] == today), None)
-
-    # ---- trend radar ----------------------------------------------------------------------
-    MOMENTUM = {"rising": 1.2, "peaking": 1.0, "steady": 0.8}
-
-    def trend_radar(self, force: bool = False) -> dict:
-        """Today's trend topics for this channel: signals from every source, clustered and scored.
-
-        Cached for `trends.refresh_hours`; one LLM call per refresh."""
-        tc = self.config.trends
-        cached = self.store.kv_get("trend_radar")
-        if cached and not force:
-            age = self.clock() - datetime.fromisoformat(cached["at"])
-            if age < timedelta(hours=tc.refresh_hours):
-                return cached
-        with self.tracer.span("trends.radar", None) as span:
-            key = self.secrets.youtube_api_key.get_secret_value() if self.secrets and self.secrets.youtube_api_key \
-                else None
-            sigs, errors = trends.collect_signals(tc, self.http, key, self.clock())
-            topics: list[dict] = []
-            if sigs and tc.radar:
-                lines = [s.line() for s in sigs[:80]]
-                try:
-                    radar = self.trend_analyst.radar(lines)
-                    for t in radar.topics:
-                        d = t.model_dump()
-                        d["score"] = round(t.fit * self.MOMENTUM.get(t.momentum, 1.0), 2)
-                        d["sources"] = sorted({sigs[i].source for i in t.signal_indices if 0 <= i < len(sigs)})
-                        d["links"] = [sigs[i].url for i in t.signal_indices if 0 <= i < len(sigs) and sigs[i].url][:3]
-                        topics.append(d)
-                    topics.sort(key=lambda d: d["score"], reverse=True)
-                except LLMError as exc:
-                    errors["radar"] = str(exc)[:300]
-            report = {"at": self.clock().isoformat(), "topics": topics, "errors": errors,
-                      "signals": [s.model_dump() for s in sigs[:80]]}
-            self.store.kv_set("trend_radar", report)
-            span.detail = (f"{len(sigs)} signals from {len(tc.sources) - len(errors)} source(s) → {len(topics)} topics"
-                           + (f"; top: {topics[0]['topic']} ({topics[0]['score']})" if topics else ""))
-            if errors:
-                span.status = "warn"
-        return report
-
-    def trend_lines(self, min_fit: float = 6.0, top: int = 8) -> list[str]:
-        """What the idea writer and planner see: radar topics with our angle, else raw signals."""
-        if not self.config.trends.enabled:
-            return []
-        radar = self.trend_radar()
-        topics = [t for t in radar.get("topics", []) if t["fit"] >= min_fit][:top]
-        if topics:
-            return [f"{t['topic']} — why now: {t['why_now']} ({t['momentum']}, timely for ~{t['shelf_life_hours']}h, "
-                    f"fit {t['fit']:.0f}/10). Our angle: {t['angle']}" for t in topics]
-        return [trends.Signal(**s).line() for s in radar.get("signals", [])[:25]]
-
-    def viral_formats(self, top: int = 5) -> list[str]:
-        """Formats that are going viral right now (from the viral scout's analyses)."""
-        concepts = (self.store.kv_get("viral_last") or {}).get("concepts", {})
-        seen, out = set(), []
-        for c in concepts.values():
-            if c.get("format") and c["format"].lower() not in seen and c.get("is_ai_generated", True):
-                seen.add(c["format"].lower())
-                out.append(f"{c['format']} — why it works: {c.get('why_it_works', '')[:220]} "
-                           f"Motion: {c.get('motion_notes', '')[:160]}")
-        return out[:top]
-
-    # ---- viral scout ----------------------------------------------------------------------
-    def viral_scout(self) -> dict:
-        """Pull today's best-performing AI shorts from every configured source and rank them."""
-        from . import viral
-        from .config import Secrets
-
-        with self.tracer.span("viral.scout", None) as span:
-            report = viral.scout(self.config.viral, self.secrets or Secrets(), self.http, self.clock())
-            previous = self.store.kv_get("viral_last") or {}
-            fresh = {f"{v['platform']}:{v['id']}" for v in report["videos"]}
-            manual = [v for v in previous.get("videos", []) if v.get("manual")
-                      and f"{v['platform']}:{v['id']}" not in fresh][:20]   # videos you added stay listed
-            report["videos"] = manual + report["videos"]
-            concepts = previous.get("concepts", {})  # keep analyses of videos we already studied
-            report["concepts"] = {k: c for k, c in concepts.items()
-                                  if k in {f"{v['platform']}:{v['id']}" for v in report["videos"]}}
-            self.store.kv_set("viral_last", report)
-            parts = [f"{name}: {n}" for name, n in report["sources"].items()]
-            span.detail = f"{len(report['videos'])} AI videos kept of {report['found']} found · " + ", ".join(parts)
-            if report["errors"]:
-                span.status = "warn" if report["videos"] else "error"
-                span.detail += " · errors: " + "; ".join(f"{k}: {v[:120]}" for k, v in report["errors"].items())
-            elif not report["videos"]:
-                span.status = "warn"
-        return report
-
-    def viral_add(self, url: str, title: str = "", notes: str = "", views: int | None = None,
-                  likes: int | None = None, comments: int | None = None) -> dict:
-        """Add a video you found yourself to the viral list (so it can be studied and remixed)."""
-        from . import viral
-
-        with self.tracer.span("viral.add", None, url=url) as span:
-            video = viral.manual_video(url, title, notes, views, likes, comments, self.secrets, self.http,
-                                       self.clock()).model_dump(mode="json")
-            video["manual"] = True
-            report = self.store.kv_get("viral_last") or {"at": None, "videos": [], "found": 0,
-                                                         "sources": {}, "errors": {}, "concepts": {}}
-            key = f"{video['platform']}:{video['id']}"
-            report["videos"] = [video] + [v for v in report["videos"] if f"{v['platform']}:{v['id']}" != key]
-            self.store.kv_set("viral_last", report)
-            span.detail = f"{key} · {video['title'][:80]}"
-        return video
-
-    def viral_remix(self, count: int | None = None, keys: list[str] | None = None,
-                    rescout: bool = False) -> list[ContentItem]:
-        """Study the top viral videos, then pitch our own versions of the strongest concepts.
-
-        `keys` ("youtube:abc123") picks specific videos; otherwise the best ones we haven't used yet.
-        """
-        from . import viral
-        from .models import Inspiration
-
-        cfg = self.config.viral
-        count = cfg.daily_remixes if count is None else count
-        report = self.store.kv_get("viral_last")
-        if rescout or not report:
-            report = self.viral_scout()
-        used = set(self.store.kv_get("viral_used", []))
-        pool = [v for v in report.get("videos", []) if f"{v['platform']}:{v['id']}" not in used]
-        if keys:
-            pool = [v for v in report.get("videos", []) if f"{v['platform']}:{v['id']}" in keys]
-        pool = pool[: max(cfg.analyze_top, len(keys or []))]
-        if not pool or count <= 0:
-            return []
-
-        thumbs: list[tuple[int, Path]] = []
-        thumb_dir = self.store.data_dir / "viral"
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        for index, v in enumerate(pool):
-            data = viral.thumbnail_bytes(v, self.http) if self.http else None
-            if data:
-                path = thumb_dir / f"{v['platform']}_{v['id']}.jpg"
-                path.write_bytes(data)
-                thumbs.append((index, path))
-
-        shared = Usage()
-        with self.tracer.span("viral.analyze", None, videos=len(pool)) as span, usage.tracking(shared):
-            try:
-                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche,
-                                                      thumbs or None, cfg.closeness)
-            except LLMError:
-                if not thumbs:
-                    raise
-                analysis = self.viral_analyst.analyze(pool, max(count, len(keys or [])) + 1, cfg.stay_in_niche,
-                                                      closeness=cfg.closeness)
-            concepts = [c for c in analysis.concepts
-                        if 0 <= c.source_index < len(pool) and c.replicable and c.is_ai_generated]
-            concepts.sort(key=lambda c: c.our_version.predicted_score, reverse=True)
-            span.detail = f"{len(analysis.concepts)} concepts from {len(pool)} videos, {len(concepts)} usable"
-            if not concepts:
-                span.status = "warn"
-
-        saved = report.setdefault("concepts", {})
-        for c in analysis.concepts:
-            if 0 <= c.source_index < len(pool):
-                v = pool[c.source_index]
-                saved[f"{v['platform']}:{v['id']}"] = c.model_dump(mode="json")
-
-        items = []
-        for c in concepts[:count]:
-            v = pool[c.source_index]
-            key = f"{v['platform']}:{v['id']}"
-            item = ContentItem(channel=self.config.channel.name, idea=c.our_version, inspiration=Inspiration(
-                platform=v["platform"], url=v["url"], title=v.get("title", ""), creator=v.get("creator", ""),
-                views=v.get("views"), likes=v.get("likes"), comments=v.get("comments"), format=c.format,
-                why_it_works=c.why_it_works, hook_pattern=c.hook_pattern, visual_mechanic=c.visual_mechanic,
-                motion_notes=c.motion_notes, originality=c.originality))
-            for label, u in shared.llm.items():
-                entry = item.usage.llm.setdefault(label, type(u)())
-                entry.calls += 1
-                entry.input_tokens += u.input_tokens // max(len(concepts[:count]), 1)
-                entry.output_tokens += u.output_tokens // max(len(concepts[:count]), 1)
-            item.move(Stage.IDEA, f"remix of a viral {v['platform']} video ({c.format})")
-            items.append(self.store.save(item))
-            saved[key]["item_id"] = item.id
-            used.add(key)
-            self.tracer.event("idea.pitched", "ok", item.id,
-                              f"{c.our_version.title} · viral format \"{c.format}\" from {v['platform']}")
-        self.store.kv_set("viral_used", sorted(used)[-1000:])
-        self.store.kv_set("viral_last", report)
-        return items
-
-    # ---- autopilot ------------------------------------------------------------------------
-    @property
-    def autopilot_active(self) -> bool:
-        return self.config.autopilot.enabled and not self.store.kv_get("autopilot_paused")
-
-    def set_autopilot_paused(self, paused: bool, by: str = "you") -> None:
-        self.store.kv_set("autopilot_paused", {"at": self.clock().isoformat(), "by": by} if paused else None)
-        self.tracer.event("autopilot.pause" if paused else "autopilot.resume", "ok", detail=f"by {by}")
-
-    def credits_spent_today(self) -> float:
-        today = self.clock().astimezone(ZoneInfo(self.config.publish.schedule.timezone)).date().isoformat()
-        tz = ZoneInfo(self.config.publish.schedule.timezone)
-        total = 0.0
-        for e in self.store.events(step_prefix="render", limit=2000):
-            try:
-                day = datetime.fromisoformat(e["at"]).astimezone(tz).date().isoformat()
-            except (TypeError, ValueError):
-                continue
-            if day == today:
-                total += e["attrs"].get("credits", 0) or 0
-        return total
-
-    def _render_estimate(self, phase: str, shots: int) -> float:
-        hf = self.config.video.higgsfield
-        estimate = hf.estimate(shots, phase)
-        if hf.keyframes and (phase == "draft" or not hf.draft_preview):  # keyframes come with the first pass
-            estimate += shots * hf.unit_costs.keyframe
-        if phase == "draft" or not hf.draft_preview:                       # so do narration and music
-            video = self.config.video
-            estimate += (shots * hf.unit_costs.narration if video.voice.provider == "higgsfield" else 0) \
-                + (hf.unit_costs.music if video.music.generate else 0)
-        return estimate
-
-    def _budget_block(self, item: ContentItem, plan: RenderPlan) -> str | None:
-        """Why the autopilot must not start this render (daily cap or balance), else None."""
-        estimate = self._render_estimate(item.render_phase, len(plan.shots))
-        spent = self.credits_spent_today()
-        cap = self.config.autopilot.max_credits_per_day
-        if spent + estimate > cap:
-            return (f"Daily credit cap reached: {spent:.0f} spent today + ≈{estimate:.0f} for this "
-                    f"{item.render_phase} render > {cap:.0f} (autopilot.max_credits_per_day). It renders tomorrow.")
-        balance = self.store.kv_get("higgsfield_balance") or {}
-        if balance.get("credits") is not None and balance["credits"] < estimate:
-            return (f"Not enough Higgsfield credits: balance {balance['credits']:.0f}, this "
-                    f"{item.render_phase} render needs ≈{estimate:.0f}. Top up and it continues.")
-        return None
-
-    def _preview_passes(self, item: ContentItem) -> tuple[bool, str]:
-        """Is the low-res preview good enough to pay for the final without a human?"""
-        if item.attention:
-            return False, item.attention
-        if item.quality and item.quality.failed:
-            return False, "technical QA failed: " + ", ".join(c.name for c in item.quality.failed)
-        if item.shot_reviews:
-            avg = sum(r.qa.score for r in item.shot_reviews) / len(item.shot_reviews)
-            if avg < self.config.autopilot.min_visual_score:
-                return False, f"visual QA average {avg:.1f} < {self.config.autopilot.min_visual_score:.1f}"
-            return True, f"visual QA {avg:.1f}/10, technical QA {item.quality.score:.0f}/100"
-        return True, f"technical QA {item.quality.score:.0f}/100 (no visual QA model)"
-
-    def autopilot_fill(self) -> dict:
-        """Start today's videos: viral remixes (or calendar ideas) until the daily target is met."""
-        ap = self.config.autopilot
-        report = {"active": self.autopilot_active, "pitched": 0, "good_today": 0, "attempts_today": 0}
-        if not self.autopilot_active:
-            return report
-        tz = ZoneInfo(self.config.publish.schedule.timezone)
-        today = self.clock().astimezone(tz).date()
-        made = [i for i in self.store.list() if i.created_at.astimezone(tz).date() == today]
-        good = [i for i in made if i.stage not in (Stage.REJECTED, Stage.FAILED) and i.attention is None]
-        report["good_today"], report["attempts_today"] = len(good), len(made)
-        need = min(ap.videos_per_day - len(good), ap.max_attempts_per_day - len(made))
-        if need <= 0:
-            return report
-        # Don't write scripts that can't be rendered: check today's cap and the balance first.
-        hf = self.config.video.higgsfield
-        shots = max(1, math.ceil(self.config.video.target_duration_s / hf.shot_duration_s))
-        first = self._render_estimate("draft" if hf.draft_preview else "final", shots)
-        spent, cap = self.credits_spent_today(), ap.max_credits_per_day
-        balance = (self.store.kv_get("higgsfield_balance") or {}).get("credits")
-        held = [i for i in self.store.list() if i.attention and i.attention.startswith(BUDGET_HOLDS)
-                and i.stage not in STOP_STAGES]
-        if spent + first > cap or (balance is not None and balance < first) or held:
-            report["skipped"] = (f"budget: spent {spent:.0f}/{cap:.0f} today, balance "
-                                 f"{'?' if balance is None else f'{balance:.0f}'}, a new video needs ≈{first:.0f} to start"
-                                 + (f", {len(held)} video(s) already waiting for credits" if held else ""))
-            waiting = [i for i in self.store.list() if i.stage not in STOP_STAGES]
-            if not (ap.prepare_when_blocked and not waiting and spent + first <= cap):
-                self.tracer.event("autopilot.fill", "skipped", detail=report["skipped"])
-                return report
-            # Nothing queued: write one video now, so it renders the moment credits arrive.
-            need = 1
-            report["prepared_for_top_up"] = True
-        with self.tracer.span("autopilot.fill", None, need=need) as span:
-            items: list[ContentItem] = []
-            if ap.source == "mix" and self.config.trends.enabled:
-                # Today's best bet: a topic people are searching for now, told in a format going viral.
-                try:
-                    if self.store.kv_get("last_viral") != today.isoformat() and self.config.viral.enabled:
-                        self.viral_scout()       # refresh the formats that are working today
-                        self.store.kv_set("last_viral", today.isoformat())
-                    if [t for t in self.trend_radar().get("topics", []) if t["fit"] >= 6]:
-                        items = self.ideate(need)
-                except Exception as exc:
-                    log.warning("autopilot trend fusion failed: %s", exc)
-            if ap.source in ("viral", "mix") and len(items) < need:
-                try:
-                    rescout = self.store.kv_get("last_viral") != today.isoformat()
-                    items += self.viral_remix(need - len(items), rescout=rescout)
-                    if rescout:
-                        self.store.kv_set("last_viral", today.isoformat())
-                except Exception as exc:  # no sources / analyst down: fall back to the calendar
-                    log.warning("autopilot viral remix failed: %s", exc)
-            if len(items) < need:
-                items += self.ideate(need - len(items))
-            report["pitched"] = len(items)
-            span.detail = (f"{len(items)} new idea(s) for today ({len(good)} good of {len(made)} tried so far; "
-                           f"target {ap.videos_per_day})")
-        return report
-
-    def refresh_readiness(self) -> dict:
-        from . import readiness
-        from .config import Secrets
-
-        result = readiness.summary(readiness.check(self.config, self.secrets or Secrets(), self.store))
-        self.store.kv_set("readiness", {**result, "at": self.clock().isoformat()})
-        return result
-
-    def autopilot_day(self) -> dict:
-        """One full automatic cycle: fill today's ideas, then push everything as far as it goes."""
-        self.refresh_readiness()
-        report = self.autopilot_fill()
-        if report["active"]:
-            moved = self.run()
-            report["published"] = sum(1 for i in moved if i.stage == Stage.PUBLISHED)
-            report["waiting"] = sum(1 for i in moved if i.stage == Stage.AWAITING_RENDER)
-            report["held"] = sum(1 for i in moved if i.attention and i.stage not in STOP_STAGES)
-        try:
-            from . import money
-            money.refresh(self)
-        except Exception as exc:  # the books must never stop production
-            log.warning("money refresh failed: %s", exc)
-        self.store.kv_set("autopilot_last_run", {"at": self.clock().isoformat(), "report": report})
-        return report
-
+    # ---- scheduling ---------------------------------------------------------------------
     def _assign_slot(self, item: ContentItem) -> None:
         with self._slot_lock:
             taken = [i.scheduled_for for i in self.store.list()
@@ -1035,7 +535,7 @@ class Pipeline:
             item.scheduled_for = schedule.next_slot(self.config.publish.schedule, taken, self.clock())
             self.store.save(item)
         if item.scheduled_for:
-            local = item.scheduled_for.astimezone(ZoneInfo(self.config.publish.schedule.timezone))
+            local = item.scheduled_for.astimezone(self.tz)
             self.tracer.event("schedule.slot", "ok", item.id, f"{local:%a %d %b %H:%M}")
             self.notify(Notice(kind="scheduled", title=f"Scheduled: {item.idea.title}",
                                lines=[f"Goes out on {', '.join(self.config.publish.platforms)} at "
@@ -1100,63 +600,6 @@ class Pipeline:
                 links=[(r.platform, r.url) for r in item.publishes if r.ok and r.url]))
         return self.store.save(item)
 
-    # ---- analytics ----------------------------------------------------------------------
-    def refresh_metrics(self, max_age_days: int = 30) -> int:
-        """Pull views/likes/comments for recent posts. Returns how many posts were updated."""
-        cutoff = self.clock() - timedelta(days=max_age_days)
-        updated = 0
-        with self.tracer.span("stats.refresh", None) as span:
-            for item in self.store.list():
-                if item.created_at < cutoff or not item.published_platforms():
-                    continue
-                changed = False
-                for result in item.publishes:
-                    publisher = self.publishers.get(result.platform)
-                    fetch = getattr(publisher, "fetch_metrics", None)
-                    if not (result.ok and result.post_id and fetch):
-                        continue
-                    if "SEND_TO_USER_INBOX" in (result.detail or ""):
-                        continue  # TikTok draft: no public video yet
-                    try:
-                        item.metrics[result.platform] = fetch(result.post_id)
-                        changed, updated = True, updated + 1
-                    except Exception as exc:
-                        log.warning("metrics %s/%s failed: %s", item.id, result.platform, exc)
-                        self.tracer.event("stats.fetch", "error", item.id, f"{result.platform}: {exc}"[:500])
-                if changed:
-                    self.store.save(item)
-            span.detail = f"{updated} post(s) updated"
-        return updated
-
-    def digest(self) -> Notice:
-        from .monitor import scan
-
-        items = self.store.list()
-        counts: dict[str, int] = {}
-        for i in items:
-            counts[i.stage.value] = counts.get(i.stage.value, 0) + 1
-        today = self.clock().date()
-        published_today = [i for i in items if i.stage == Stage.PUBLISHED and i.updated_at.date() == today]
-        upcoming = sorted((i for i in items if i.stage == Stage.EDITED and i.scheduled_for),
-                          key=lambda i: i.scheduled_for)
-        lines = [" · ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "no items yet"]
-        lines.append(f"Published today: {len(published_today)}")
-        waiting = [i for i in items if i.stage == Stage.REVIEWED or i.awaiting_final_approval]
-        if waiting:
-            lines.append("Waiting for you: " + ", ".join(f"{i.id} ({i.idea.title[:40]})" for i in waiting))
-        if upcoming:
-            lines.append(f"Next post: {upcoming[0].idea.title[:50]} at {upcoming[0].scheduled_for:%Y-%m-%d %H:%M} UTC")
-        views = sum(i.total_views for i in items)
-        if views:
-            lines.append(f"Total views tracked: {views:,}")
-        credits = sum(i.usage.credits for i in items)
-        tokens = sum(i.usage.tokens for i in items)
-        lines.append(f"Spend so far: {credits:.0f} Higgsfield credits, {tokens:,} LLM tokens")
-        alerts = scan(self.store, self.config, self.clock())
-        if alerts:
-            lines.append(f"Alerts: {len(alerts)} — " + "; ".join(a.title for a in alerts[:3]))
-        return Notice(kind="digest", title=f"Daily summary — {self.config.channel.name}", lines=lines)
-
     # ---- orchestration ------------------------------------------------------------------
     def advance(self, item: ContentItem, until: Stage = Stage.PUBLISHED) -> ContentItem:
         """Push one item forward as far as gates allow (approval, handoff, preview, schedule, `until`)."""
@@ -1169,9 +612,15 @@ class Pipeline:
             log.info("item %s is busy elsewhere — skipped", item.id)
             return item
 
+    # While the autopilot's stop button is pressed, nothing is written, rendered or posted. Registering
+    # clips that were already paid for (awaiting_render) and the local edit still finish.
+    PAUSE_HOLDS = (Stage.IDEA, Stage.APPROVED, Stage.EDITED)
+
     def _advance(self, item: ContentItem, until: Stage) -> ContentItem:
         while item.stage not in STOP_STAGES and ORDER.index(item.stage) < ORDER.index(until):
             before, phase_before, clips_before = item.stage, item.render_phase, len(item.clips)
+            if item.stage in self.PAUSE_HOLDS and self.autopilot_paused:
+                break
             try:
                 if item.stage == Stage.IDEA:
                     item = self.develop(item)
@@ -1184,8 +633,8 @@ class Pipeline:
                 elif item.stage == Stage.EDITED:
                     if item.awaiting_final_approval or not self.publishers:
                         break
-                    if self.config.autopilot.enabled and (not self.autopilot_active or item.attention):
-                        break  # paused (the stop button also holds posting), or it needs a human first
+                    if self.config.autopilot.enabled and item.attention:
+                        break  # the autopilot flagged it: a human looks first
                     item = self.publish(item)
             except Exception as exc:
                 log.exception("item %s failed at %s", item.id, before)

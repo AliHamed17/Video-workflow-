@@ -39,7 +39,7 @@ def _guard(name: str, fn) -> Check:
 def check_ffmpeg() -> list[Check]:
     if shutil.which("ffmpeg") is None:
         return [Check("ffmpeg", False, "not installed")]
-    filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, check=False).stdout
     missing = [f for f in ("ass", "loudnorm", "sidechaincompress") if f" {f} " not in filters]
     out = [Check("ffmpeg", not missing, "ok" if not missing else f"missing filters: {missing}")]
     out.append(Check("ffmpeg flite voice", " flite " in filters or None,

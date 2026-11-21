@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
+TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 — a URL, not a secret
 YOUTUBE_SCOPES = ("https://www.googleapis.com/auth/youtube.upload "
                   "https://www.googleapis.com/auth/youtube.readonly "                 # upload + read stats
                   "https://www.googleapis.com/auth/yt-analytics-monetary.readonly")  # revenue per video

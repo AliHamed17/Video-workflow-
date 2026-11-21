@@ -3,7 +3,8 @@
 Only messages from the configured TELEGRAM_CHAT_ID are obeyed. The bot long-polls getUpdates
 (no public webhook needed) and remembers its offset in the store.
 
-Commands: /list · /status <id> · /approve <id> · /reject <id> · /ideas [n] [topic] · /digest · /help
+Commands: /list · /status <id> · /approve <id> · /reject <id> · /ideas [n] [topic] · /digest ·
+/money · /trends · /viral · /remix <n> · /ready · /autopilot · /pause · /resume · /help
 """
 
 from __future__ import annotations
@@ -20,10 +21,14 @@ from .store import Store
 
 log = logging.getLogger(__name__)
 
-HELP = ("Commands:\n/list — items in progress\n/status <id>\n/approve <id>\n/final <id> — render the full-res final\n"
-        "/reject <id>\n/retry <id>\n/alerts\n/plan — the content calendar\n"
-        "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n/digest — summary now\n"
-        "/pause · /resume — stop or restart the autopilot (nothing new is made or posted while paused)")
+HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, with its cost and earnings\n"
+        "/approve <id>\n/final <id> — render the full-res final\n/reject <id>\n/retry <id>\n"
+        "/ideas [n] [topic or URL] — pitch new ideas on the next cycle\n"
+        "/viral — today's top AI videos · /remix <n> — make our version of number n\n"
+        "/trends [refresh] — what's trending for this channel\n/money — this month, cash, runway, best videos\n"
+        "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
+        "/alerts · /plan — the content calendar · /digest — summary now\n"
+        "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
 
 
 class TelegramBot:
@@ -113,6 +118,18 @@ class TelegramBot:
                      or "No plan yet — open the Calendar in the dashboard and press 'Plan the next 7 days'.")
         elif command == "/digest":
             self.say(self.pipeline.digest().plain())
+        elif command == "/money":
+            self.say(self.money_text())
+        elif command == "/trends":
+            self.say(self.trends_text(refresh=rest.strip().lower() == "refresh"))
+        elif command == "/viral":
+            self.say(self.viral_text())
+        elif command == "/remix":
+            self.say(self.remix(rest.strip()))
+        elif command == "/ready":
+            self.say(self.ready_text())
+        elif command == "/autopilot":
+            self.say(self.autopilot_text())
         elif command in ("/pause", "/resume"):
             if not self.pipeline.config.autopilot.enabled:
                 self.say("The autopilot is off (autopilot.enabled: false in the channel config).")
@@ -154,19 +171,131 @@ class TelegramBot:
         return "\n".join(f"{i.id} · {i.stage.value} · {i.idea.title[:50]}" for i in active[-25:])
 
     def status_text(self, item_id: str) -> str:
+        from . import money
+
         try:
             i = self.store.get(item_id)
         except KeyError as exc:
             return str(exc)
         lines = [f"{i.idea.title}", f"Stage: {i.stage.value}"]
+        if i.attention:
+            lines.append(f"⚠️ {i.attention[:300]}")
+        if i.inspiration:
+            lines.append(f"Inspired by: {i.inspiration.platform} · {i.inspiration.format}")
         if i.review:
             lines.append(f"Critic: {i.review.score:.1f}/10")
         if i.scheduled_for:
-            lines.append(f"Scheduled: {i.scheduled_for:%Y-%m-%d %H:%M} UTC")
+            tz = self.pipeline.config.publish.schedule.timezone
+            lines.append(f"Scheduled: {i.scheduled_for.astimezone(self.pipeline.tz):%a %d %b %H:%M} ({tz})")
         for p in i.publishes:
             lines.append(f"{p.platform}: {'ok' if p.ok else 'failed'} {p.url or ''}")
         if i.metrics:
             lines.append(f"Views: {i.total_views:,}")
         if i.error:
             lines.append(f"Error: {i.error[:300]}")
+        books = money.for_item(self.store, i, self.pipeline.config.money)
+        if books["cost"] or books["revenue"]:
+            lines.append(f"Money: cost {books['cost']:.2f}, earned {books['revenue']:.2f}, "
+                         f"profit {books['profit']:+.2f} {books['currency']}")
+        elif i.usage.credits:
+            lines.append(f"Spent: {i.usage.credits:.0f} Higgsfield credits")
+        return "\n".join(lines)
+
+    # ---- the business on your phone ---------------------------------------------------------
+    def money_text(self) -> str:
+        from . import money
+
+        b = money.summary(self.store, self.pipeline.config.money, self.pipeline.clock())
+        cur = b["currency"]
+        if not b["entries"]:
+            return ("No money tracked yet. Set money.credit_usd and money.subscriptions in the channel config; "
+                    "revenue comes in from YouTube Analytics, Stripe or a CSV (docs/MONEY.md).")
+        lines = [f"💰 {b['month']}: +{b['month_income']:.2f} income / −{b['month_expense']:.2f} costs "
+                 f"= {b['month_net']:+.2f} {cur}",
+                 f"Cash {b['cash']:.2f} {cur} · burn {b['burn_per_month']:.2f}/month"
+                 + (f" · runway {b['runway_days']:.0f} days" if b["runway_days"] else "")]
+        if b["budget"]:
+            lines.append(f"Budget: {b['month_expense']:.2f} of {b['budget']:.2f}" + (" ⚠️ over" if b["over_budget"] else ""))
+        if b["cost_per_video"] is not None:
+            lines.append(f"Average cost per video: {b['cost_per_video']:.2f} {cur}")
+        if b["expected_total"]:
+            lines.append(f"Expected: {b['expected_total']:.2f} {cur}"
+                         + (f" ({len(b['overdue'])} overdue)" if b["overdue"] else ""))
+        for e in b["overdue"][:3]:
+            lines.append(f"  🔴 {e['note'][:50]} — {e['amount']:.2f}, due {e['due']} (id {e['id']})")
+        earners = [v for v in b["videos"] if v["revenue"]][:3]
+        if earners:
+            lines.append("Best videos:")
+            lines += [f"  {v['title'][:40]} — profit {v['profit']:+.2f}"
+                      + (f", RPM {v['rpm']:.2f}" if v["rpm"] else "") for v in earners]
+        return "\n".join(lines)
+
+    def trends_text(self, refresh: bool = False) -> str:
+        if not self.pipeline.config.trends.enabled:
+            return "Trends are off (trends.enabled: false in the channel config)."
+        radar = self.pipeline.trend_radar(force=True) if refresh else (self.store.kv_get("trend_radar") or {})
+        topics = radar.get("topics", [])[:6]
+        if not topics:
+            return "No trend radar yet. Send /trends refresh (or it runs with the next ideas)."
+        arrow = {"rising": "📈", "peaking": "🔥", "steady": "➖"}
+        return "\n".join([f"Trending for this channel ({radar['at'][:16].replace('T', ' ')} UTC):"] + [
+            f"{arrow.get(t['momentum'], '•')} {t['topic']} — fit {t['fit']:.0f}/10, ~{t['shelf_life_hours']}h left"
+            f"\n   angle: {t['angle'][:140]}" for t in topics])
+
+    def _viral_list(self) -> list[dict]:
+        return (self.store.kv_get("viral_last") or {}).get("videos", [])[:8]
+
+    def viral_text(self) -> str:
+        videos = self._viral_list()
+        if not videos:
+            return "No viral videos pulled yet: they're found with the next autopilot run (or `vw viral`)."
+        concepts = (self.store.kv_get("viral_last") or {}).get("concepts", {})
+        lines = ["Top AI videos right now (/remix <n> to make our version):"]
+        for n, v in enumerate(videos, 1):
+            reach = f"{v['views']:,} views" if v.get("views") else v["platform"]
+            made = " ✅ remixed" if concepts.get(f"{v['platform']}:{v['id']}", {}).get("item_id") else ""
+            lines.append(f"{n}. {v.get('title', '')[:60]} — {reach}{made}")
+        return "\n".join(lines)
+
+    def remix(self, arg: str) -> str:
+        videos = self._viral_list()
+        if not arg.isdigit() or not 1 <= int(arg) <= len(videos):
+            return f"Usage: /remix <n>, with n from 1 to {len(videos)} (see /viral)" if videos else self.viral_text()
+        v = videos[int(arg) - 1]
+        requests = self.store.kv_get("pending_requests", [])
+        requests.append({"viral": {"keys": [f"{v['platform']}:{v['id']}"]}})
+        self.store.kv_set("pending_requests", requests)
+        self.on_change()
+        return f"🎬 Queued: our own version of \"{v.get('title', '')[:60]}\". The script is written on the next cycle."
+
+    def ready_text(self) -> str:
+        result = self.pipeline.refresh_readiness()
+        icon = {"ok": "✅", "missing": "❌", "optional": "➖"}
+        lines = ["Ready to run alone ✅" if result["ready"] else
+                 f"Not ready yet: {', '.join(result['missing'])}"]
+        for c in result["checks"]:
+            lines.append(f"{icon.get(c['status'], '•')} {c['name']}: {c['detail']}"
+                         + (f"\n   → {c['fix']}" if c["status"] == "missing" and c["fix"] else ""))
+        return "\n".join(lines)
+
+    def autopilot_text(self) -> str:
+        pipe, ap = self.pipeline, self.pipeline.config.autopilot
+        if not ap.enabled:
+            return "The autopilot is off (autopilot.enabled: false in the channel config)."
+        state = "⏸ paused (send /resume)" if pipe.autopilot_paused else "▶️ running"
+        lines = [f"Autopilot {state}",
+                 f"Today: {pipe.credits_spent_today():.0f} of {ap.max_credits_per_day:.0f} credits, "
+                 f"target {ap.videos_per_day} video(s)/day, source: {ap.source}"]
+        balance = (self.store.kv_get("higgsfield_balance") or {}).get("credits")
+        if balance is not None:
+            lines.append(f"Higgsfield balance: {balance:.0f} credits")
+        last = self.store.kv_get("autopilot_last_run")
+        if last:
+            r = last.get("report", {})
+            lines.append(f"Last run {last['at'][:16].replace('T', ' ')} UTC: {r.get('pitched', 0)} pitched, "
+                         f"{r.get('published', 0)} published, {r.get('waiting', 0)} waiting for render"
+                         + (f" — {r['skipped']}" if r.get("skipped") else ""))
+        held = [i for i in self.store.list() if i.attention and i.stage not in (Stage.PUBLISHED, Stage.REJECTED)]
+        for i in held[:4]:
+            lines.append(f"⚠️ {i.id}: {i.attention[:120]}")
         return "\n".join(lines)

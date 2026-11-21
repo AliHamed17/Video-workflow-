@@ -48,7 +48,7 @@ class FliteVoice:
             proc = subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
                  f"flite=textfile={text_file}:voice={self.voice}", "-ar", "48000", "-ac", "2", str(dest)],
-                capture_output=True, text=True)
+                capture_output=True, text=True, check=False)
         finally:
             Path(text_file).unlink(missing_ok=True)
         if proc.returncode != 0:

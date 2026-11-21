@@ -68,7 +68,8 @@ def status(pipeline, now: datetime | None = None) -> dict:
         "daemon": daemon,
         "balance": balance,
         "credits_per_video": per_video,
-        "videos_affordable": (balance["credits"] // per_video) if balance and balance.get("credits") is not None else None,
+        "videos_affordable": (balance["credits"] // per_video)
+        if balance and balance.get("credits") is not None and per_video > 0 else None,
         "alerts": [a.__dict__ for a in alerts],
         "health": {"at": health["at"], "ago": _ago(health["at"], now), "live": health.get("live"),
                    "ok": sum(1 for c in health["checks"] if c["ok"]),

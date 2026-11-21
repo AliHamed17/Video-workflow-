@@ -76,8 +76,8 @@ def narration_params(voice: VoiceConfig, text: str) -> dict:
 
 def music_params(music: MusicConfig, item: ContentItem, seconds: float) -> dict:
     mood = (item.script.music_mood if item.script else "") or "curious, cinematic"
-    return {"model": music.model, "force_instrumental": True, "duration": int(round(seconds)) + 2,
-            "prompt": (f"{mood}. Instrumental score for a {int(round(seconds))}-second vertical short video "
+    return {"model": music.model, "force_instrumental": True, "duration": round(seconds) + 2,
+            "prompt": (f"{mood}. Instrumental score for a {round(seconds)}-second vertical short video "
                        f"titled '{item.idea.title}'. No vocals. A hook in the first second, builds to a payoff "
                        "near the end, and an ending that loops back to the start.")}
 

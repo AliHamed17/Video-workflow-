@@ -20,7 +20,10 @@ Telegram) the daemon:
 4. Advances every item in parallel (`runtime.workers`): script → critique → package → (your
    approval) → render → voice → edit → schedule → publish.
 5. Refreshes stats every `runtime.stats_every_hours`.
-6. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`).
+6. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`):
+   what went out today, what waits for you, the next post, views, the autopilot's spend against its
+   cap, the Higgsfield balance, today's top trends, this month's money (income, costs, cash, runway,
+   overdue payments), setup gaps and open alerts.
 7. With `VW_CLOUD_URL` set: pushes everything to the cloud dashboard and applies the commands
    you clicked there (checked every 30 s).
 
@@ -40,6 +43,7 @@ Only one daemon can run per `data/` directory (file lock). The dashboard, the bo
 | 🚀 "Published" with links | Nothing |
 | ❌ "… failed" | `vw show <id>`; fix the cause, then `vw publish <id>` (only the failed platforms retry) |
 | 📊 the daily digest | Glance at it |
+| 💰 a sponsor or platform payout for one video | Open the video's page → **Cost & earnings** → *Record earnings* (or `vw money add income 120 --item <id>`) |
 
 ## Telegram
 
@@ -48,9 +52,19 @@ Only one daemon can run per `data/` directory (file lock). The dashboard, the bo
    `message.chat.id` into `TELEGRAM_CHAT_ID`.
 3. Add `telegram` to `notify.channels`. `vw doctor --live` should show `@your_bot`.
 
-The bot obeys only that chat. Commands: `/list`, `/status <id>`, `/approve <id>`,
-`/final <id>`, `/reject <id>`, `/retry <id>`, `/alerts`, `/ideas [n] [topic]`, `/digest`,
-`/pause`, `/resume` (the autopilot's stop button).
+The bot obeys only that chat. Commands:
+
+| Command | What it does |
+|---|---|
+| `/list`, `/status <id>` | Items in progress; one video with its stage, notes, schedule, links, views and profit |
+| `/approve <id>`, `/final <id>`, `/reject <id>`, `/retry <id>` | The approval gates, from your phone |
+| `/ideas [n] [topic or URL]` | Pitch new ideas on the next cycle |
+| `/viral`, `/remix <n>` | Today's top AI videos; make our own version of number *n* |
+| `/trends [refresh]` | What's trending for this channel, with momentum, time left and our angle |
+| `/money` | This month's income and costs, cash, burn, runway, overdue payments, best-earning videos |
+| `/autopilot`, `/ready` | On or paused, today's spend against the cap, last run, held videos; the setup checklist |
+| `/alerts`, `/plan`, `/digest` | Open problems; the content calendar; the daily summary now |
+| `/pause`, `/resume` | The autopilot's stop button: while paused nothing new is written, rendered or posted |
 
 ## Monitoring dashboard
 

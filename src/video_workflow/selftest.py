@@ -75,7 +75,7 @@ class ToneVoice:
 
 
 def _has_flite() -> bool:
-    out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, check=False).stdout
     return " flite " in out
 
 
@@ -252,7 +252,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
     def digest():
         notice = pipe.digest()
         pipe.notify(notice)
-        assert "Published today: 1" in notice.lines
+        assert any(line.startswith("Published today: 1 — ") for line in notice.lines), notice.lines
         return notice.lines[0]
 
     def dashboard():

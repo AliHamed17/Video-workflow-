@@ -81,6 +81,7 @@ def apply_money(pipeline, args: dict) -> str:
         due = args.get("due")
         entry = money.add(pipeline.store, args.get("kind", "income"), float(args["amount"]), args.get("category", ""),
                           args.get("note", ""), status="expected" if due else "paid", due=due,
+                          platform=args.get("platform", ""), item_id=args.get("item_id"),
                           currency=pipeline.config.money.currency)
         result = f"added {entry['kind']} {entry['amount']:,.2f} {entry['note']}" + (f" (due {due})" if due else "")
     else:
@@ -306,13 +307,17 @@ def make_handler(pipeline, token: str | None = None):
                 return self._redirect(f"/?flash={quote(msg)}")
             if path in ("/money/add", "/money/paid"):
 
+                item_id = form.get("item_id", "")
+                item_id = item_id if re.fullmatch(r"[0-9a-f]{6,32}", item_id) else None
+                back = f"/item/{item_id}" if item_id else "/money"     # only ever a local page
                 if path.endswith("add"):
                     try:
                         args = {"op": "add", "kind": form.get("kind", "income"), "amount": float(form.get("amount") or 0),
                                 "note": form.get("note", "")[:200], "category": form.get("category", "")[:60],
-                                "due": form.get("due") or None}
+                                "due": form.get("due") or None, "platform": form.get("platform", "")[:30],
+                                "item_id": item_id}
                     except ValueError:
-                        return self._redirect(f"/money?flash={quote('Amount must be a number.')}")
+                        return self._redirect(f"{back}?flash={quote('Amount must be a number.')}")
                 else:
                     args = {"op": "paid", "id": form.get("id", "")[:16]}
                 if cloud:
@@ -323,7 +328,7 @@ def make_handler(pipeline, token: str | None = None):
                         msg = apply_money(pipeline, args)
                     except (KeyError, ValueError) as exc:
                         msg = f"Not saved: {exc}"
-                return self._redirect(f"/money?flash={quote(msg)}")
+                return self._redirect(f"{back}?flash={quote(msg)}")
             if path == "/trends/refresh":
                 if cloud:
                     store.enqueue("trends", None, {"op": "refresh"}, source="cloud dashboard")

@@ -102,6 +102,13 @@ def render_board(pipeline, st: dict, flash: str = "") -> str:
         (f"{m['avg_quality']:.0f}" if m["avg_quality"] is not None else "–", "avg quality score"),
         (f"{m['credits_total']:.0f}", "Higgsfield credits spent"),
     ]
+    from .. import money
+
+    books = money.summary(pipeline.store, pipeline.config.money, now)
+    if books["entries"]:
+        kpis += [(f"<a href='/money'>{books['month_net']:+,.0f}</a>", f"net {books['currency']} this month"),
+                 (f"<a href='/money'>{books['cash']:,.0f}</a>", f"cash ({books['currency']})"
+                  + (f" · {books['runway_days']:.0f}d runway" if books["runway_days"] else ""))]
     kpi_html = "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>" for v, label in kpis)
     cols = []
     for title, match in COLUMNS:
@@ -275,10 +282,7 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
         stats = "".join(f"<tr><td>{e(k)}</td><td colspan=2>{v.views or 0:,} views · {v.likes or 0:,} likes · "
                         f"{v.comments or 0:,} comments · {v.shares or 0:,} shares</td></tr>" for k, v in item.metrics.items())
         parts.append(_section("Publishing & stats", f"<table>{rows}{stats}</table>"))
-    u = item.usage
-    models = ", ".join(f"{e(k)} ×{v.calls}" for k, v in u.llm.items()) or "—"
-    parts.append(_section("Cost", f"<p class=meta>{u.llm_calls} LLM calls · {u.tokens:,} tokens ({models}) · "
-                                  f"{u.credits:.0f} Higgsfield credits</p>"))
+    parts.append(_section("💰 Cost &amp; earnings", money_html(pipeline, item)))
     parts.append(_section("Timeline (every step, oldest first)", timeline_html(pipeline, item)))
     history = "".join(f"<tr><td>{ev.at:%Y-%m-%d %H:%M}</td><td>{e(ev.stage.value)}</td><td>{e(ev.note)}</td></tr>"
                       for ev in reversed(item.history))
@@ -286,6 +290,52 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     body = (_flash(flash) + f"<h2>{e(item.idea.title)}</h2>"
             f"<div class=grid><div>{left}</div><div>{''.join(parts)}</div></div>")
     return page(item.idea.title, body, st, "/")
+
+
+def money_html(pipeline, item: ContentItem) -> str:
+    """One video's books: what it cost (live from its usage), what it earned, profit, and a form to
+    record earnings (sponsor, platform payout) against it."""
+    from .. import money
+
+    u = item.usage
+    models = ", ".join(f"{e(k)} ×{v.calls}" for k, v in u.llm.items()) or "—"
+    usage = (f"<p class=meta>{u.llm_calls} LLM calls · {u.tokens:,} tokens ({models}) · "
+             f"{u.credits:.0f} Higgsfield credits</p>")
+    b = money.for_item(pipeline.store, item, pipeline.config.money)
+    cur = e(b["currency"])
+
+    def amt(x: float) -> str:
+        return f"{x:,.2f} {cur}"
+
+    rows = [("Higgsfield", amt(b["credits_cost"]) if pipeline.config.money.credit_usd else
+             f"{b['credits']:.0f} credits <span class=meta>(set money.credit_usd to price them)</span>"),
+            ("LLM", amt(b["llm_cost"]))]
+    if b["other_cost"]:
+        rows.append(("Other costs", amt(b["other_cost"])))
+    rows += [("Earned", amt(b["revenue"])), ("Expected", amt(b["expected"]))] if b["expected"] else \
+        [("Earned", amt(b["revenue"]))]
+    profit_cls = "ok" if b["profit"] >= 0 else "bad"
+    rows.append(("Profit", f"<b class={profit_cls}>{b['profit']:+,.2f} {cur}</b>"
+                 + (f" <span class=meta>· ROI {b['roi']:.0f}%</span>" if b["roi"] is not None else "")
+                 + (f" <span class=meta>· RPM {b['rpm']:.2f}</span>" if b["rpm"] is not None else "")))
+    table = "<table class=copytbl>" + "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows) + "</table>"
+    entries = "".join(
+        f"<tr><td class=meta>{e(x['date'][5:])}</td><td>{e(x.get('platform') or x['category'])}"
+        f"<div class=meta>{e(x['note'][:80])}{' · expected' if x['status'] == 'expected' else ''}</div></td>"
+        f"<td class='num {'ok' if x['kind'] == 'income' else 'bad'}'>"
+        f"{'+' if x['kind'] == 'income' else '−'}{x['amount']:,.2f}</td></tr>"
+        for x in b["entries"][:12])
+    entries = f"<table>{entries}</table>" if entries else ""
+    field = ("font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);"
+             "color:var(--ink)")
+    form = (f"<form method=post action='/money/add' class=actions style='align-items:center'>"
+            f"<input type=hidden name=item_id value='{e(item.id)}'><input type=hidden name=kind value=income>"
+            f"<input name=amount type=number step=0.01 min=0 required placeholder='amount' style='width:7em;{field}'>"
+            f"<select name=platform style='{field}'>"
+            + "".join(f"<option>{p}</option>" for p in ("youtube", "tiktok", "instagram", "sponsor", "affiliate", "other"))
+            + f"</select><input name=note placeholder='what it was (optional)' style='flex:1;min-width:140px;{field}'>"
+            "<button>➕ Record earnings</button></form>")
+    return usage + table + entries + form
 
 
 def timeline_html(pipeline, item: ContentItem) -> str:
