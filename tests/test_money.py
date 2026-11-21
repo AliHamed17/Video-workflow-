@@ -163,6 +163,8 @@ def test_watchdog_notices_a_silent_worker_and_notifies_once(tmp_path, monkeypatc
     store = CloudStore(DB(str(tmp_path / "c.sqlite3")))
     store.kv_set("sync", {"at": "2026-11-19T10:00:00+00:00"})
     posted = []
+    quiet = watchdog(CloudPipeline(store), store, NOW, None)                    # no channel set yet
+    assert quiet["notified"] == 0 and quiet["channels"] == [] and not store.kv_get("watchdog_sent")
     monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://hooks.test/alert")
     http = httpx.Client(transport=httpx.MockTransport(lambda r: (posted.append(json.loads(r.content)),
                                                                  httpx.Response(200))[1]))

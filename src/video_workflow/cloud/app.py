@@ -118,14 +118,15 @@ def watchdog(pipeline, store, now=None, http=None) -> dict:
         notify.events = list({*notify.events, "alert"})
         dispatcher = build_dispatcher(notify, secrets, http)
         channels = [n.name for n in dispatcher.notifiers if n.name != "log"]
-        dispatcher.send(Notice(kind="alert", title=f"{len(fresh)} problem(s) in the video workflow",
-                               lines=[f"{'🔴' if a.severity == 'critical' else '🟠'} {a.title}: {a.detail}"[:300]
-                                      for a in fresh[:8]] + ["Dashboard: Health page"]))
-        for a in fresh:
-            sent[a.key] = now.isoformat()
-        store.kv_set("watchdog_sent", sent)
+        if channels:   # with no channel set, keep them "new" so they go out once one is added
+            dispatcher.send(Notice(kind="alert", title=f"{len(fresh)} problem(s) in the video workflow",
+                                   lines=[f"{'🔴' if a.severity == 'critical' else '🟠'} {a.title}: {a.detail}"[:300]
+                                          for a in fresh[:8]] + ["Dashboard: Health page"]))
+            for a in fresh:
+                sent[a.key] = now.isoformat()
+            store.kv_set("watchdog_sent", sent)
     result = {"at": now.isoformat(), "alerts": [{"severity": a.severity, "title": a.title} for a in alerts],
-              "notified": len(fresh), "channels": channels, "worker_sync_hours": hours}
+              "notified": len(fresh) if channels else 0, "channels": channels, "worker_sync_hours": hours}
     store.kv_set("watchdog_last", result)
     return result
 
