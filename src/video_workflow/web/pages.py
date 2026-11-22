@@ -903,6 +903,64 @@ def _idx(value) -> str:
     return (f"<b class='{tone}'>{value:.2f}×</b><div class=bar style='width:{width}%;margin-top:3px'></div>")
 
 
+def experiments_html(pipeline) -> str:
+    """A/B tests: the running one (both sides), finished ones (winner, lift, p), adopted settings (undo)."""
+    from .. import experiments as ex
+
+    store, cfg = pipeline.store, pipeline.config.experiments
+    records = store.kv_get("experiments", []) or []
+    running = next((e for e in records if e["status"] == "running"), None)
+
+    def side_rows(exp) -> str:
+        arms = ((exp.get("result") or {}).get("arms")) or {}
+        out = []
+        for arm in exp["arms"]:
+            a = arms.get(arm["name"], {})
+            assigned = a.get("assigned", sum(1 for v in exp["assigned"].values() if v == arm["name"]))
+            med = a.get("median")
+            out.append(f"<tr><td><b>{e(arm['name'])}</b></td><td class=num>{assigned} video(s)</td>"
+                       f"<td class=num>{a.get('judged', 0)} judged</td>"
+                       f"<td class=num>{_idx(med) if med is not None else '<span class=meta>—</span>'}</td></tr>")
+        return "<table>" + "".join(out) + "</table>"
+
+    parts = [f"<p class=meta>New videos alternate between two settings; once each side has {cfg.min_per_arm} "
+             f"videos old enough to judge, a permutation test says whether the difference is real (p ≤ {cfg.max_p})."
+             f" Auto-start: {'on' if cfg.auto_start else 'off'} · auto-adopt: {'on' if cfg.auto_adopt else 'off'}.</p>"]
+    if running:
+        parts.append(f"<p><b>Running: {e(running['title'])}</b> — {e(running['question'])}</p>" + side_rows(running)
+                     + "<form method=post action='/growth/exp-stop'><button>Stop</button></form>")
+    else:
+        done = {r["key"] for r in records}
+        buttons = "".join(
+            f"<form method=post action='/growth/exp-start'><input type=hidden name=key value='{s.key}'>"
+            f"<button title='{e(s.question, quote=True)}'>{'✓ ' if s.key in done else ''}{e(s.title)}</button></form>"
+            for s in ex.CATALOG)
+        parts.append(f"<p class=meta>No test running. Start one:</p><div class=actions>{buttons}</div>")
+    finished = [r for r in reversed(records) if r["status"] in ("done", "stopped")][:5]
+    for r in finished:
+        res = r.get("result") or {}
+        verdict = (f"<b class=ok>{e(res['winner'])} wins</b> ({res['lift'] * 100:+.0f}% on the median, p={res['p']})"
+                   if res.get("winner") else
+                   "stopped" if r["status"] == "stopped" else f"no clear difference (p={res.get('p')})")
+        adopt = ""
+        if res.get("winner") and not r.get("adopted"):
+            adopt = (f"<form method=post action='/growth/exp-adopt'><input type=hidden name=id value='{e(r['id'])}'>"
+                     f"<input type=hidden name=arm value='{e(res['winner'], quote=True)}'><button class=primary>"
+                     f"Adopt “{e(res['winner'])}”</button></form>")
+        elif r.get("adopted"):
+            adopt = f"<span class=meta>adopted: {e(r['adopted'])}</span>"
+        parts.append(f"<details><summary>{e(r['title'])}: {verdict}</summary>{side_rows(r)}</details>{adopt}")
+    overrides = store.kv_get("config_overrides", {}) or {}
+    if overrides:
+        rows = "".join(
+            f"<tr><td><code>{e(path)}</code></td><td>{e(str(v['value']))}<div class=meta>was {e(str(v['was']))} · "
+            f"{e(v.get('from', ''))}</div></td><td><form method=post action='/growth/exp-undo'>"
+            f"<input type=hidden name=path value='{e(path, quote=True)}'><button>Undo</button></form></td></tr>"
+            for path, v in overrides.items())
+        parts.append(f"<p><b>Adopted settings</b> (on top of the channel config)</p><table>{rows}</table>")
+    return _section("🧪 Experiments", "".join(parts))
+
+
 def render_growth(pipeline, st: dict, flash: str = "") -> str:
     from ..growth import DIMENSIONS
 
@@ -1015,8 +1073,8 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
                    f"<a href='/item/{item.id}'>{e(item.idea.title[:50])}</a></div></td></tr>" for _, item, c in quotes[:15])
     comments = _section("🗣 Top comments", f"<table>{said}</table>") if said else ""
 
-    body = (_flash(flash) + "<h2>Growth</h2>" + head + kpi_html + button + errors + playbook + hits_html + asks_html
-            + what + videos + comments)
+    body = (_flash(flash) + "<h2>Growth</h2>" + head + kpi_html + button + errors + playbook + experiments_html(pipeline)
+            + hits_html + asks_html + what + videos + comments)
     return page("Growth", body, st, "/growth", every_ms=3000 if busy else 30000)
 
 

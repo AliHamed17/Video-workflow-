@@ -67,6 +67,7 @@ video:
     max_speedup: 1.3
     voices: {}                   # per-language voice, e.g. {es: nova, ar: onyx}
   music:
+    enabled: true                # false: narration and sound design only
     dir: null                    # folder of royalty-free tracks; file names matching the script's mood win
     generate: false              # true: an original instrumental per video with Higgsfield (≈3 credits)
     volume_db: -16
@@ -178,6 +179,7 @@ publish:
   youtube:
     privacy: private    # private | unlisted | public — start private until you trust the pipeline
     category_id: "28"   # 28 = Science & Technology, 22 = People & Blogs, 24 = Entertainment
+    captions: true      # upload the narration as subtitle tracks (main language + every version)
   instagram:
     share_to_feed: true
   tiktok:
@@ -282,6 +284,15 @@ maintenance:
   clean_clips_after_days: 45    # rendered shot files of published videos
   delete_rejected_after_days: 14
   keep_events_days: 120
+
+experiments:
+  # A/B tests on your own videos (Dashboard → Growth → Experiments): new videos alternate between two
+  # settings (length, hook style, captions, sound design, music, posting time); once each side has
+  # min_per_arm videos old enough to judge, a permutation test says whether the difference is real.
+  auto_start: false         # true: start the next test from the catalog whenever none is running
+  auto_adopt: false         # true: apply a clear winner by itself (undo any time on the Growth page)
+  min_per_arm: 4
+  max_p: 0.1
 
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)

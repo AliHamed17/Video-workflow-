@@ -140,6 +140,7 @@ class VoiceConfig(BaseModel):
 
 
 class MusicConfig(BaseModel):
+    enabled: bool = True           # false: narration and sound design only
     dir: str | None = None         # folder of royalty-free tracks (mp3/wav/m4a/ogg/flac)
     volume_db: float = -16
     duck: bool = True              # lower the music under the voiceover
@@ -218,6 +219,7 @@ class ContentConfig(BaseModel):
     fact_check: bool = True           # independent fact-check pass before the critic
     idea_overgenerate: int = 2        # pitch N extra ideas and keep the best by predicted score
     formats: list[str] = Field(default_factory=list)  # recurring series formats for the channel
+    hook_style: str = ""              # extra guidance for the hook lab, e.g. "open with a direct question"
 
 
 class ApprovalConfig(BaseModel):
@@ -248,6 +250,7 @@ class AutopilotConfig(BaseModel):
 class YouTubeConfig(BaseModel):
     privacy: Literal["private", "unlisted", "public"] = "private"
     category_id: str = "28"
+    captions: bool = True            # upload the narration as subtitle tracks (main language + every version)
 
 
 class InstagramConfig(BaseModel):
@@ -406,6 +409,16 @@ class MaintenanceConfig(BaseModel):
     keep_events_days: int = 120          # the step-by-step trace log
 
 
+class ExperimentsConfig(BaseModel):
+    """A/B tests on the channel's own videos: new videos alternate between two settings, and the
+    performance index of each side is compared once enough videos are old enough to judge."""
+
+    auto_start: bool = False         # start the next test from the catalog when none is running
+    auto_adopt: bool = False         # apply a clear winner by itself (you can always undo it)
+    min_per_arm: int = 4             # mature videos per side before judging
+    max_p: float = 0.1               # how sure we must be (permutation test p-value) to call a winner
+
+
 class CommunityConfig(BaseModel):
     """Answering viewers. Replies are drafted from the video's own (fact-checked) script; they are sent
     when you approve them, or by themselves with auto_reply."""
@@ -460,6 +473,7 @@ class AppConfig(BaseModel):
     community: CommunityConfig = Field(default_factory=CommunityConfig)
     compilation: CompilationConfig = Field(default_factory=CompilationConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
+    experiments: ExperimentsConfig = Field(default_factory=ExperimentsConfig)
     seo: SeoConfig = Field(default_factory=SeoConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)

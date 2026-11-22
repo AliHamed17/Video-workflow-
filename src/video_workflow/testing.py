@@ -284,6 +284,11 @@ class FakePlatforms:
                 "title": "An octopus has THREE hearts 🐙 #Shorts", "description": "Three hearts, blue blood.",
                 "tags": ["octopus"], "categoryId": "28", "channelId": "UCours", "publishedAt": "2026-11-20T09:00:00Z",
                 "thumbnails": {}}}]})
+        if host == "www.googleapis.com" and path == "/upload/youtube/v3/captions":
+            body = req.content.decode("utf-8")
+            meta = json.loads(body.split("\r\n\r\n", 1)[1].split("\r\n--", 1)[0])
+            self.posted.append(("youtube.caption", {**meta["snippet"], "srt": body.split("\r\n\r\n")[2]}))
+            return httpx.Response(200, json={"id": f"cap{len(self.posted)}"})
         if host == "suggestqueries.google.com":
             q = req.url.params.get("q", "")
             return httpx.Response(200, json=[q, [f"{q} explained", f"{q} facts", f"why do {q}", f"{q} shorts"]])

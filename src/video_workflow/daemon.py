@@ -209,6 +209,9 @@ class Daemon:
                     report["retitled"] = len(self.pipeline.rescue_titles())
                     growth = self.pipeline.growth_report()
                     report["winners"] = len(growth.get("winners", []))
+                    exp = self.pipeline.evaluate_experiments()
+                    if exp:
+                        report["experiment"] = f"{exp['title']}: {exp['status']}"
                 except Exception as exc:   # learning must never stop production
                     log.warning("growth step failed: %s", exc)
 

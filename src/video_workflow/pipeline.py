@@ -56,6 +56,7 @@ from .flows import (
     AutopilotFlow,
     CommunityFlow,
     CompilationFlow,
+    ExperimentFlow,
     GrowthFlow,
     ReportingFlow,
     SoundFlow,
@@ -80,7 +81,7 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 @dataclass
 class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, CompilationFlow, SoundFlow,
-               ReportingFlow):
+               ExperimentFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -133,6 +134,14 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
 
     def local_now(self) -> datetime:
         return self.clock().astimezone(self.tz)
+
+    def _editor_for(self, item: ContentItem):
+        """The editor with this video's settings (an A/B test can change captions, music, sound design)."""
+        cfg = self.config_for(item)
+        if cfg is self.config or self.editor is None:
+            return self.editor
+        return Editor(cfg.video, width=self.editor.width, height=self.editor.height, fps=self.editor.fps,
+                      workers=self.editor.workers)
 
     def _final_size(self) -> tuple[int, int]:
         if self.editor:
@@ -205,11 +214,15 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         """IDEA -> REVIEWED (or REJECTED): hooks, write, fact-check, critique, revise, direct, package."""
         self._expect(item, Stage.IDEA)
         cc = self.config.content
+        self.assign_experiment(item)             # a running A/B test: this video's side and settings
+        item_cfg = self.config_for(item)
+        writer, hook_lab = ((self.writer, self.hook_lab) if item_cfg is self.config else
+                            (Scriptwriter(item_cfg, self.router), HookLab(item_cfg, self.router)))
         with self.tracer.bind(item.id), usage.tracking(item.usage):
             lessons = self.lessons()   # what our own results say works (the growth playbook)
             if cc.hook_variants > 0:
                 with self.tracer.span("develop.hooks", item.id) as span:
-                    hooks = self.hook_lab.generate(item.idea, cc.hook_variants, lessons=lessons)
+                    hooks = hook_lab.generate(item.idea, cc.hook_variants, lessons=lessons)
                     item.hook_options = hooks.hooks
                     best = hooks.hooks[hooks.best_index]
                     if best.text.strip() and best.text.strip() != item.idea.hook.strip():
@@ -223,7 +236,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             passed = False
             for round_ in range(rounds):
                 with self.tracer.span("develop.write", item.id, round=round_ + 1) as span:
-                    script = self.writer.write(item.idea, previous=script, review=review, corrections=corrections,
+                    script = writer.write(item.idea, previous=script, review=review, corrections=corrections,
                                                inspiration=brief, lessons=lessons)
                     span.detail = f"draft {round_ + 1}: {len(script.shots)} shots"
                 # Fact-check and critic read the same draft independently: run them side by side.
@@ -299,7 +312,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             if check is not None and check.verdict == "fix" and self.config.compliance.auto_fix:
                 with self.tracer.span("develop.write", item.id, round="compliance") as span:
                     fixes = summarize_compliance(check)
-                    item.script = self.writer.write(
+                    item.script = writer.write(
                         item.idea, previous=item.script, corrections=fixes, inspiration=brief, lessons=lessons,
                         review=item.review.model_copy(update={
                             "verdict": "revise", "problems": ["compliance: " + i.issue for i in check.issues
@@ -556,8 +569,8 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             music = self.pick_music(item)
             item.music_track = str(music) if music else None
             with self.tracer.span("edit.assemble", item.id, phase=phase) as span:
-                final, thumb = self.editor.assemble(item, self.store.item_dir(item.id), voiceover, music,
-                                                    phase=phase)
+                final, thumb = self._editor_for(item).assemble(item, self.store.item_dir(item.id), voiceover,
+                                                               music, phase=phase)
                 item.final_video, item.thumbnail = str(final), str(thumb)
                 span.detail = f"{probe(final)['duration']:.1f}s {phase} cut" + (f", music {music.name}" if music else "")
             with self.tracer.span("qa.technical", item.id) as span:
@@ -603,7 +616,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         with self._slot_lock:
             others = [i for i in self.store.list()
                       if i.scheduled_for and i.id != item.id and i.stage in (Stage.EDITED, Stage.PUBLISHED)]
-            sched = self.config.publish.schedule
+            sched = self.config_for(item).publish.schedule   # an A/B test may set the posting time
             if self.learned_slots():   # growth.learn_slots: post when our videos have done best
                 sched = sched.model_copy(update={"slots": self.learned_slots()})
             slot = schedule.next_slot(sched, [i.scheduled_for for i in others], now)
@@ -687,6 +700,11 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                 self.first_comment(item, [r.platform for r in results if r.ok])
             except Exception as exc:   # a comment must never undo a publish
                 log.warning("first comment failed for %s: %s", item.id, exc)
+            if any(r.ok and r.platform == "youtube" for r in results):
+                try:
+                    self.upload_captions(item)
+                except Exception as exc:
+                    log.warning("captions failed for %s: %s", item.id, exc)
         for failure in (r for r in results if not r.ok):
             self.notify(Notice(kind="failed", title=f"{failure.platform} upload failed: {item.idea.title}",
                                lines=[failure.detail or ""], item_id=item.id))

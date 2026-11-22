@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.8: Experiments and subtitles ✅
+
+- [x] A/B tests on our own videos: a catalog (length, hook style, captions, sound design, music, posting time), balanced assignment, per-video settings for writing, editing and scheduling
+- [x] Judged with a permutation test on the performance index; winners adopted on top of the config (and undone); auto-start / auto-adopt
+- [x] YouTube subtitle tracks from the narration, in every language, once each
+- [x] The channel now tests its own production settings on real viewers
+
 ## Phase 2.7: Weekly compilation, watermark, housekeeping ✅
 
 - [x] Weekly long-form compilation for YouTube from the week's best Shorts: countdown, blurred 16:9, intro/outro, chapters

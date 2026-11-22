@@ -18,6 +18,7 @@ ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 REPLY_URL = "https://www.googleapis.com/youtube/v3/comments"
+CAPTIONS_URL = "https://www.googleapis.com/upload/youtube/v3/captions"
 
 
 class YouTubePublisher(HTTPPublisher):
@@ -153,6 +154,21 @@ class YouTubePublisher(HTTPPublisher):
         snippet.setdefault("categoryId", self.config.category_id)
         self._send("PUT", VIDEOS_URL, "YouTube title update", headers=auth, params={"part": "snippet"},
                    json={"id": video_id, "snippet": snippet})
+
+    def upload_caption(self, video_id: str, language: str, name: str, srt: str) -> str:
+        """A subtitle track (SRT) on our video, in one language (youtube.force-ssl scope). Returns its id."""
+        import json as _json
+        import uuid
+
+        boundary = f"vw-{uuid.uuid4().hex}"
+        meta = _json.dumps({"snippet": {"videoId": video_id, "language": language, "name": name, "isDraft": False}})
+        body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n"
+                f"--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n{srt}\r\n--{boundary}--\r\n")
+        resp = self._send("POST", CAPTIONS_URL, "YouTube captions", idempotent=False,
+                          params={"uploadType": "multipart", "part": "snippet"}, content=body.encode("utf-8"),
+                          headers={"Authorization": f"Bearer {self.access_token()}",
+                                   "Content-Type": f"multipart/related; boundary={boundary}"})
+        return str(resp.json().get("id", ""))
 
     def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
         """Top-level comments, most relevant first (youtube.readonly scope)."""

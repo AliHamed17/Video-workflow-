@@ -11,6 +11,6 @@ def test_everything_works_together(tmp_path):
     results, final = selftest.run(tmp_path, width=360, height=640)
     failed = [(r.name, r.detail) for r in results if not r.ok]
     assert not failed, failed
-    assert len(results) == 24
+    assert len(results) == 25
     info = probe(final)
     assert (info["width"], info["height"]) == (360, 640) and info["has_audio"]

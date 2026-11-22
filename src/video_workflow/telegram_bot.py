@@ -32,6 +32,7 @@ HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, wit
         "/followup <n> — a follow-up of hit n · /ask <n> — make what viewers asked for (n from /insights)\n"
         "/replies — drafted answers to viewers · /send <n> [your own words] · /skip <n>\n"
         "/compile — this week's best Shorts as one long YouTube video\n"
+        "/experiments — the A/B test running on new videos and past results\n"
         "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
         "/alerts · /plan — the content calendar · /digest — summary now\n"
         "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
@@ -134,6 +135,8 @@ class TelegramBot:
             self.say(self.remix(rest.strip()))
         elif command == "/insights":
             self.say(self.insights_text())
+        elif command == "/experiments":
+            self.say(self.experiments_text())
         elif command == "/compile":
             requests = self.store.kv_get("pending_requests", [])
             requests.append({"growth": {"op": "compile"}})
@@ -366,6 +369,23 @@ class TelegramBot:
         ok, detail = run_community(self.pipeline, {"op": command[1:], "item_id": item.id,
                                                    "comment_id": draft.comment_id, "text": text.strip()})
         return ("✅ " if ok else "⚠️ ") + detail
+
+    def experiments_text(self) -> str:
+        records = self.store.kv_get("experiments", []) or []
+        if not records:
+            return ("No experiments yet. Start one on the dashboard's Growth page (length, hook style, captions, "
+                    "sound design, music, posting time), or set experiments.auto_start.")
+        lines = []
+        running = next((r for r in records if r["status"] == "running"), None)
+        if running:
+            per_arm = {a["name"]: sum(1 for v in running["assigned"].values() if v == a["name"]) for a in running["arms"]}
+            lines.append(f"🧪 Running: {running['title']} — " + " vs ".join(f"{n} ({c})" for n, c in per_arm.items()))
+        for r in [r for r in reversed(records) if r["status"] == "done"][:4]:
+            res = r.get("result") or {}
+            lines.append(f"• {r['title']}: " + (f"{res['winner']} wins ({res['lift'] * 100:+.0f}%, p={res['p']})"
+                                               if res.get("winner") else f"no clear difference (p={res.get('p')})")
+                         + (f" · adopted {r['adopted']}" if r.get("adopted") else ""))
+        return "\n".join(lines)
 
     def ready_text(self) -> str:
         result = self.pipeline.refresh_readiness()

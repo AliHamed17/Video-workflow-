@@ -448,6 +448,8 @@ class ContentItem(BaseModel):
     kind: Literal["short", "compilation"] = "short"
     platforms: list[str] | None = None      # where this one goes (None: publish.platforms)
     compiled_from: list[str] = Field(default_factory=list)   # a compilation's Shorts, in order
+    experiment: dict[str, str] | None = None   # {"id": ..., "arm": ...} when this video is part of an A/B test
+    caption_tracks: list[str] = Field(default_factory=list)  # subtitle languages uploaded to YouTube
     stage: Stage = Stage.IDEA
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)

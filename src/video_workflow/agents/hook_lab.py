@@ -11,6 +11,9 @@ class HookLab(Agent):
     def generate(self, idea: Idea, count: int = 5, lessons: str = "") -> HookSet:
         prompt = load_prompt("hooks").substitute(count=count, title=idea.title, hook=idea.hook,
                                                  angle=idea.angle)
+        if self.config.content.hook_style.strip():
+            prompt += ("\n\nHOOK STYLE FOR THIS VIDEO (required — all hooks use it, the best one included): "
+                       + self.config.content.hook_style.strip())
         if lessons:
             prompt += ("\n\nWhat our own results say about hooks and openings (weigh strong rules most when "
                        "you pick best_index):\n" + lessons)

@@ -36,6 +36,13 @@ works the best-fitting phrase into the title or the first line of the descriptio
 naturally, and uses several as tags. The video page lists them (🔎). No key needed; when the lookup
 is unavailable the packaging is written as before (`seo.enabled`, `seo.region`).
 
+## Subtitles on YouTube
+
+After a Short goes up, its narration is uploaded as a YouTube subtitle track in the channel's language,
+plus one per language version (`content.languages`), once each. Many people watch on mute, and the
+text is indexed for search. `publish.youtube.captions: false` turns it off. It needs the same
+`youtube.force-ssl` scope as replies.
+
 ## Title rescue
 
 The packager also writes two **reserve titles** with a different angle. About a day after posting,

@@ -54,6 +54,29 @@ follows still win over a rule.
 See [COMMUNITY.md](COMMUNITY.md#title-rescue): with `growth.title_rescue: true`, a video far below
 our usual first-day views switches to a reserve title the packager wrote, once.
 
+## Experiments (A/B tests)
+
+The playbook says what *seems* to work; an experiment checks it. Dashboard → Growth → 🧪 Experiments:
+pick one from the catalog and every new Short joins it, alternating between two sides:
+
+| Test | Sides |
+|---|---|
+| Video length | 20 s vs 30 s |
+| Hook style | a direct question vs a bold, true claim |
+| Caption style | word by word vs one line per shot |
+| Sound design | with vs without whooshes, riser and end hit |
+| Music | music vs narration and sound only |
+| Posting time | 09:00 vs 18:30 |
+
+Each video is written, edited and scheduled with its side's settings, and nothing else changes. Once
+both sides have `experiments.min_per_arm` videos old enough to judge, their performance index is
+compared with a permutation test on the medians. A winner is only called when a difference that big
+would be rare by chance (p ≤ `max_p`); otherwise the result is "no clear difference", which is common
+with few videos and still useful. **Adopt** puts the winner's setting on top of the channel config
+(kept across restarts, shown with what it replaced); **Undo** puts it back. `auto_start` runs the
+catalog one test after another; `auto_adopt` applies clear winners by itself. `/experiments` on
+Telegram shows where things stand.
+
 ## Weekly compilation
 
 Shorts earn little per view; long videos earn far more. With `compilation.enabled: true`, every

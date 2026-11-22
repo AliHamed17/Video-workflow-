@@ -241,8 +241,12 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         assert item.stage == Stage.PUBLISHED, item.publishes
         assert sorted(item.published_platforms()) == ["instagram", "tiktok", "youtube"]
         assert any(n.kind == "published" for n in memory.notices)
+        captions = [body for kind, body in platforms.posted if kind == "youtube.caption"]
+        assert item.caption_tracks[0] == "en" and len(captions) == len(item.caption_tracks), platforms.posted
+        assert all("-->" in c["srt"] for c in captions) and {c["language"] for c in captions} == set(item.caption_tracks)
         state["item"] = item
-        return "published in parallel to " + ", ".join(f"{r.platform} ({r.post_id})" for r in item.publishes if r.ok)
+        return ("published in parallel to " + ", ".join(f"{r.platform} ({r.post_id})" for r in item.publishes if r.ok)
+                + f" · subtitles on YouTube in {', '.join(item.caption_tracks)}")
 
     def stats_feedback():
         assert pipe.refresh_metrics() == 3
@@ -324,6 +328,43 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         return (f"weekly compilation: 3 Shorts → {info['duration']:.0f}s 1920x1080 with countdown labels, intro/outro "
                 f"and chapters, posted to YouTube only ({urls[0].split('/')[-1][:20]}) · housekeeping freed "
                 f"{done['freed_mb']} MB, kept every final cut")
+
+    def experiment():
+        from .growth import video_rows
+
+        exp = pipe.start_experiment("length")
+        made = [pipe.develop(i) for i in pipe.ideate(2)]
+        sides = {i.experiment["arm"] for i in made}
+        assert sides == {"20 s", "30 s"}, sides
+        prompts = [p for schema, p in pipe.router._providers["fake"].calls if schema == "Script"][-2:]
+        assert any("about 20 seconds" in p for p in prompts) and any("about 30 seconds" in p for p in prompts)
+        # Pretend both sides have aged: four 30-second videos clearly beat four 20-second ones.
+        records = pipe.experiments_list()
+        running = next(r for r in records if r["id"] == exp["id"])
+        for n in range(8):
+            side = "30 s" if n % 2 else "20 s"
+            past = ContentItem(channel=made[0].channel, idea=made[0].idea.model_copy(update={"title": f"Test {n}"}),
+                               experiment={"id": exp["id"], "arm": side},
+                               created_at=datetime.now(UTC) - timedelta(days=6))
+            past.metrics["youtube"] = PostMetrics(views=(30_000 if side == "30 s" else 9_000) + n * 300)
+            past.move(Stage.PUBLISHED)
+            past.history[-1].at = datetime.now(UTC) - timedelta(days=5)
+            store.save(past)
+            running["assigned"][past.id] = side
+        pipe._save_experiments(records)
+        assert len(video_rows(store.list(), datetime.now(UTC), pipe.tz)) >= 8
+        done = pipe.evaluate_experiments()
+        result = done["result"]
+        assert done["status"] == "done" and result["winner"] == "30 s", result
+        before = pipe.config.video.target_duration_s
+        pipe.adopt_experiment(done["id"], "30 s")
+        assert pipe.config.video.target_duration_s == 30 and store.kv_get("config_overrides")
+        pipe.undo_override("video.target_duration_s")
+        assert pipe.config.video.target_duration_s == before
+        for item in made:
+            pipe.reject(store.get(item.id), note="selftest: experiment demo")
+        return (f"A/B test '{exp['title']}': new videos alternated 20 s / 30 s with their own scripts; judged "
+                f"30 s the winner ({result['lift'] * 100:+.0f}% on the median, p={result['p']}), adopted, undone")
 
     def compliance():
         llm = pipe.router._providers["fake"]
@@ -565,6 +606,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Compliance: a risky script is fixed before rendering", compliance),
         ("Engagement: search phrases, replies to viewers, title rescue", engagement),
         ("Weekly compilation + housekeeping", compilation),
+        ("Experiments: an A/B test on new videos", experiment),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

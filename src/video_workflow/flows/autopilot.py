@@ -193,6 +193,7 @@ class AutopilotFlow:
             try:
                 self.refresh_stats()      # scheduled runs have no daemon: read the numbers here
                 self.growth_report()      # learn from what's out already, before writing more
+                self.evaluate_experiments()
             except Exception as exc:
                 log.warning("growth report failed: %s", exc)
         report = self.autopilot_fill()

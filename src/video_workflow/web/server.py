@@ -147,6 +147,18 @@ def run_growth(pipeline, args: dict) -> tuple[bool, str]:
         if op == "follow_up":
             item = pipeline.follow_up(args["id"])
             return (True, f"follow-up {item.id}: {item.idea.title[:70]}") if item else (False, "no idea pitched")
+        if op == "exp_start":
+            exp = pipeline.start_experiment(args["key"])
+            return True, f"experiment started: {exp['title']} ({' vs '.join(a['name'] for a in exp['arms'])})"
+        if op == "exp_stop":
+            exp = pipeline.stop_experiment()
+            return (True, f"experiment stopped: {exp['title']}") if exp else (False, "no experiment is running")
+        if op == "exp_adopt":
+            pipeline.adopt_experiment(args["id"], args["arm"])
+            return True, f"adopted: {args['arm']} (undo on the Growth page)"
+        if op == "exp_undo":
+            pipeline.undo_override(args["path"])
+            return True, f"{args['path']} is back to the channel's setting"
         if op == "compile":
             item = pipeline.make_compilation(force=True)
             return (True, f"compilation {item.id}: {item.idea.title[:70]}") if item else \
@@ -562,10 +574,15 @@ def make_handler(pipeline, token: str | None = None):
                 else:
                     msg = run_community(pipeline, args)[1]
                 return self._redirect(f"/community?flash={quote(msg)}")
-            if path in ("/growth/refresh", "/growth/follow-up", "/growth/request", "/growth/compile"):
-                op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request",
-                      "compile": "compile"}[path.rsplit("/", 1)[1]]
+            if path in ("/growth/refresh", "/growth/follow-up", "/growth/request", "/growth/compile",
+                        "/growth/exp-start", "/growth/exp-stop", "/growth/exp-adopt", "/growth/exp-undo"):
+                op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request", "compile": "compile",
+                      "exp-start": "exp_start", "exp-stop": "exp_stop", "exp-adopt": "exp_adopt",
+                      "exp-undo": "exp_undo"}[path.rsplit("/", 1)[1]]
                 args = {"op": op}
+                for name in ("key", "id", "arm", "path"):
+                    if form.get(name):
+                        args[name] = form[name][:120]
                 if op == "follow_up":
                     if not re.fullmatch(r"[0-9a-f]{6,32}", form.get("id", "")):
                         return self._redirect(f"/growth?flash={quote('Unknown video.')}")
@@ -580,7 +597,9 @@ def make_handler(pipeline, token: str | None = None):
                 else:
                     if not store.kv_get("growth_running"):
                         _background("growth", lambda: run_growth(pipeline, args))
-                    msg = {"compile": "Building this week's compilation…",
+                    msg = {"exp_start": "Starting the experiment…", "exp_stop": "Stopping the experiment…",
+                           "exp_adopt": "Adopting the winner…", "exp_undo": "Undoing…",
+                           "compile": "Building this week's compilation…",
                            "refresh": "Reading our results and rewriting the playbook…",
                            "follow_up": "Writing a follow-up of the hit…",
                            "request": "Pitching what the viewers asked for…"}[op]

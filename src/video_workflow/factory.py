@@ -81,6 +81,8 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
 
     store = Store(data_dir)
     secrets = secrets or load_secrets(store)   # environment first, then accounts connected on the dashboard
+    from .flows.experiments import apply_overrides
+    apply_overrides(config, store)             # winners of A/B tests you adopted (undo on the Growth page)
     http = net.default_client()
     editor = Editor(config.video) if shutil.which("ffmpeg") else None
     return Pipeline(

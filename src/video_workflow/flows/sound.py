@@ -78,9 +78,12 @@ class SoundFlow:
         return self.store.save(item)
 
     def pick_music(self, item: ContentItem) -> Path | None:
+        music = self.config_for(item).video.music
+        if not music.enabled:
+            return None
         if item.music_generated and Path(item.music_generated).exists():
             return Path(item.music_generated)   # the original track made for this video
-        folder = self.config.video.music.dir
+        folder = music.dir
         if not folder or not Path(folder).is_dir():
             return None
         tracks = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in AUDIO_EXT)
@@ -95,6 +98,34 @@ class SoundFlow:
         if best:
             return best[0]
         return tracks[int(hashlib.sha1(item.id.encode()).hexdigest(), 16) % len(tracks)]
+
+    # ---- subtitle tracks -----------------------------------------------------------------------
+    def upload_captions(self, item: ContentItem) -> list[str]:
+        """The narration as YouTube subtitles: the channel's language plus every language version. Each
+        track once; a failure is logged and never undoes the publish. Returns the languages uploaded."""
+        from ..kit import srt
+
+        upload = getattr(self.publishers.get("youtube"), "upload_caption", None)
+        video_id = item.post_id("youtube")
+        if not (self.config.publish.youtube.captions and upload and video_id and item.script and item.kind == "short"):
+            return []
+        durations = [s.duration_s for s in item.script.shots]
+        tracks = [(self.config.channel.language, [s.voiceover or s.on_screen_text for s in item.script.shots])]
+        tracks += [(v.language, [s.voiceover or s.on_screen_text for s in v.localization.shots]) for v in item.versions]
+        done = []
+        for language, lines in tracks:
+            if language in item.caption_tracks or not any(line.strip() for line in lines):
+                continue
+            try:
+                upload(video_id, language, f"{language} · narration", srt(lines, durations))
+                item.caption_tracks.append(language)
+                done.append(language)
+            except Exception as exc:
+                self.tracer.event("publish.captions", "warn", item.id, f"{language}: {exc}"[:300])
+        if done:
+            self.store.save(item)
+            self.tracer.event("publish.captions", "ok", item.id, f"subtitles on YouTube: {', '.join(done)}")
+        return done
 
     # ---- languages ------------------------------------------------------------------------
     def _voice_for(self, item: ContentItem, language: str, texts: list[str]) -> list[VoiceClip]:
@@ -130,7 +161,7 @@ class SoundFlow:
                 try:
                     loc = self.translator.localize(item.script, item.packaging, lang)
                     clips = self._voice_for(item, lang, [s.voiceover for s in loc.shots])
-                    final, thumb = self.editor.assemble(
+                    final, thumb = self._editor_for(item).assemble(
                         item, self.store.item_dir(item.id), None, music, phase="final", variant=lang,
                         texts=[(s.on_screen_text, s.voiceover) for s in loc.shots], voice_clips=clips)
                     variant = item.model_copy(deep=True)
