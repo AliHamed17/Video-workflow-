@@ -238,6 +238,18 @@ def clips_add(item_id: str, shot_index: int, source: str,
     _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url, morph)])
 
 
+@app.command("rewrite")
+def rewrite(item_id: str, note: Annotated[str, typer.Option(help="What the writers should change")] = "",
+            now: Annotated[bool, typer.Option("--now", help="Write it straight away instead of on the next run")] = False,
+            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Send a script back to the writers from scratch (keeps the idea); it then waits for your approval."""
+    pipe = _setup(config, data, publishers=False)
+    item = pipe.rewrite(pipe.store.get(item_id), note)
+    if now:
+        item = pipe.develop(item)
+    _table([item])
+
+
 @app.command("virality")
 def virality(item_id: str, score: Annotated[float, typer.Argument(help="Virality Predictor score, 0-100")],
              notes: Annotated[str, typer.Option(help="Its main findings (hook, retention risks)")] = "",

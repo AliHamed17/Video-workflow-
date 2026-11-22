@@ -152,6 +152,11 @@ class LLMRouter:
                     errors.append(f"{label} cannot take images")
                     self.calls.append((task, label, "unavailable"))
                     continue
+                if "authentication" in str(exc).lower() or "api_key" in str(exc).lower():
+                    # An SDK with no credentials at all only notices when it sends: try the next candidate.
+                    errors.append(f"{label} unavailable (no credentials)")
+                    self.calls.append((task, label, "unavailable"))
+                    continue
                 raise
             except LLMError as exc:
                 log.warning("LLM %s failed for %s: %s", label, task, exc)

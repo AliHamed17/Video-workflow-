@@ -515,6 +515,7 @@ class ContentItem(BaseModel):
     fact_check: FactCheck | None = None
     compliance: ComplianceCheck | None = None
     virality: dict | None = None   # Higgsfield Virality Predictor read of the final cut {score, notes, job, at}
+    hold_review: bool = False      # a rewritten script waits for a human even with the autopilot on
     review: Review | None = None
     revisions: int = 0
     render_plan: RenderPlan | None = None

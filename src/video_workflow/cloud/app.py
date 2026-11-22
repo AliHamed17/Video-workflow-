@@ -73,6 +73,9 @@ class CloudPipeline:
     def rerender(self, item, shots: list[int], note: str = ""):
         return self._queue("rerender", item, shots=shots, note=note)
 
+    def rewrite(self, item, note: str = ""):
+        return self._queue("rewrite", item, note=note)
+
     def publish(self, item, force: bool = False):
         return self._queue("publish", item)
 

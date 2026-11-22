@@ -113,13 +113,47 @@ def is_punch(word: str, punch: set[str]) -> bool:
     return bool(plain) and (plain in punch or any(ch.isdigit() for ch in plain))
 
 
-def word_chunks(text: str, size: int) -> list[str]:
-    words = text.split()
-    chunks = [words[i : i + size] for i in range(0, len(words), size)]
+def phrase_spans(words: list[str], emphasis: list[str]) -> list[tuple[int, int]]:
+    """Where each punch phrase occurs in the spoken words, as [start, end) word positions."""
+    plain = [_plain(w) for w in words]
+    spans = []
+    for phrase in emphasis:
+        target = [_plain(w) for w in phrase.split() if _plain(w)]
+        for i in range(len(plain) - len(target) + 1) if target else ():
+            if plain[i : i + len(target)] == target and not any(a < i + len(target) and i < b for a, b in spans):
+                spans.append((i, i + len(target)))
+    return sorted(spans)
+
+
+def punch_positions(words: list[str], emphasis: list[str]) -> set[int]:
+    """The words that pop: the script's punch phrases where they occur, and every number."""
+    out = {i for a, b in phrase_spans(words, emphasis) for i in range(a, b)}
+    return out | {i for i, w in enumerate(words) if any(ch.isdigit() for ch in w)}
+
+
+def chunk_indices(words: list[str], size: int, emphasis: list[str] | None = None) -> list[list[int]]:
+    """Word positions per caption, ``size`` words each, never splitting a punch phrase across two."""
+    starts = {a: b for a, b in phrase_spans(words, emphasis or [])}
+    units, i = [], 0
+    while i < len(words):
+        end = starts.get(i, i + 1)
+        units.append(list(range(i, end)))
+        i = end
+    chunks: list[list[int]] = []
+    for unit in units:
+        if chunks and len(chunks[-1]) + len(unit) <= size:
+            chunks[-1] += unit
+        else:
+            chunks.append(list(unit))
     if len(chunks) > 1 and len(chunks[-1]) == 1:  # no lonely last word
         last = chunks.pop()
         chunks[-1] += last
-    return [" ".join(c) for c in chunks]
+    return chunks
+
+
+def word_chunks(text: str, size: int, emphasis: list[str] | None = None) -> list[str]:
+    words = text.split()
+    return [" ".join(words[i] for i in chunk) for chunk in chunk_indices(words, size, emphasis)]
 
 
 def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, height: int,
@@ -166,11 +200,11 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
     kinetic = captions.style == "kinetic"
     white, hot, accent = _colour("&H00FFFFFF"), _colour(captions.highlight_color), _colour(captions.accent_color)
 
-    def kinetic_line(words: list[str], active: int, punch: set[str]) -> str:
+    def kinetic_line(words: list[str], active: int, punch: set[int]) -> str:
         """The chunk with the spoken word lit up and punch words bigger, in the accent colour."""
         out = []
         for i, word in enumerate(words):
-            text, big = _ass_text(word), is_punch(word, punch)
+            text, big = _ass_text(word), i in punch
             if not big and i != active:
                 out.append(text)
                 continue
@@ -197,22 +231,25 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
         if use_words and shot.speech and shot.voiceover.strip():
             if captions.headline:
                 headline(shot, shot.start + 0.05, end - 0.05)
-            chunks = word_chunks(shot.voiceover, max(1, captions.words_per_caption))
+            spoken = shot.voiceover.split()
+            index_chunks = chunk_indices(spoken, max(1, captions.words_per_caption), shot.emphasis)
+            chunks = [" ".join(spoken[i] for i in c) for c in index_chunks]
             weights = [len(c) + 2 for c in chunks]
             t, total = shot.start, sum(weights)
-            punch = punch_words(shot.emphasis)
-            for chunk, weight in zip(chunks, weights, strict=True):
+            punch = punch_positions(spoken, shot.emphasis)
+            for chunk, positions, weight in zip(chunks, index_chunks, weights, strict=True):
                 span = shot.speech * weight / total
                 if not kinetic:
                     event(t, t + span, "Word", chunk, fade=40, pop=True)
                 else:
                     # One event per spoken word: the chunk pops in once, then the highlight walks along it.
-                    words = chunk.split()
+                    words = [spoken[i] for i in positions]
+                    local = {n for n, i in enumerate(positions) if i in punch}
                     w_weights = [len(w) + 1 for w in words]
                     w_total, at = sum(w_weights), t
                     for i, w_weight in enumerate(w_weights):
                         w_span = span * w_weight / w_total
-                        event(at, at + w_span, "Word", kinetic_line(words, i, punch), raw=True,
+                        event(at, at + w_span, "Word", kinetic_line(words, i, local), raw=True,
                               fade=40 if i == 0 else 0, fade_out=40 if i == len(words) - 1 else 0, pop=i == 0)
                         at += w_span
                 t += span

@@ -129,7 +129,7 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |
 | `vw plan --days 7` · `vw localize <id> -l es -l ar` · `vw kit <id>` | Plan the content calendar · build language versions · download the publish kit (zip) |
 | `vw logs [id] [-f]` · `vw alerts` · `vw quality <id>` | Step-by-step trace (live with `-f`) · current problems · an item's quality report |
-| `vw approve-final <id>` · `vw retry <id>` · `vw rerender <id> -s 2 --note "..."` | Approve the full-res render · resume a failed item · re-shoot chosen shots |
+| `vw approve-final <id>` · `vw retry <id>` · `vw rerender <id> -s 2 --note "..."` · `vw rewrite <id> --note "..."` | Approve the full-res render · resume a failed item · re-shoot chosen shots · write a script again from the same idea |
 | `vw higgsfield-balance <credits> --plan <plan>` | Record the Higgsfield balance (the render skill does this) |
 | `vw init` · `vw doctor [--live]` | Create config files · check (and with `--live`, test) every connection |
 | `vw run [--ideas N] [--until stage]` | Push every item as far as the gates allow (parallel workers) |

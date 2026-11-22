@@ -169,6 +169,9 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
     actions = []
     if item.stage == Stage.REVIEWED:
         actions.append(form("approve", "✅ Approve script", "primary"))
+    if item.stage in (Stage.REVIEWED, Stage.APPROVED, Stage.FAILED) and not item.clips and not item.final_video:
+        actions.append(form("rewrite", "✍ Rewrite script", "",
+                            "<input name=note placeholder='what to change (optional)' style='max-width:240px'>"))
     if item.awaiting_final_approval:
         hf = pipeline.config.video.higgsfield
         cost = hf.estimate(len(item.script.shots), "final")
@@ -233,12 +236,13 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                        f"<td>{e(h.technique)}</td><td class=num>{h.strength:.0f}</td></tr>" for h in item.hook_options)
         parts.append(_section("Hook lab", f"<table><tr><th>Hook</th><th>Technique</th><th class=num>Strength</th></tr>{rows}</table>"))
     if item.script:
-        from ..video.editor import is_punch, punch_words
+        from ..video.editor import punch_positions
 
         def spoken(shot) -> str:
             # The narration with the caption's punch words marked, as the viewer will see them pop.
-            punch = punch_words(shot.emphasis)
-            return " ".join(f"<mark>{e(w)}</mark>" if is_punch(w, punch) else e(w) for w in shot.voiceover.split())
+            words = shot.voiceover.split()
+            punch = punch_positions(words, shot.emphasis)
+            return " ".join(f"<mark>{e(w)}</mark>" if i in punch else e(w) for i, w in enumerate(words))
 
         rows = "".join(f"<tr><td>{s.index + 1}<div class=meta>{e(s.beat)}</div></td><td>{e(s.visual)}</td>"
                        f"<td>{spoken(s)}</td><td><b>{e(s.on_screen_text)}</b></td></tr>" for s in item.script.shots)

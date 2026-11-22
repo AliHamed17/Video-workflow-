@@ -178,6 +178,7 @@ Claude Code skill.
 | Nothing happens | `vw doctor --live`; `vw list`. Items in `reviewed` are waiting for approval |
 | `failed` item | `vw logs <id>` shows the failing step; fix the cause, then `vw retry <id>` (or the Retry button) |
 | A shot looks wrong | Re-render it from the item page, or `vw rerender <id> -s 3 --note "closer, sharper"` |
+| A script isn't good enough (before rendering) | ✍ Rewrite script on the item page (with an optional note), or `vw rewrite <id> --note "..." [--now]`: written again from the same idea, then it waits for you even with the autopilot on |
 | Not publishing | Quality gate failed (see the item's Technical quality), or it's scheduled, or a preview awaits final approval |
 | Publishing stuck in `edited` | It is scheduled (`vw show <id>` → `scheduled_for`) or one platform failed (see `publishes`) |
 | YouTube videos stay private | Unverified API projects are locked to private: see SETUP.md |

@@ -54,3 +54,31 @@ def test_bad_route_entry():
     router = _router(["no-colon"], {})
     with pytest.raises(LLMError, match="provider:model"):
         router.structured("packaging", system="s", prompt="p", schema=SocialMeta)
+
+
+class NoCredentials:
+    """The Anthropic SDK with no key, token or profile: it builds, then refuses when it sends."""
+
+    name = "anthropic"
+
+    def structured(self, **kw):
+        raise TypeError('"Could not resolve authentication method. Expected one of api_key, auth_token, or '
+                        'credentials to be set."')
+
+
+def test_an_sdk_without_credentials_falls_through_to_the_next_candidate():
+    good = Good()
+    router = _router(["anthropic:claude-x", "cli:claude"], {"anthropic": NoCredentials(), "cli": good})
+    assert router.structured("packaging", system="s", prompt="p", schema=SocialMeta) == GOOD
+    assert [c[2] for c in router.calls] == ["unavailable", "ok"]
+
+
+def test_other_type_errors_still_surface():
+    class Bug:
+        name = "bug"
+
+        def structured(self, **kw):
+            raise TypeError("unexpected keyword argument 'tempurature'")
+
+    with pytest.raises(TypeError, match="tempurature"):
+        _router(["bug:m"], {"bug": Bug()}).structured("packaging", system="s", prompt="p", schema=SocialMeta)

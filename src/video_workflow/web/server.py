@@ -684,7 +684,7 @@ def make_handler(pipeline, token: str | None = None):
                         _background("plan", lambda: run_plan(pipeline))
                     msg = "Planning the next 7 days…"
                 return self._redirect(f"/calendar?flash={quote(msg)}")
-            m = re.fullmatch(r"/item/([0-9a-f]+)/(approve|final|reject|publish|retry|rerender)", path)
+            m = re.fullmatch(r"/item/([0-9a-f]+)/(approve|final|reject|publish|retry|rerender|rewrite)", path)
             if not m:
                 return self._send(404, b"Not found", "text/plain")
             item_id, action = m.groups()
@@ -705,6 +705,9 @@ def make_handler(pipeline, token: str | None = None):
                 elif action == "rerender":
                     pipeline.rerender(item, [int(form.get("shot", "0"))], form.get("note", ""))
                     msg = f"Shot {int(form.get('shot', '0')) + 1} will be rendered again."
+                elif action == "rewrite":
+                    pipeline.rewrite(item, form.get("note", ""))
+                    msg = "Sent back to the writers: the new script is ready after the next run, then waits for you."
                 else:
                     item = pipeline.publish(item, force=True)
                     ok = sorted(item.published_platforms())

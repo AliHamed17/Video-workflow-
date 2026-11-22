@@ -17,7 +17,7 @@ from typing import Any
 from ..models import ContentItem, Stage
 from .db import DB
 
-COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas", "plan", "viral",
+COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "rewrite", "publish", "ideas", "plan", "viral",
                    "autopilot", "trends", "money", "growth", "community",
                    "sponsor"}
 

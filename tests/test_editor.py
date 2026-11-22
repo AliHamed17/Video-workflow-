@@ -115,3 +115,16 @@ def test_a_rendered_morph_is_a_straight_cut(config, tmp_path):
     item.clips[0].morph = True
     editor.assemble(item, tmp_path / "b")
     assert editor.transitions == ""                               # the clip already flows into shot 2
+
+
+def test_punch_phrases_stay_on_one_caption_and_only_where_they_are_said():
+    from video_workflow.video.editor import punch_positions, word_chunks
+
+    vo = "Beam a signal to Voyager 1. Moon's distance? 1.3 seconds. Keep watching."
+    chunks = word_chunks(vo, 3, ["1.3 seconds"])
+    assert " ".join(chunks) == vo and "1.3 seconds." in next(c for c in chunks if "1.3" in c)   # kept together
+    assert word_chunks(vo, 3) != chunks                                   # without it, it would have split
+    words = ["Jupiter?", "Under", "an", "hour.", "An", "hour", "is", "short."]
+    marked = punch_positions(words, ["Under an hour"])
+    assert [words[i] for i in sorted(marked)] == ["Under", "an", "hour."]   # not the second "An hour"
+    assert word_chunks("one two three four", 3) == ["one two three four"]  # no lonely last word, as before

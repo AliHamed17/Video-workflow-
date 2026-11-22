@@ -333,6 +333,9 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                 worst = [i for i in check.issues if i.severity in ("block", "fix")][:3]
                 item.attention = (f"Compliance {check.verdict}: " + "; ".join(f"[{i.category}] {i.issue}" for i in worst)
                                   )[:600]
+        if item.hold_review:          # a rewrite someone asked for: they decide, not the autopilot
+            item.hold_review = False
+            item.attention = item.attention or "Rewritten on request — read the new script, then approve or reject."
         item.move(Stage.REVIEWED, f"score {item.review.score:.1f}")
         self.store.save(item)
 
@@ -384,6 +387,25 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         item.attention = None
         item.move(Stage.APPROVED, note)
         self.tracer.event("gate.final", "ok", item.id, note)
+        return self.store.save(item)
+
+    def rewrite(self, item: ContentItem, note: str = "") -> ContentItem:
+        """Send a script back to the writers from scratch, keeping the idea (only before anything is rendered).
+
+        The next run writes it again — hooks, script, fact-check, critic, compliance, direction, packaging —
+        and it then waits for a human, even with the autopilot on. ``note`` is passed to the writers.
+        """
+        self._expect(item, Stage.REVIEWED, Stage.APPROVED, Stage.FAILED)
+        if item.clips or item.final_video:
+            raise ValueError("Shots are already rendered: re-render shots instead, or reject and start over")
+        if note.strip():
+            item.idea.angle = f"{item.idea.angle.strip()} (Editor's note for this rewrite: {note.strip()[:500]})"
+        item.script = item.review = item.fact_check = item.compliance = item.packaging = item.render_plan = None
+        item.hook_options, item.revisions = [], 0
+        item.attention = item.error = item.failed_stage = None
+        item.hold_review = True
+        item.move(Stage.IDEA, "rewrite requested" + (f": {note.strip()[:120]}" if note.strip() else ""))
+        self.tracer.event("gate.rewrite", "ok", item.id, note.strip()[:200] or "rewrite requested")
         return self.store.save(item)
 
     def reject(self, item: ContentItem, note: str = "rejected by human") -> ContentItem:

@@ -247,6 +247,8 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str] | None:
         elif action == "rerender":
             args = cmd.get("args") or {}
             pipeline.rerender(item, [int(s) for s in args.get("shots", [])], args.get("note", ""))
+        elif action == "rewrite":
+            pipeline.rewrite(item, (cmd.get("args") or {}).get("note", ""))
         elif action == "publish":
             item = pipeline.publish(item, force=True)
             return True, "published to " + (", ".join(sorted(item.published_platforms())) or "nothing yet")

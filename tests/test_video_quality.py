@@ -139,3 +139,43 @@ def test_live_checks_skip_a_missing_key_and_know_every_trend_source(config):
     config.trends.sources = [TrendSourceConfig(type="wikipedia")]
     checks = check_trends(config, httpx.Client(transport=httpx.MockTransport(wiki)), live=True)
     assert [(c.name, c.ok, c.detail) for c in checks] == [("trends wikipedia", True, "1 signals")]
+
+
+def test_rewrite_sends_a_script_back_and_holds_it_for_a_human(config, tmp_path):
+    from video_workflow.cloud.app import make_cloud_handler
+    from video_workflow.cloud.sync import CloudClient, CloudSync
+
+    config.autopilot.enabled = True                                    # even with the autopilot on
+    pipe = _pipe(config, tmp_path / "worker")
+    item = pipe.develop(pipe.store.save(ContentItem(channel="c", idea=make_idea())))
+    item.stage, item.attention = Stage.REVIEWED, "critic still wanted changes"
+    pipe.store.save(item)
+    item = pipe.rewrite(item, "open on the lure glowing in the dark")
+    assert item.stage == Stage.IDEA and item.script is None and item.hold_review and item.attention is None
+    assert "lure glowing" in item.idea.angle
+    item = pipe.develop(item)
+    assert item.stage == Stage.REVIEWED and item.script and item.attention.startswith("Rewritten on request")
+    assert not item.hold_review                                        # one-off
+    item.clips = [Clip(shot_index=0, source="x", phase="draft")]
+    with pytest.raises(ValueError, match="already rendered"):
+        pipe.rewrite(item)
+
+    # From the cloud dashboard: queued, applied by the worker at its next sync.
+    item.clips = []
+    pipe.store.save(item)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_cloud_handler(
+        db_url=str(tmp_path / "cloud.sqlite3"), token="pw", secret="s"))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        sync = CloudSync(pipe, CloudClient(base, "s"))
+        sync.sync()
+        with httpx.Client(base_url=base, timeout=20, cookies={"vw_token": "pw"}, follow_redirects=True) as web:
+            assert "✍ Rewrite script" in web.get(f"/item/{item.id}").text
+            assert "Sent to your worker: rewrite" in web.post(f"/item/{item.id}/rewrite", data={"note": "shorter"}).text
+        assert sync.poll() == 1
+        again = pipe.store.get(item.id)
+        assert again.stage == Stage.IDEA and "shorter" in again.idea.angle
+    finally:
+        server.shutdown()
+        server.server_close()
