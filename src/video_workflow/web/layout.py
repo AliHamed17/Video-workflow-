@@ -17,6 +17,7 @@ CSS = """
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;font:14.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+mark{background:#d9f99d;color:#14161b;border-radius:3px;padding:0 2px}
 header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
 .top{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:10px 20px}
 .brand{font-weight:700;font-size:16px;color:var(--ink)}

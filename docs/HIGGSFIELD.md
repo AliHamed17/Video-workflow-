@@ -81,11 +81,18 @@ audio?") to browse the catalog. Some options at the time of writing:
 
 | Model id | Good for |
 |---|---|
-| `seedance_2_5` | General text-to-video, native audio (default) |
-| `kling3_0` | Multi-shot, audio sync, motion transfer |
-| `cinematic_studio_3_0` / `cinematic_studio_video_4_0` | Premium cinematic look, genre control |
+| `seedance_2_5` | General video, native audio, start + end frames (morph shots), drafts you finalize later (default) |
+| `kling4_0` | Ordered keyframes, HDR, up to 30 s, 4K |
+| `kling3_0` | Multi-shot, audio sync, motion transfer, start + end frames |
+| `cinematic_studio_video_v2` | Refined cinematic camera and colour, genre and speed-ramp control |
+| `grok_video_v15` | Physics and camera motion from a start image or references |
 | `minimax_h3` | Keyframes, mixed image/video references |
-| `kling_4_0_flash`, `seedance_2_5_flash` | Fast, cheaper drafts |
+
+(Catalog checked Nov 2026 with `models_explore`.) You don't have to tune `params` by hand when you
+switch: with `check_model: true` the renderer reads the model's catalog entry before spending and
+drops or clamps whatever that model doesn't take. Put how the model reads prompts in
+`higgsfield.prompt_guide` so the director writes for it. See [VIDEO_QUALITY.md](VIDEO_QUALITY.md) for
+morph shots, failed-shot retries and the Virality Predictor.
 
 Cost reference: a 5-second 1080p `seedance_2_5` shot with audio was quoted at **80 credits**,
 so a 30-second video (6 shots) is about 480 credits. Check the current price with a cost
@@ -93,6 +100,7 @@ preflight, which is free.
 
 ## Beyond plain shots (roadmap)
 
-The same MCP server also provides `generate_audio` (voiceover / music), `virality_predictor`,
+In use: `generate_audio` (narration and music), `models_explore` (model check) and
+`virality_predictor` (optional read of the final cut). The same MCP server also provides
 `upscale_video`, `reframe`, AI influencer characters for a consistent on-screen host, and
 `tiktok_prepare_publish`. See [ROADMAP.md](ROADMAP.md).

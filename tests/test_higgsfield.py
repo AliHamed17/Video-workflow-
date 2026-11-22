@@ -16,17 +16,30 @@ from video_workflow.video.higgsfield_mcp import (
 
 from .conftest import make_idea, make_plan
 
+# The shape models_explore returned for seedance_2_5 (Nov 2026), trimmed.
+SEEDANCE = {"items": [{"id": "seedance_2_5", "output_type": "video", "parameters": [
+    {"name": "mode", "options": ["t2v", "omni_reference", "video_edit", "video_extension"]},
+    {"name": "duration", "min": 4, "max": 30}, {"name": "resolution", "options": ["480p", "720p", "1080p", "4k"]},
+    {"name": "generate_audio"}, {"name": "draft"}, {"name": "draft_job_id"}],
+    "medias": [{"name": "medias", "roles": ["start_image", "end_image", "image_references"]}],
+    "aspect_ratios": ["auto", "16:9", "9:16"]}]}
+
 
 class FakeCaller:
     """Mimics the Higgsfield MCP responses observed in practice (cost, balance, batches, jobs_wait)."""
 
-    def __init__(self, video_credits=80, image_credits=2, balance=1000, fail_job=None):
+    def __init__(self, video_credits=80, image_credits=2, balance=1000, fail_job=None, catalog=SEEDANCE,
+                 fail_times=99):
         self.video_credits, self.image_credits, self.balance = video_credits, image_credits, balance
-        self.fail_job = fail_job
-        self.calls, self.polls = [], 0
+        self.fail_job, self.catalog, self.fail_times = fail_job, catalog, fail_times
+        self.calls, self.polls, self.failures = [], 0, 0
 
     async def call(self, name, arguments):
         self.calls.append((name, arguments))
+        if name == "models_explore":
+            if self.catalog is None:
+                raise RuntimeError("unknown tool")
+            return self.catalog
         if name == "generate_video":
             assert arguments["params"]["get_cost"] is True
             return {"cost": {"credits": self.video_credits, "credits_exact": self.video_credits}}
@@ -39,15 +52,21 @@ class FakeCaller:
             return {"job": {"job_id": "music-track-1", "status": "queued"}}
         if name in ("generate_video_batch", "generate_image_batch", "generate_audio_batch"):
             kind = {"generate_image_batch": "img", "generate_audio_batch": "aud"}.get(name, "vid")
-            return {"jobs": [{"index": r["index"], "job_id": f"{kind}-{r['index']}", "status": "queued"}
-                             for r in arguments["requests"]]}
+            jobs = []
+            for r in arguments["requests"]:
+                again = sum(1 for n, a in self.calls[:-1] if n == name
+                            for q in a["requests"] if q["index"] == r["index"])   # a resubmission: new job id
+                jobs.append({"index": r["index"], "job_id": f"{kind}-{r['index']}" + (f"-r{again}" if again else ""),
+                             "status": "queued"})
+            return {"jobs": jobs}
         if name == "jobs_wait":
             self.polls += 1
             jobs = []
             for j in arguments["jobs"]:
                 if self.polls == 1:
                     jobs.append({**j, "status": "in_progress"})
-                elif j["index"] == self.fail_job and j["job_id"].startswith("vid"):
+                elif j["index"] == self.fail_job and j["job_id"].startswith("vid") and self.failures < self.fail_times:
+                    self.failures += 1
                     jobs.append({**j, "status": "failed", "error": "nsfw"})
                 else:
                     ext = "jpg" if j["job_id"].startswith("img") else \
@@ -78,7 +97,7 @@ def test_keyframes_then_draft_shots(tmp_path):
     item = ContentItem(channel="c", idea=make_idea(), render_phase="draft")
     result = gen.render(item, make_plan(2, 5), tmp_path)
     names = [n for n, _ in caller.calls]
-    assert names[:4] == ["generate_video", "generate_image", "balance", "generate_image_batch"]
+    assert names[:5] == ["models_explore", "generate_video", "generate_image", "balance", "generate_image_batch"]
     assert "generate_video_batch" in names and seen == [(1000.0, "pro")]
     video = next(a for n, a in caller.calls if n == "generate_video_batch")["requests"][0]["params"]
     assert video["medias"] == [{"role": "start_image", "value": "img-0"}]
@@ -113,10 +132,71 @@ def test_budget_and_balance_guards_block_before_submitting(tmp_path):
     assert not [n for n, _ in caller.calls if n.endswith("_batch")]
 
 
-def test_failed_job_raises(tmp_path):
+def test_a_refused_shot_is_retried_toned_down_and_the_good_shots_are_kept(tmp_path):
     item = ContentItem(channel="c", idea=make_idea(), render_phase="final")
-    with pytest.raises(HiggsfieldError, match="nsfw"):
-        _gen(FakeCaller(fail_job=1), keyframes=False)[0].render(item, make_plan(2, 5), tmp_path)
+    caller = FakeCaller(fail_job=1, fail_times=1)
+    result = _gen(caller, keyframes=False)[0].render(item, make_plan(2, 5), tmp_path)
+    batches = [a for n, a in caller.calls if n == "generate_video_batch"]
+    assert len(batches) == 2 and [r["index"] for r in batches[1]["requests"]] == [1]       # only the failed shot
+    assert batches[1]["requests"][0]["params"]["prompt"].endswith("nothing graphic.")
+    assert sorted(c.shot_index for c in result.clips) == [0, 1] and not result.failed
+    assert "retried shot(s) 2" in result.note and result.credits == 80 * 3
+
+    caller = FakeCaller(fail_job=1)                                    # refused again: report it, keep shot 1
+    result = _gen(caller, keyframes=False)[0].render(item, make_plan(2, 5), tmp_path / "b")
+    assert [c.shot_index for c in result.clips] == [0] and result.failed == {1: "nsfw"}
+    caller = FakeCaller(fail_job=1)
+    result = _gen(caller, keyframes=False, retry_failed_shots=False)[0].render(item, make_plan(2, 5), tmp_path / "c")
+    assert len([n for n, _ in caller.calls if n == "generate_video_batch"]) == 1 and result.failed
+
+
+def test_a_morph_shot_ends_on_the_next_keyframe_and_the_final_keeps_it(tmp_path):
+    plan = make_plan(3, 5)
+    plan.shots[0].transition = "morph"
+    caller = FakeCaller()
+    item = ContentItem(channel="c", idea=make_idea(), render_phase="draft", render_plan=plan)
+    result = _gen(caller)[0].render(item, plan, tmp_path)
+    reqs = next(a for n, a in caller.calls if n == "generate_video_batch")["requests"]
+    assert reqs[0]["params"]["medias"] == [{"role": "start_image", "value": "img-0"},
+                                           {"role": "end_image", "value": "img-1"}]
+    assert len(reqs[1]["params"]["medias"]) == 1 and "morphing shot(s) 1" in result.note
+    assert [c.morph for c in result.clips] == [True, False, False]
+    final = ContentItem(channel="c", idea=make_idea(), render_phase="final", render_plan=plan,
+                        clips=result.clips)
+    out = _gen(FakeCaller())[0].render(final, plan, tmp_path / "final")
+    assert [c.morph for c in out.clips] == [True, False, False]          # finalized from the morphing draft
+    off = _gen(FakeCaller(), morph=False)[0].render(item, plan, tmp_path / "off")
+    assert not any(c.morph for c in off.clips)
+
+
+def test_requests_adapt_to_the_models_catalog_entry(tmp_path):
+    from video_workflow.video.base import ModelInfo
+
+    kling = {"id": "kling3_0", "parameters": [{"name": "duration", "min": 3, "max": 15},
+                                             {"name": "mode", "options": ["std", "pro", "4k"]},
+                                             {"name": "sound", "options": ["on", "off"]}],
+             "medias": [{"roles": ["start_image", "end_image"]}], "aspect_ratios": ["16:9", "9:16", "1:1"]}
+    caller = FakeCaller(catalog={"model": kling})
+    item = ContentItem(channel="c", idea=make_idea(), render_phase="final")
+    gen, _ = _gen(caller, model="kling3_0", keyframes=False)
+    result = gen.render(item, make_plan(1, 20), tmp_path)
+    params = next(a for n, a in caller.calls if n == "generate_video_batch")["requests"][0]["params"]
+    assert "resolution" not in params and params["duration"] == 15           # dropped and clamped
+    assert "dropped resolution" in result.note and "duration 20s → 15s" in result.note
+    info = ModelInfo.from_catalog("x", {"id": "x", "parameters": [{"name": "duration", "options": [5, 10]}],
+                                        "medias": [{"roles": ["start_image"]}], "aspect_ratios": ["16:9"]})
+    assert info.adapt({"duration": 7})[0]["duration"] == 5
+    out, notes = info.adapt({"medias": [{"role": "end_image", "value": "k"}]})
+    assert "medias" not in out and notes == ["x takes no end_image"]
+    with pytest.raises(ValueError, match="does not render 9:16"):
+        info.adapt({"aspect_ratio": "9:16"})
+    caller = FakeCaller(catalog={"model": {**kling, "aspect_ratios": ["16:9"]}})
+    with pytest.raises(HiggsfieldError, match="9:16"):
+        _gen(caller, model="kling3_0", keyframes=False)[0].render(item, make_plan(1, 5), tmp_path / "v")
+    assert not [n for n, _ in caller.calls if n.endswith("_batch")]            # nothing spent
+    caller = FakeCaller(catalog=None)                                          # no catalog: render as written
+    _gen(caller, keyframes=False)[0].render(item, make_plan(1, 5), tmp_path / "w")
+    assert next(a for n, a in caller.calls if n == "generate_video_batch")["requests"][0]["params"]["resolution"]
 
 
 def test_parsers_match_real_shapes():

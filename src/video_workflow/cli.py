@@ -231,10 +231,22 @@ def clips_add(item_id: str, shot_index: int, source: str,
               job: Annotated[str | None, typer.Option(help="Higgsfield video job id (needed to finalize drafts)")] = None,
               keyframe_job: Annotated[str | None, typer.Option(help="Higgsfield keyframe job id")] = None,
               keyframe_url: Annotated[str | None, typer.Option(help="Keyframe image URL")] = None,
+              morph: Annotated[bool, typer.Option("--morph", help="Rendered to end on the next shot's keyframe")] = False,
               config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Attach a rendered clip (https URL or local file) to a shot."""
     pipe = _setup(config, data, publishers=False)
-    _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url)])
+    _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url, morph)])
+
+
+@app.command("virality")
+def virality(item_id: str, score: Annotated[float, typer.Argument(help="Virality Predictor score, 0-100")],
+             notes: Annotated[str, typer.Option(help="Its main findings (hook, retention risks)")] = "",
+             job: Annotated[str | None, typer.Option(help="Virality Predictor job id (to reopen the dashboard)")] = None,
+             config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Record Higgsfield's Virality Predictor read of a video's final cut."""
+    pipe = _setup(config, data, publishers=False)
+    item = pipe.record_virality(pipe.store.get(item_id), score, notes, job)
+    console.print(f"{item.id}: virality {item.virality['score']:.0f}/100")
 
 
 @audio_app.command("add")
@@ -665,7 +677,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 26:
+    if passed != len(results) or len(results) < 27:
         raise typer.Exit(1)
 
 

@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 3.0: Better videos ✅
+
+- [x] Story beats (hook → escalation → twist → payoff → loop) and punch words in every script; the critic checks craft
+- [x] Direction per shot: framing, subject motion, camera + lens, transition; one locked subject look; model prompt guide
+- [x] Edit: timing-preserving transitions, kinetic captions, animated headline, optional progress bar
+- [x] Higgsfield: morph shots (end frame = next keyframe), model catalog check, failed shots retried and the rest kept, Virality Predictor read
+
 ## Phase 2.9: Facebook Reels and sponsorships ✅
 
 - [x] Facebook Reels as an opt-in fourth platform (draft by default): publish, plays/likes/comments, replies, Page followers

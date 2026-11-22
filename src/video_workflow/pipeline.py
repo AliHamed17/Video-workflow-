@@ -462,7 +462,23 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                                item_id=item.id))
             return item
         self._merge_clips(item, result.clips)
+        if result.failed:
+            # Keep what rendered; the retry renders only the missing shots.
+            self.store.save(item)
+            reasons = "; ".join(f"shot {i + 1}: {why}" for i, why in sorted(result.failed.items()))
+            raise RuntimeError(f"Higgsfield could not render {reasons}. The other shots are kept — adjust the prompt "
+                               f"(vw rerender {item.id} <shot> --note '...') or just retry: vw retry {item.id}")
         return self._maybe_complete_render(item)
+
+    def record_virality(self, item: ContentItem, score: float, notes: str = "", job: str | None = None) -> ContentItem:
+        """Keep Higgsfield's Virality Predictor read of the final cut (from the higgsfield-render skill)."""
+        if not 0 <= score <= 100:
+            raise ValueError("score is 0-100 (a 0-10 score: multiply by 10)")
+        item.virality = {"score": round(score, 1), "notes": notes.strip()[:1000], "job": job,
+                         "at": self.clock().isoformat()}
+        self.tracer.event("qa.virality", "ok" if score >= 50 else "warn", item.id,
+                          f"virality {score:.0f}/100" + (f": {notes.strip()[:160]}" if notes.strip() else ""))
+        return self.store.save(item)
 
     def _merge_clips(self, item: ContentItem, clips: list[Clip]) -> None:
         new = {(c.shot_index, c.phase) for c in clips}
@@ -470,8 +486,13 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         item.clips.sort(key=lambda c: (c.phase, c.shot_index))
 
     def add_clip(self, item: ContentItem, shot_index: int, source: str, job_id: str | None = None,
-                 keyframe_job: str | None = None, keyframe_url: str | None = None) -> ContentItem:
-        """Register a rendered clip (URL or local file) — used by the handoff flow."""
+                 keyframe_job: str | None = None, keyframe_url: str | None = None,
+                 morph: bool = False) -> ContentItem:
+        """Register a rendered clip (URL or local file) — used by the handoff flow.
+
+        ``morph``: the clip was rendered to end on the next shot's keyframe. A final finalized from a
+        morphing draft is one too.
+        """
         self._expect(item, Stage.APPROVED, Stage.AWAITING_RENDER, Stage.RENDERED)
         phase = item.render_phase
         clip_dir = self.store.item_dir(item.id) / "clips"
@@ -485,8 +506,11 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         keyframe = None
         if keyframe_url:
             keyframe = str(download(keyframe_url, clip_dir / f"keyframe_{shot_index:02d}.jpg"))
+        morph = morph or (phase == "final" and any(c.morph for c in item.clips
+                                                   if c.phase == "draft" and c.shot_index == shot_index))
         clip = Clip(shot_index=shot_index, source=job_id or source, path=str(dest), phase=phase,
-                    url=source if source.startswith("http") else None, keyframe=keyframe, keyframe_job=keyframe_job)
+                    url=source if source.startswith("http") else None, keyframe=keyframe, keyframe_job=keyframe_job,
+                    morph=morph)
         self._merge_clips(item, [clip])
         self.tracer.event("render.clip", "ok", item.id, f"shot {shot_index + 1} ({phase}) registered",
                           job=job_id or "")
@@ -572,10 +596,11 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             music = self.pick_music(item)
             item.music_track = str(music) if music else None
             with self.tracer.span("edit.assemble", item.id, phase=phase) as span:
-                final, thumb = self._editor_for(item).assemble(item, self.store.item_dir(item.id), voiceover,
-                                                               music, phase=phase)
+                editor = self._editor_for(item)
+                final, thumb = editor.assemble(item, self.store.item_dir(item.id), voiceover, music, phase=phase)
                 item.final_video, item.thumbnail = str(final), str(thumb)
-                span.detail = f"{probe(final)['duration']:.1f}s {phase} cut" + (f", music {music.name}" if music else "")
+                span.detail = (f"{probe(final)['duration']:.1f}s {phase} cut" + (f", music {music.name}" if music else "")
+                               + (f", {editor.transitions}" if getattr(editor, "transitions", "") else ""))
             with self.tracer.span("qa.technical", item.id) as span:
                 item.quality = quality.check_video(item, self.config, final, self._final_size(),
                                                    preview=phase == "draft")

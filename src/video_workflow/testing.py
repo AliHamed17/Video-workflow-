@@ -85,6 +85,14 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
          "Swimming stops a heart"),
     ]
     picked = [lines[i % len(lines)] for i in range(shots)]
+    craft = [("hook", ["three"], "extreme_close_up", "the heart squeezes and relaxes twice", "slow push-in, 100mm macro",
+              "flash"),
+             ("escalation", ["gills"], "wide", "the octopus jets forward, arms trailing", "tracking shot, 24mm", "whip"),
+             ("twist", ["blue"], "close_up", "blue blood droplets drift apart", "locked off, rack focus", "zoom"),
+             ("loop", ["stops"], "medium", "the octopus settles and its mantle goes still", "slow pull-back, 50mm",
+              "cut")]
+    beat = [craft[i % len(craft)] for i in range(shots)]
+    beat[-1] = (("loop" if shots > 1 else "hook"),) + beat[-1][1:5] + ("cut",)
     idea = Idea(title="An octopus has three hearts — and one stops when it swims",
                 hook="This animal has three hearts.", angle="biology that sounds fake but isn't",
                 pillar="animal superpowers", why_it_will_perform="number + surprise + visual payoff",
@@ -169,7 +177,8 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
             our_version=idea.model_copy(update={"title": "Slicing open an octopus heart (model) — there are 3",
                                                 "predicted_score": 8.8}))]),
         Script: Script(title=idea.title, hook=idea.hook,
-                       shots=[Shot(index=i, duration_s=duration, visual=v, voiceover=vo, on_screen_text=t)
+                       shots=[Shot(index=i, duration_s=duration, beat=beat[i][0], visual=v, voiceover=vo,
+                                   on_screen_text=t, emphasis=beat[i][1])
                               for i, (v, vo, t) in enumerate(picked)],
                        cta="Which animal fact should we do next?", music_mood="curious awe",
                        loop_strategy="ends on 'three hearts' which restarts the hook"),
@@ -178,8 +187,11 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
         ComplianceCheck: ComplianceCheck(verdict="pass", issues=[ComplianceIssue(
             category="disclosure", severity="note", issue="photoreal octopus footage could be mistaken for real",
             fix="")]),
-        RenderPlan: RenderPlan(style_anchor="photoreal underwater macro, deep teal light, shallow depth of field",
-                               shots=[ShotPrompt(index=i, prompt=v, duration_s=duration, camera="slow orbit")
+        RenderPlan: RenderPlan(subject="a common octopus, rust-red skin with pale spots, about arm-length",
+                               style_anchor="photoreal underwater macro, deep teal and copper palette, soft "
+                                            "top light, shallow depth of field",
+                               shots=[ShotPrompt(index=i, prompt=v, duration_s=duration, shot_size=beat[i][2],
+                                                 motion=beat[i][3], camera=beat[i][4], transition=beat[i][5])
                                       for i, (v, _, _) in enumerate(picked)]),
         Packaging: Packaging(
             youtube=YouTubeMeta(title="An octopus has THREE hearts 🐙 #Shorts",
@@ -438,3 +450,58 @@ class FakePlatforms:
                                             "</title></item><item><title>octopus intelligence</title></item>"
                                             "</channel></rss>")
         return httpx.Response(404, json={"error": f"fake platform has no route for {host}{path}"})
+
+
+class SimulatedHiggsfield:
+    """The Higgsfield MCP tools as the headless renderer calls them (catalog, prices, balance, batches,
+    jobs_wait), with shots that can be refused once — to exercise the renderer without spending credits."""
+
+    CATALOG = {"items": [{"id": "seedance_2_5", "parameters": [
+        {"name": "mode", "options": ["t2v", "omni_reference", "video_edit", "video_extension"]},
+        {"name": "duration", "min": 4, "max": 30}, {"name": "resolution", "options": ["480p", "720p", "1080p", "4k"]},
+        {"name": "generate_audio"}, {"name": "draft"}, {"name": "draft_job_id"}],
+        "medias": [{"name": "medias", "roles": ["start_image", "end_image", "image_references"]}],
+        "aspect_ratios": ["auto", "16:9", "9:16"]}]}
+
+    def __init__(self, refuse_once: set[int] | None = None, balance: float = 1000):
+        self.refuse_once, self.balance = set(refuse_once or ()), balance
+        self.calls: list[tuple[str, dict]] = []
+        self._submitted: dict[str, int] = defaultdict(int)
+
+    def factory(self):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def open_():
+            yield self
+        return open_()
+
+    async def call(self, name: str, arguments: dict):
+        self.calls.append((name, arguments))
+        if name == "models_explore":
+            return self.CATALOG
+        if name in ("generate_video", "generate_image"):
+            return {"cost": {"credits": 15 if name == "generate_video" else 2}}
+        if name == "balance":
+            return {"credits": self.balance, "subscription_plan_type": "pro"}
+        if name == "generate_audio":
+            return {"job": {"job_id": "music-sim-0001"}}
+        if name.endswith("_batch"):
+            kind = {"generate_image_batch": "img", "generate_audio_batch": "aud"}.get(name, "vid")
+            jobs = []
+            for r in arguments["requests"]:
+                key = f"{kind}-{r['index']}"
+                self._submitted[key] += 1
+                jobs.append({"index": r["index"], "job_id": f"{key}-try{self._submitted[key]}"})
+            return {"jobs": jobs}
+        if name == "jobs_wait":
+            out = []
+            for j in arguments["jobs"]:
+                refused = j["job_id"].startswith("vid") and j["index"] in self.refuse_once and \
+                    j["job_id"].endswith("try1")
+                ext = "jpg" if j["job_id"].startswith("img") else "mp3" if j["job_id"].startswith(("aud", "music")) \
+                    else "mp4"
+                out.append({**j, "status": "failed", "error": "nsfw"} if refused else
+                           {**j, "status": "completed", "results": [{"url": f"https://cdn.sim/{j['job_id']}.{ext}"}]})
+            return {"jobs": out}
+        raise ValueError(f"unknown tool {name}")

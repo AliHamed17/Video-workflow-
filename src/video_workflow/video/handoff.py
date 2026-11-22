@@ -15,10 +15,12 @@ from ..config import VideoConfig
 from ..models import ContentItem, RenderPlan
 from .base import (
     KEYFRAME_PLACEHOLDER,
+    NEXT_KEYFRAME_PLACEHOLDER,
     REFERENCE_PLACEHOLDER,
     RenderResult,
     audio_requests,
     keyframe_params,
+    morph_target,
     reference_shot,
     video_params,
 )
@@ -39,17 +41,29 @@ class HandoffGenerator:
         existing_ref = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job), None) \
             if ref is not None else None
         shots = []
+        full_order = item.render_plan.shots if item.render_plan else plan.shots
+        rendering = {s.index for s in plan.shots}
+        known = {c.shot_index: c.keyframe_job for c in item.clips if c.keyframe_job}
+        morph_drafts = {c.shot_index for c in item.clips if c.phase == "draft" and c.morph}
         for shot in plan.shots:
             draft_job = drafts.get(shot.index) if phase == "final" else None
             anchor = None if shot.index == ref or ref is None else (existing_ref or REFERENCE_PLACEHOLDER)
-            shots.append({
+            target = morph_target(full_order, shot) if use_keyframes and hf.morph else None
+            # The next shot's keyframe: made in this request (placeholder) or already there from before.
+            end = (NEXT_KEYFRAME_PLACEHOLDER if target in rendering else known.get(target)) if target is not None else None
+            entry = {
                 "index": shot.index,
                 "keyframe": keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor)
                 if use_keyframes else None,
                 "video": video_params(hf, self.video.aspect_ratio, plan, shot, phase,
                                       keyframe_job=KEYFRAME_PLACEHOLDER if use_keyframes else None,
-                                      draft_job=draft_job, use_unlim=hf.use_unlim),
-            })
+                                      draft_job=draft_job, use_unlim=hf.use_unlim, end_keyframe_job=end),
+            }
+            if end:
+                entry["morph_into"] = target
+            elif phase == "final" and shot.index in morph_drafts:
+                entry["morph"] = True       # finalizing a morphing draft keeps the morph
+            shots.append(entry)
         narration, music = audio_requests(item, self.video)
         unit = hf.unit_costs
         per_shot = (unit.keyframe if use_keyframes else 0) + (unit.draft if phase == "draft" else unit.final)
@@ -64,9 +78,20 @@ class HandoffGenerator:
             steps.append("generate_image_batch with every shot's `keyframe` params; jobs_wait; keep each job_id")
         if use_keyframes:
             steps.append(f"replace {KEYFRAME_PLACEHOLDER} in each shot's video.medias with that shot's keyframe job_id")
+        if any("morph_into" in s for s in shots):
+            steps.append(f"for shots with `morph_into`: replace {NEXT_KEYFRAME_PLACEHOLDER} in video.medias with the "
+                         "keyframe job_id of shot `morph_into` (the shot ends on that frame)")
+        if hf.check_model:
+            steps.append(f"models_explore get {hf.model}: if a `video` param, its value, the duration or a media role "
+                         "isn't offered by the model, drop or clamp it (and tell the user) before submitting")
         steps.append("generate_video_batch with every shot's `video` params; jobs_wait")
         steps.append("for each finished shot: vw clips add <item> <index> <video_url> --job <video_job_id>"
-                     + (" --keyframe-job <id> --keyframe-url <url>" if use_keyframes else ""))
+                     + (" --keyframe-job <id> --keyframe-url <url>" if use_keyframes else "")
+                     + (" (add --morph for shots with `morph_into` or `morph`)" if any(
+                         "morph_into" in s or s.get("morph") for s in shots) else ""))
+        if hf.retry_failed_shots:
+            steps.append("a shot that failed: register the others, then resubmit only that shot once (if refused, "
+                         "append 'Natural documentary footage, calm and family-friendly' to its prompt)")
         if narration:
             steps.append("generate_audio_batch with every `audio.narration` line's params; jobs_wait; for each: "
                          "vw audio add <item> voice <url> --shot <index> --job <job_id>")

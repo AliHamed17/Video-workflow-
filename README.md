@@ -25,7 +25,8 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Visual QA** | A vision model inspects frames of every rendered shot and re-renders weak ones automatically — works with no API key through the Claude Code CLI |
 | **Production sound + consistency** | Natural narration (ElevenLabs voices via Higgsfield, ≈0.3 credits a line) and an original music track per video (≈3 credits); the first shot's keyframe anchors every other shot so the subject looks the same throughout |
 | **Technical QA** | Every cut is checked (resolution, fps, duration, loudness, black/frozen frames, dead air, bitrate, captions, narration pace); failures block publishing |
-| **Finished edit** | 1080x1920, narration (OpenAI / ElevenLabs / free offline flite) fitted to each shot, word-by-word captions with a headline, music ducked under the voice, −14 LUFS |
+| **Finished edit** | 1080x1920, narration (OpenAI / ElevenLabs / free offline flite) fitted to each shot, kinetic captions (the spoken word lights up, punch words pop), an animated headline, the director's transitions between shots (flash, whip, zoom, dissolve, dip), music ducked under the voice, −14 LUFS |
+| **Story + direction craft** | Every shot has a beat (hook → escalation → twist → payoff → loop) and punch words; the director picks framing, subject motion, a camera move with a lens and the transition per shot, and locks the subject's look across shots; morph shots flow into the next one with no cut; renders adapt to whichever Higgsfield model you pick and keep the good shots when one fails ([docs/VIDEO_QUALITY.md](docs/VIDEO_QUALITY.md)) |
 | **Synchronized publishing** | Posting slots per timezone; YouTube + Instagram + TikTok go out in parallel; failed platforms retry alone |
 | **You stay in control** | Approve scripts and final renders from **Telegram** (buttons), the **web dashboard**, or the CLI; notifications on Telegram/Slack/Discord/webhook |
 | **Monitoring** | Every step, LLM call, render, check and upload is traced: live activity feed, workflow map with per-step health, item timelines, metrics, alerts (stuck items, failures, daemon down, low credits, budget), Prometheus/JSON endpoints, `vw logs -f` |
@@ -182,7 +183,7 @@ src/video_workflow/
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            AUTOPILOT · GROWTH · COMMUNITY · SPONSORS · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
+docs/            VIDEO_QUALITY · AUTOPILOT · GROWTH · COMMUNITY · SPONSORS · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).

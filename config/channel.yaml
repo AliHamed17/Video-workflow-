@@ -52,7 +52,16 @@ video:
     draft_preview: false         # autopilot in a Claude session: one render pass (no vision model to judge drafts)
     draft_params: {draft: true}
     unit_costs: {keyframe: 2, draft: 15, final: 80, narration: 0.3, music: 3.2}
-    consistent_subject: true     # shot 1's keyframe is the reference image for every other keyframe  # for estimates shown before you approve
+    consistent_subject: true     # shot 1's keyframe is the reference image for every other keyframe
+    morph: true                  # "morph" shots end on the next shot's keyframe: two shots flow into one
+    end_role: end_image          # the model's media role for a last frame
+    check_model: true            # read the model's catalog entry first; clamp/drop what it doesn't take
+    retry_failed_shots: true     # resubmit a failed shot once (toned down if refused), keep the rest
+    prompt_guide: >-             # how this model reads prompts (passed to the director)
+      Seedance follows the order of the prompt: framing, then the subject and what it does, then
+      the camera, then light and look. One continuous action per shot reads best; name the camera
+      move once with a lens; physical verbs (drifts, snaps, unfurls) beat adjectives. It keeps a
+      start image's composition, so describe motion away from it, not a new scene.
   captions:
     burn_in: true
     mode: auto                   # auto: word-by-word from the narration, else each shot's on_screen_text
@@ -60,6 +69,8 @@ video:
     headline: true               # keep the shot's on_screen_text at the top while words play
     font: "DejaVu Sans"
     font_size: 80                # pixels on a 1080x1920 frame
+    style: kinetic               # kinetic: the spoken word lights up, punch words pop (lime) | classic
+    accent_color: "&H0012FFA3"   # punch words (ASS &HAABBGGRR: lime)
   voice:
     # none | flite (free, offline, robotic — good for drafts) | openai | elevenlabs
     provider: higgsfield         # natural voice made with Higgsfield credits (≈0.3 per line); flite fills any gap
@@ -82,6 +93,8 @@ video:
     volume_db: -12
   clip_audio_volume: 0.35        # the clips' own sound under narration
   watermark: ""                  # your handle (e.g. "@octofacts"), small in a corner of every video
+  transitions: true              # the director's transitions: flash, whip, zoom, dissolve, dip (false: cuts)
+  progress_bar: false            # a thin bar filling along the bottom as the video plays
   loudness_lufs: -14
 
 llm:
@@ -145,6 +158,7 @@ quality:
   max_rerenders: 1      # automatic re-render rounds for weak shots (on cheap drafts when draft_preview)
   block_publish_on_fail: true
   loudness_tolerance_lu: 2.0
+  virality_check: false   # Claude Code render skill: Higgsfield Virality Predictor on the final cut (costs credits)
 
 review:
   min_score: 7.0        # critic score (0-10) needed to pass

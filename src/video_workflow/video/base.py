@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from ..config import HiggsfieldConfig, MusicConfig, VideoConfig, VoiceConfig
-from ..models import Clip, ContentItem, RenderPlan, ShotPrompt
+from ..models import SHOT_SIZES, Clip, ContentItem, RenderPlan, ShotPrompt
 
 
 class AudioAsset(BaseModel):
@@ -28,6 +28,84 @@ class RenderResult(BaseModel):
     pending: bool = False   # True when rendering was handed off and clips arrive later
     note: str = ""
     credits: float = 0.0    # credits spent (estimate)
+    failed: dict[int, str] = Field(default_factory=dict)   # shots that could not be rendered → why
+
+
+# ---- adapting requests to the model's catalog entry (models_explore) ---------------------
+
+ALWAYS_ALLOWED = {"model", "prompt", "aspect_ratio", "duration", "medias", "use_unlim", "draft_job_id", "count",
+                  "folder_id", "get_cost"}
+
+
+class ModelInfo(BaseModel):
+    """What a Higgsfield model accepts, from its catalog entry."""
+
+    id: str
+    params: dict[str, dict] = Field(default_factory=dict)   # name → {options, min, max}
+    roles: set[str] = Field(default_factory=set)
+    aspect_ratios: list[str] = Field(default_factory=list)
+    duration: tuple[float | None, float | None, list] = (None, None, [])   # min, max, allowed values
+
+    @classmethod
+    def from_catalog(cls, model_id: str, payload) -> ModelInfo | None:
+        entries = payload if isinstance(payload, list) else [payload]
+        found = None
+        stack = list(entries)
+        while stack:
+            d = stack.pop(0)
+            if isinstance(d, dict):
+                if isinstance(d.get("parameters"), list) and d.get("id", model_id) == model_id:
+                    found = d
+                    break
+                stack.extend(v for v in d.values() if isinstance(v, (dict, list)))
+            elif isinstance(d, list):
+                stack.extend(d)
+        if found is None:
+            return None
+        params = {str(p.get("name")): {"options": p.get("options"), "min": p.get("min"), "max": p.get("max")}
+                  for p in found["parameters"] if isinstance(p, dict) and p.get("name")}
+        roles = {str(r) for m in found.get("medias") or [] if isinstance(m, dict) for r in m.get("roles") or []}
+        dur = params.get("duration", {})
+        rng = found.get("duration_range") or {}
+        duration = (dur.get("min", rng.get("min")), dur.get("max", rng.get("max")), list(dur.get("options") or []))
+        return cls(id=model_id, params=params, roles=roles, aspect_ratios=list(found.get("aspect_ratios") or []),
+                   duration=duration)
+
+    def adapt(self, params: dict) -> tuple[dict, list[str]]:
+        """The request with what this model can't take removed or clamped, and what changed."""
+        out, notes = dict(params), []
+        if self.aspect_ratios and out.get("aspect_ratio") and out["aspect_ratio"] not in self.aspect_ratios:
+            raise ValueError(f"{self.id} does not render {out['aspect_ratio']} (it offers {', '.join(self.aspect_ratios)})")
+        for key in list(out):
+            if key in ALWAYS_ALLOWED:
+                continue
+            spec = self.params.get(key)
+            if self.params and spec is None:
+                notes.append(f"dropped {key} (not a {self.id} parameter)")
+                out.pop(key)
+            elif spec and spec.get("options") and out[key] not in spec["options"]:
+                notes.append(f"dropped {key}={out[key]} ({self.id} offers {spec['options']})")
+                out.pop(key)
+        low, high, allowed = self.duration
+        if isinstance(out.get("duration"), (int, float)):
+            want = out["duration"]
+            if allowed:
+                out["duration"] = min(allowed, key=lambda v: abs(v - want))
+            else:
+                out["duration"] = max(low if low is not None else want, min(high if high is not None else want, want))
+            if isinstance(want, int):
+                out["duration"] = int(round(out["duration"]))      # the API takes whole seconds
+            if out["duration"] != want:
+                notes.append(f"duration {want}s → {out['duration']}s")
+        if self.roles and out.get("medias"):
+            kept = [m for m in out["medias"] if m.get("role") in self.roles]
+            for m in out["medias"]:
+                if m not in kept:
+                    notes.append(f"{self.id} takes no {m.get('role')}")
+            out["medias"] = kept
+            if not kept:
+                out.pop("medias")
+        return out, notes
 
 
 class VideoGenerator(Protocol):
@@ -36,13 +114,39 @@ class VideoGenerator(Protocol):
     def render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult: ...
 
 
+def _sentence(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?" else text + "."
+
+
 def full_prompt(plan: RenderPlan, index: int) -> str:
+    """The video prompt in the order video models weigh it: framing, scene, motion, camera, subject, look."""
     shot = next(s for s in plan.shots if s.index == index)
-    return f"{shot.prompt.strip()} Camera: {shot.camera.strip()}. {plan.style_anchor.strip()}"
+    parts = [_sentence(SHOT_SIZES.get(shot.shot_size, "")), _sentence(shot.prompt)]
+    if shot.motion.strip():
+        parts.append(_sentence(f"Motion: {shot.motion.strip()}"))
+    parts.append(_sentence(f"Camera: {shot.camera.strip()}"))
+    if plan.subject.strip():
+        parts.append(_sentence(f"Subject: {plan.subject.strip()}"))
+    parts.append(_sentence(plan.style_anchor))
+    return " ".join(p for p in parts if p)
 
 
 KEYFRAME_PLACEHOLDER = "<KEYFRAME_JOB_ID>"
 REFERENCE_PLACEHOLDER = "<REFERENCE_KEYFRAME_JOB_ID>"
+NEXT_KEYFRAME_PLACEHOLDER = "<NEXT_KEYFRAME_JOB_ID>"
+
+
+def morph_target(plan_shots: list[ShotPrompt], shot: ShotPrompt) -> int | None:
+    """The shot this one morphs into (its last frame = that shot's keyframe), or None."""
+    if shot.transition != "morph":
+        return None
+    order = [s.index for s in plan_shots]
+    at = order.index(shot.index) if shot.index in order else -1
+    return order[at + 1] if 0 <= at < len(order) - 1 else None
 
 
 def keyframe_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: ShotPrompt,
@@ -52,8 +156,10 @@ def keyframe_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: S
     With ``reference_job`` (the first shot's keyframe) the still is drawn from that reference, so
     the subject, character design, palette and world match across every shot.
     """
+    size = SHOT_SIZES.get(shot.shot_size, "")
+    subject = f" Subject: {_sentence(plan.subject)}" if plan.subject.strip() else ""
     prompt = (f"Opening frame of a vertical video shot, photographic still, no text or watermark. "
-              f"{shot.prompt.strip()} {plan.style_anchor.strip()}")
+              f"{_sentence(size)} {_sentence(shot.prompt)}{subject} {_sentence(plan.style_anchor)}").replace("  ", " ")
     params = {"model": hf.keyframe_model, "prompt": prompt, "aspect_ratio": aspect, **hf.keyframe_params}
     if reference_job:
         params["prompt"] += (" Keep exactly the same subject, character design, colours, lighting and world as "
@@ -107,12 +213,14 @@ def audio_requests(item: ContentItem, video: VideoConfig) -> tuple[list[dict], d
 
 def video_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: ShotPrompt, phase: str,
                  keyframe_job: str | None = None, draft_job: str | None = None,
-                 use_unlim: bool | None = None) -> dict:
+                 use_unlim: bool | None = None, end_keyframe_job: str | None = None) -> dict:
     """generate_video params for one shot in a given phase.
 
     * draft phase: cheap 480p draft (``draft_params``), animated from the keyframe if there is one.
     * final phase after a draft: finalize the approved draft at full resolution (``draft_job_id``).
     * final phase without drafts: full-resolution render (from the keyframe if there is one).
+    * ``end_keyframe_job`` (a "morph" shot): the shot ends on the next shot's keyframe, so the two
+      shots flow into each other with no cut.
     """
     params = {"model": hf.model, "prompt": full_prompt(plan, shot.index), "aspect_ratio": aspect,
               "duration": shot.duration_s, **hf.params}
@@ -123,6 +231,9 @@ def video_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: Shot
         if keyframe_job:
             params |= hf.keyframe_video_params
             params["medias"] = [{"role": hf.keyframe_role, "value": keyframe_job}]
+            if end_keyframe_job and hf.morph:
+                params["medias"].append({"role": hf.end_role, "value": end_keyframe_job})
+                params["prompt"] += " The shot ends exactly on the given end frame, moving into it smoothly."
         if phase == "draft":
             params.pop("resolution", None)  # drafts are 480p by definition
             params |= hf.draft_params

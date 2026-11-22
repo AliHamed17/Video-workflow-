@@ -64,10 +64,10 @@ stage.
 | | `llm/cli_provider.py` | Claude Code / Codex / Gemini CLI over stdin, JSON extracted and validated |
 | Agents | `agents/*.py` + `prompts/*.md` | TrendScout, ViralAnalyst, TrendAnalyst, GrowthAnalyst, Scriptwriter, Critic, ComplianceReviewer, Director, Packager, CommunityManager, Translator, Planner |
 | Render | `video/handoff.py` | Writes `render_request.json` for Claude Code + Higgsfield MCP |
-| | `video/higgsfield_mcp.py` | Headless MCP client: cost preflight → batch submit → poll → download |
+| | `video/higgsfield_mcp.py` | Headless MCP client: model catalog check (adapt params) → cost preflight → batch submit (morph shots end on the next keyframe) → poll → retry failed shots once → download |
 | | `video/mock.py` | Free placeholder clips for testing |
 | Voice | `voice.py` | Per-shot narration: OpenAI TTS, ElevenLabs, or offline flite; cached by text hash |
-| Edit | `video/editor.py` | Parallel normalise to 1080x1920@30, stitch, fit narration per shot, ASS word captions + headline, music with sidechain ducking, loudnorm −14 LUFS, thumbnail |
+| Edit | `video/editor.py` | Parallel normalise to 1080x1920@30, stitch with timing-preserving xfade transitions (fallback: cuts), fit narration per shot, kinetic ASS captions (spoken word + punch words) under an animated headline, optional progress bar, music with sidechain ducking, loudnorm −14 LUFS, thumbnail |
 | Schedule | `schedule.py`, `pipeline._assign_slot` | Next free posting slot per timezone and daily cap; every platform posts together; trend videos (`timely_for_hours`) take the earliest slot and post at once rather than miss their window |
 | Publish | `publishers/*.py` | YouTube resumable upload; Instagram resumable Reels; TikTok chunked FILE_UPLOAD (draft or direct); Facebook Reels (start → upload → finish, draft or published); `fetch_metrics`, comments and `fetch_audience` on each |
 | Network | `net.py` | Retries with backoff and Retry-After; non-idempotent calls never retried after an ambiguous 5xx |

@@ -16,6 +16,9 @@ Score honestly (0-10). Check, in order:
 3. Retention — any dead shot, recap, slow middle, or payoff that comes too late?
 4. Platform/policy risk — dangerous acts, medical claims, real people, copyrighted characters?
 5. Loop and CTA — does the ending invite a rewatch or a comment?
+6. Craft — a mid-video twist that re-hooks? Concrete comparisons instead of adjectives? Can each
+   visual be filmed by an AI video model in one continuous take (no on-screen text, crowds, famous
+   people or fine hand work), and do the visuals change from shot to shot?
 
 Calibration: approve when score >= $min_score and there are no factual or policy problems.
 Minor polish (a word choice, a slightly long line) is not a reason to revise — list it under

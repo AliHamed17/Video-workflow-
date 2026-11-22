@@ -233,8 +233,15 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                        f"<td>{e(h.technique)}</td><td class=num>{h.strength:.0f}</td></tr>" for h in item.hook_options)
         parts.append(_section("Hook lab", f"<table><tr><th>Hook</th><th>Technique</th><th class=num>Strength</th></tr>{rows}</table>"))
     if item.script:
-        rows = "".join(f"<tr><td>{s.index + 1}</td><td>{e(s.visual)}</td><td>{e(s.voiceover)}</td>"
-                       f"<td><b>{e(s.on_screen_text)}</b></td></tr>" for s in item.script.shots)
+        from ..video.editor import is_punch, punch_words
+
+        def spoken(shot) -> str:
+            # The narration with the caption's punch words marked, as the viewer will see them pop.
+            punch = punch_words(shot.emphasis)
+            return " ".join(f"<mark>{e(w)}</mark>" if is_punch(w, punch) else e(w) for w in shot.voiceover.split())
+
+        rows = "".join(f"<tr><td>{s.index + 1}<div class=meta>{e(s.beat)}</div></td><td>{e(s.visual)}</td>"
+                       f"<td>{spoken(s)}</td><td><b>{e(s.on_screen_text)}</b></td></tr>" for s in item.script.shots)
         parts.append(_section("Script", "<table><colgroup><col style='width:4%'><col style='width:44%'>"
                               "<col style='width:32%'><col style='width:20%'></colgroup>"
                               f"<tr><th>#</th><th>Visual</th><th>Narration</th><th>On screen</th></tr>"
@@ -299,9 +306,29 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                           f"{copy_table(v.localization.packaging)}</div></div>")
         parts.append(_section(f"Language versions ({len(item.versions)})", "".join(blocks)))
     if item.render_plan:
-        rows = "".join(f"<tr><td>{s.index + 1}</td><td>{e(s.prompt)}<br><span class=meta>{e(s.camera)}</span></td></tr>"
-                       for s in item.render_plan.shots)
-        parts.append(_section("Higgsfield prompts", f"<p class=meta>{e(item.render_plan.style_anchor)}</p><table>{rows}</table>"))
+        from ..models import SHOT_SIZES
+
+        plan = item.render_plan
+        morphed = {c.shot_index for c in item.clips if c.morph}
+
+        def direction(s) -> str:
+            bits = [SHOT_SIZES.get(s.shot_size, ""), s.camera, f"motion: {s.motion}" if s.motion else ""]
+            into = ("morph ✓" if s.index in morphed else s.transition) if s.transition != "cut" else ""
+            return (" · ".join(e(b) for b in bits if b)
+                    + (f" · then {pill(into, 'info')}" if into and s.index < len(plan.shots) - 1 else ""))
+
+        rows = "".join(f"<tr><td>{s.index + 1}</td><td>{e(s.prompt)}<br><span class=meta>{direction(s)}</span></td></tr>"
+                       for s in plan.shots)
+        look = (f"<p class=meta><b>Subject</b> {e(plan.subject)}</p>" if plan.subject else "") + \
+            f"<p class=meta><b>Look</b> {e(plan.style_anchor)}</p>"
+        parts.append(_section("Direction (Higgsfield prompts)", f"{look}<table>{rows}</table>"))
+    if item.virality:
+        v = item.virality
+        tone = "ok" if v["score"] >= 70 else "warn" if v["score"] >= 40 else "error"
+        score = f"{v['score']:.0f}/100"
+        parts.append(_section(f"🔮 Virality Predictor — {pill(score, tone)}",
+                              f"<p>{e(v.get('notes') or '')}</p><p class=meta>Higgsfield's read of the final cut"
+                              + (f" · job {e(v['job'])}" if v.get("job") else "") + "</p>"))
     if item.publishes or item.metrics:
         def publish_row(r) -> str:
             target = f"<a href='{e(r.url)}'>{e(r.url)}</a>" if r.url else e(r.post_id or "")

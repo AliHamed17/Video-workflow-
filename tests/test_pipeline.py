@@ -111,7 +111,7 @@ def test_handoff_flow_registers_clips(config, tmp_path):
     request = json.loads((pipe.store.item_dir(item.id) / "clips" / "render_request.json").read_text())
     assert [r["index"] for r in request["shots"]] == [0, 1]
     assert request["shots"][0]["video"]["aspect_ratio"] == "9:16"
-    assert "teal and orange" in request["shots"][0]["video"]["prompt"]
+    assert "teal and orange" in request["shots"][0]["video"]["prompt"].lower()
     assert request["phase"] == "final" and request["shots"][0]["keyframe"] is None
 
     # Simulate the Claude Code skill: render elsewhere, then register each clip.

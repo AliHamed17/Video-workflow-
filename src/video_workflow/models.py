@@ -47,12 +47,28 @@ class IdeaBatch(BaseModel):
     ideas: list[Idea]
 
 
+BEATS = ("hook", "setup", "escalation", "twist", "payoff", "loop")
+
+
 class Shot(BaseModel):
     index: int = Field(description="0-based shot number")
     duration_s: int = Field(description="Shot length in seconds")
+    beat: Literal["hook", "setup", "escalation", "twist", "payoff", "loop"] = Field(
+        description="This shot's job in the story: hook (shot 0), setup, escalation, twist (a mid-video re-hook), "
+                    "payoff, loop (the last shot, flowing back into the first)")
     visual: str = Field(description="What the viewer sees, in plain language")
     voiceover: str = Field(description="Narration spoken during this shot ('' if none)")
     on_screen_text: str = Field(description="Short caption burned on screen (max ~7 words, '' if none)")
+    emphasis: list[str] = Field(description="1-2 words copied exactly from this shot's voiceover that carry the "
+                                            "punch (a number, the surprising word); the captions light them up")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _craft_defaults(cls, data):
+        # Shots stored before beats/emphasis existed. (The LLM schema still requires both.)
+        if isinstance(data, dict) and ("beat" not in data or "emphasis" not in data):
+            data = {"beat": "hook" if data.get("index") == 0 else "escalation", "emphasis": [], **data}
+        return data
 
 
 class Script(BaseModel):
@@ -64,16 +80,47 @@ class Script(BaseModel):
     loop_strategy: str = Field(description="How the ending flows back into the start for rewatches")
 
 
+SHOT_SIZES = {"extreme_close_up": "Extreme close-up", "close_up": "Close-up", "medium": "Medium shot",
+              "wide": "Wide shot", "aerial": "Aerial shot", "pov": "POV shot"}
+TRANSITIONS = ("cut", "flash", "whip", "zoom", "dissolve", "dip", "morph")
+
+
 class ShotPrompt(BaseModel):
     index: int
-    prompt: str = Field(description="Full text-to-video prompt for this shot (subject, action, camera, light, style)")
+    prompt: str = Field(description="The scene for this shot: subject, setting, first-frame composition, lighting, "
+                                    "colour, texture — concrete and visible only")
     duration_s: int
-    camera: str = Field(description="Camera movement / framing, e.g. 'slow dolly-in, macro'")
+    shot_size: Literal["extreme_close_up", "close_up", "medium", "wide", "aerial", "pov"] = Field(
+        description="Framing; never the same size twice in a row")
+    motion: str = Field(description="What physically moves from the first second to the last: one clear action "
+                                    "with a start and an end state")
+    camera: str = Field(description="One camera move with a lens, e.g. 'slow push-in, 100mm macro'")
+    transition: Literal["cut", "flash", "whip", "zoom", "dissolve", "dip", "morph"] = Field(
+        description="How this shot hands over to the next: cut (most), flash (a hard reveal), whip (fast change of "
+                    "place), zoom (diving into detail), dissolve (time passing), dip (a pause before the payoff), "
+                    "morph (this shot's last frame becomes the next shot's first; at most twice). Last shot: cut")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _craft_defaults(cls, data):
+        if isinstance(data, dict) and not {"shot_size", "motion", "transition"} <= data.keys():
+            data = {"shot_size": "medium", "motion": "", "transition": "cut", **data}
+        return data
 
 
 class RenderPlan(BaseModel):
-    style_anchor: str = Field(description="Shared style sentence appended to every shot for visual consistency")
+    subject: str = Field(description="Exact look of the recurring subject (what it is, size, colours, markings, "
+                                     "materials) in one sentence, added to every shot so it never changes; '' if none")
+    style_anchor: str = Field(description="Shared look in one sentence (render style, a palette of 3-4 named colours, "
+                                          "lighting mood, depth of field), added to every shot")
     shots: list[ShotPrompt]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_subject_by_default(cls, data):
+        if isinstance(data, dict) and "subject" not in data:
+            data = {**data, "subject": ""}
+        return data
 
 
 class Review(BaseModel):
@@ -352,6 +399,7 @@ class Clip(BaseModel):
     phase: Literal["draft", "final"] = "final"
     keyframe: str | None = None      # local path of the keyframe still, if one was used
     keyframe_job: str | None = None  # Higgsfield job id of the keyframe
+    morph: bool = False              # rendered to end on the next shot's keyframe: the editor cuts straight on
 
 
 class VoiceClip(BaseModel):
@@ -466,6 +514,7 @@ class ContentItem(BaseModel):
     script: Script | None = None
     fact_check: FactCheck | None = None
     compliance: ComplianceCheck | None = None
+    virality: dict | None = None   # Higgsfield Virality Predictor read of the final cut {score, notes, job, at}
     review: Review | None = None
     revisions: int = 0
     render_plan: RenderPlan | None = None

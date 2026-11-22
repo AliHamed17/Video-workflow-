@@ -15,6 +15,8 @@ class Director(Agent):
             shot_duration=video.higgsfield.shot_duration_s,
             script=script.model_dump_json(indent=2),
             visual_style=self.config.channel.visual_style.strip(),
+            model_guide=(f"\nHow {video.higgsfield.model} reads prompts:\n{video.higgsfield.prompt_guide.strip()}\n"
+                         if video.higgsfield.prompt_guide.strip() else ""),
         )
         if inspiration:
             prompt += ("\n\nThis video adapts a viral format; reproduce its ENERGY with original imagery:\n"
@@ -28,4 +30,6 @@ class Director(Agent):
         plan.shots = [by_index[s.index] for s in script.shots]
         for shot in plan.shots:
             shot.duration_s = video.higgsfield.shot_duration_s
+        if plan.shots and plan.shots[-1].transition == "morph":
+            plan.shots[-1].transition = "cut"      # nothing to morph into after the last shot
         return plan

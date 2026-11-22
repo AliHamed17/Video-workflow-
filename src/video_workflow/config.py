@@ -109,6 +109,15 @@ class HiggsfieldConfig(BaseModel):
     # with it as a reference image, so the subject, palette and world stay the same across shots.
     consistent_subject: bool = True
     reference_role: str = "image_references"
+    # "morph" shots end on the next shot's keyframe (end-frame role), so the two flow into each other.
+    morph: bool = True
+    end_role: str = "end_image"
+    # Notes on how the chosen model reads prompts, passed to the director (see the example config).
+    prompt_guide: str = ""
+    # Before spending, read the model's catalog entry (models_explore) and adapt: clamp the duration,
+    # drop parameters the model doesn't take, skip media roles it doesn't support.
+    check_model: bool = True
+    retry_failed_shots: bool = True   # resubmit shots that failed (once), keeping the ones that worked
     draft_preview: bool = True    # render cheap drafts, approve the preview, then finalize full-res
     draft_params: dict = Field(default_factory=lambda: {"draft": True})
     unit_costs: UnitCosts = Field(default_factory=UnitCosts)
@@ -130,6 +139,10 @@ class CaptionConfig(BaseModel):
     font: str = "DejaVu Sans"
     font_size: int = 80            # pixels on a 1080x1920 frame
     highlight_color: str = "&H0000E5FF"  # ASS BGR colour for word captions (yellow)
+    # kinetic: white words, the word being spoken lights up, punch words (the script's emphasis and
+    # numbers) in the accent colour and bigger. classic: every word in the highlight colour.
+    style: Literal["kinetic", "classic"] = "kinetic"
+    accent_color: str = "&H0012FFA3"     # ASS BGR colour for punch words (lime)
 
 
 class VoiceConfig(BaseModel):
@@ -173,6 +186,8 @@ class VideoConfig(BaseModel):
     music: MusicConfig = Field(default_factory=MusicConfig)
     sound_design: SoundDesignConfig = Field(default_factory=SoundDesignConfig)
     watermark: str = ""            # your handle (e.g. "@octofacts"), small in a corner of every video; "" = none
+    transitions: bool = True       # the director's transitions between shots (flash, whip, zoom ...); False: hard cuts
+    progress_bar: bool = False     # a thin bar filling along the bottom edge as the video plays
     clip_audio_volume: float = 0.35  # level of the clips' own audio under narration
     loudness_lufs: float = -14
 
@@ -216,6 +231,9 @@ class QualityConfig(BaseModel):
     max_rerenders: int = 1            # automatic re-render rounds per video
     block_publish_on_fail: bool = True
     loudness_tolerance_lu: float = 2.0
+    # Claude Code (higgsfield-render skill): run Higgsfield's Virality Predictor on the final cut before
+    # publishing and record it with `vw virality`. Informational; costs Higgsfield credits.
+    virality_check: bool = False
 
 
 class ContentConfig(BaseModel):

@@ -366,6 +366,34 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         return (f"A/B test '{exp['title']}': new videos alternated 20 s / 30 s with their own scripts; judged "
                 f"30 s the winner ({result['lift'] * 100:+.0f}% on the median, p={result['p']}), adopted, undone")
 
+    def better_videos():
+        from .testing import SimulatedHiggsfield
+        from .video.higgsfield_mcp import HiggsfieldMCPGenerator
+
+        item = store.get(state["item"].id)
+        beats = [s.beat for s in item.script.shots]
+        assert beats[0] == "hook" and item.render_plan.subject and any(s.emphasis for s in item.script.shots), beats
+        cuts = [e["detail"] or "" for e in store.events(item_id=item.id, step_prefix="edit.assemble", limit=20)]
+        assert any("flash after shot 1" in d for d in cuts), cuts
+        ass = (store.item_dir(item.id) / "edit" / "captions.ass").read_text("utf-8")
+        assert "\\1c&H12FFA3&" in ass and "\\move(" in ass, "kinetic captions / animated headline missing"
+        # Headless Higgsfield over MCP (simulated): catalog check, a morph shot, a refused shot retried.
+        sim = SimulatedHiggsfield(refuse_once={1})
+        plan = item.render_plan.model_copy(deep=True)
+        plan.shots[0].transition = "morph"
+        trial = ContentItem(channel=item.channel, idea=item.idea, script=item.script, render_plan=plan,
+                            render_phase="draft")
+        hf = pipe.config.video.higgsfield.model_copy(update={"params": {"resolution": "1080p", "fps": 60}})
+        http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"clip")))
+        result = HiggsfieldMCPGenerator(hf, "9:16", sim.factory, http=http, poll_interval_s=0).render(
+            trial, plan, workdir / "hf-sim")
+        names = [n for n, _ in sim.calls]
+        assert names[0] == "models_explore" and result.clips[0].morph and not result.failed, result.note
+        assert "retried shot(s) 2" in result.note and "dropped fps" in result.note, result.note
+        return (f"beats {' → '.join(beats)}; kinetic captions + animated headline; {cuts[0].split(', ', 1)[-1]}; "
+                f"headless Higgsfield: model checked ({result.note.split('adapted to the model: ')[-1]}), shot 1 "
+                "morphs into shot 2, a refused shot retried toned down")
+
     def sponsors_and_facebook():
         from . import money
         from . import sponsors as deals
@@ -654,6 +682,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Weekly compilation + housekeeping", compilation),
         ("Experiments: an A/B test on new videos", experiment),
         ("Facebook Reels + sponsorships", sponsors_and_facebook),
+        ("Better videos: beats, kinetic captions, transitions, morphs", better_videos),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),
