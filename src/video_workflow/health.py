@@ -199,6 +199,11 @@ def check_voice(config: AppConfig, secrets: Secrets, http: httpx.Client, live: b
         return Check("voice", True, "flite (offline)")
     if provider == "openai":
         return Check("voice", bool(secrets.openai_api_key), "OpenAI TTS" if secrets.openai_api_key else "needs OPENAI_API_KEY")
+    if provider == "higgsfield":
+        # Spoken by Higgsfield during the render step (its credits, no key here); flite fills any gap.
+        voice = config.video.voice
+        return Check("voice", True, f"Higgsfield voices ({voice.model or 'default engine'}"
+                                    f"{', voice ' + voice.voice[:8] if voice.voice else ''}) · flite fills gaps")
     key = _s(secrets.elevenlabs_api_key)
     if not key:
         return Check("voice", False, "needs ELEVENLABS_API_KEY")

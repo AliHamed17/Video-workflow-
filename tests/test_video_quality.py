@@ -109,3 +109,14 @@ def test_finals_inherit_the_morph_and_the_virality_read_shows_on_the_page(config
     assert "<mark>3</mark>" in page and "<mark>hearts</mark>" in page          # the punch words the captions pop
     assert "Direction (Higgsfield prompts)" in page and "morph ✓" in page and "a rust-red octopus" in page
     assert ">hook<" in page                                                     # the beat under the shot number
+
+
+def test_doctor_does_not_ask_for_an_elevenlabs_key_when_higgsfield_speaks(config):
+    from video_workflow.config import Secrets
+    from video_workflow.health import check_voice
+
+    config.video.voice.provider = "higgsfield"
+    result = check_voice(config, Secrets(_env_file=None), httpx.Client(), live=False)
+    assert result.ok is True and "Higgsfield voices" in result.detail
+    config.video.voice.provider = "elevenlabs"
+    assert check_voice(config, Secrets(_env_file=None), httpx.Client(), live=False).ok is False
