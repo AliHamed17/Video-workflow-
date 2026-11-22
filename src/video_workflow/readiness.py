@@ -84,12 +84,15 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
                     "YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN"),
         "instagram": (bool(secrets.instagram_access_token and secrets.instagram_user_id),
                       "INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_USER_ID"),
+        "facebook": (bool(secrets.facebook_page_token and secrets.facebook_page_id),
+                     "FACEBOOK_PAGE_ID, FACEBOOK_PAGE_TOKEN"),
         "tiktok": (bool(secrets.tiktok_access_token or secrets.tiktok_refresh_token),
                    "TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_ACCESS_TOKEN, TIKTOK_REFRESH_TOKEN"),
     }
     for platform, (ok, names) in creds.items():
         if platform in wanted:
-            label = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok"}[platform]
+            label = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok",
+                     "facebook": "Facebook"}[platform]
             out.append(Need(label, "ok" if ok else "missing",
                             "credentials set" if ok else "not connected",
                             "" if ok else f"Dashboard → Connect → {label} (or set {names})"))

@@ -200,6 +200,10 @@ class Daemon:
         last = self.store.kv_get("last_stats")
         if not last or self.clock() - datetime.fromisoformat(last) >= timedelta(hours=rt.stats_every_hours):
             report["metrics"] = self.pipeline.refresh_metrics()
+            try:
+                self.pipeline.refresh_audience()
+            except Exception as exc:
+                log.warning("audience refresh failed: %s", exc)
             self.store.kv_set("last_stats", self.clock().isoformat())
             if self.config.growth.enabled:
                 try:

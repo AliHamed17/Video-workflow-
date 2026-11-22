@@ -366,6 +366,52 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         return (f"A/B test '{exp['title']}': new videos alternated 20 s / 30 s with their own scripts; judged "
                 f"30 s the winner ({result['lift'] * 100:+.0f}% on the median, p={result['p']}), adopted, undone")
 
+    def sponsors_and_facebook():
+        from . import money
+        from . import sponsors as deals
+        from .config import FacebookConfig
+        from .publishers import FacebookPublisher
+
+        item = store.get(state["item"].id)
+        fb = FacebookPublisher("fb-token", "777", FacebookConfig(), http=platforms.client(), sleep=lambda s: None,
+                               poll_interval_s=0)
+        reel = fb.publish(item, Path(item.final_video))
+        finish = next(body for kind, body in platforms.posted if kind == "facebook.finish")
+        assert reel.ok and reel.url.endswith(reel.post_id) and finish["video_state"] == "DRAFT", finish
+        assert "Made with AI." in finish["description"]
+        stats, said = fb.fetch_metrics(reel.post_id), fb.fetch_comments(reel.post_id)
+        assert stats.views == 5400 and [c.author for c in said] == ["Dana"]          # our own comment skipped
+        pipe.publishers["facebook"] = fb
+        try:
+            audience = pipe.refresh_audience()
+        finally:
+            pipe.publishers.pop("facebook")
+        followers = {k: v["followers"] for k, v in audience.items() if isinstance(v, dict)}
+        assert followers == {"youtube": 48_200, "instagram": 15_600, "tiktok": 23_100, "facebook": 9_100}, followers
+        deal = deals.add(store, "Coral Co", "hello@coral.example", 500, notes="reef-safe sunscreen")
+        deals.update(store, deal["id"], status="booked")
+        booked = next(e for e in money.ledger(store) if e.get("key") == f"deal:{deal['id']}")
+        assert booked["status"] == "expected" and booked["amount"] == 500
+        drafted = pipe.draft_pitch(deal["id"])
+        assert "{media_kit_link}" in drafted["pitch"]["body"]
+        deals.update(store, deal["id"], status="paid")
+        assert next(e for e in money.ledger(store) if e["id"] == booked["id"])["status"] == "paid"
+        store.kv_set("media_kit_share", {"token": "share-me", "at": datetime.now(UTC).isoformat()})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(pipe, token="selftest"))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            kit = httpx.get(f"{base}/kit/share-me", timeout=10)
+            assert kit.status_code == 200 and "96,000" in kit.text and "media kit" in kit.text
+            assert httpx.get(f"{base}/kit/guess", timeout=10).status_code == 404
+            assert "500" not in kit.text.split("</style>", 1)[1]                    # no money on the public kit
+        finally:
+            server.shutdown()
+            server.server_close()
+        return (f"Facebook Reel {reel.post_id} as a draft (5,400 plays, comments read); followers read on 4 platforms "
+                f"(96,000 in all); deal Coral Co: booked → expected 500 in the books → pitch drafted → paid; media "
+                "kit shared by link, wrong links refused")
+
     def compliance():
         llm = pipe.router._providers["fake"]
         saved = {k: llm.responses[k] for k in (Script, ComplianceCheck)}
@@ -607,6 +653,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Engagement: search phrases, replies to viewers, title rescue", engagement),
         ("Weekly compilation + housekeeping", compilation),
         ("Experiments: an A/B test on new videos", experiment),
+        ("Facebook Reels + sponsorships", sponsors_and_facebook),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

@@ -171,6 +171,7 @@ class AutopilotFlow:
         if not (self.publishers and due):
             return False
         self.refresh_metrics()
+        self.refresh_audience()
         if self.config.growth.comments:
             self.refresh_comments()
             self.draft_replies()

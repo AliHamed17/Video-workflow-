@@ -209,6 +209,11 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                     self.wfile.write(payload)
                     return None
                 return self._send(200, body, "application/json")
+            if path.startswith("/kit/"):                       # the shared media kit: link only, no login
+                from ..web.server import public_kit
+                body = public_kit(pipeline, path)
+                return self._send(200, body, headers={"X-Robots-Tag": "noindex"}) if body else \
+                    self._send(404, b"Not found", "text/plain")
             if path == "/login":
                 nxt = parse_qs(url.query).get("next", ["/"])[0]
                 return self._send(200, LOGIN.format(css=CSS, next=escape(nxt, quote=True), error="").encode())

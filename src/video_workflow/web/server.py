@@ -277,6 +277,45 @@ def google_finish(pipeline, base: str, code: str, state: str, http=None) -> str:
     return "YouTube connected. Your worker uses it from its next sync."
 
 
+def run_sponsor(pipeline, args: dict) -> tuple[bool, str]:
+    """add | update | pitch — shared by the dashboard, Telegram and cloud commands."""
+    from .. import sponsors
+
+    try:
+        op = args.get("op")
+        if op == "add":
+            deal = sponsors.add(pipeline.store, args.get("brand", ""), args.get("contact", ""),
+                                float(args.get("value") or 0), pipeline.config.money.currency, args.get("notes", ""))
+            return True, f"deal added: {deal['brand']}"
+        if op == "update":
+            changes = {k: args[k] for k in ("status", "value", "due", "contact", "notes") if args.get(k) not in (None, "")}
+            deal = sponsors.update(pipeline.store, args["id"], **changes)
+            return True, f"{deal['brand']}: {deal['status']}" + (" (in the books)" if deal.get("ledger_id") else "")
+        if op == "pitch":
+            pipeline.store.kv_set("sponsor_running", True)
+            try:
+                deal = pipeline.draft_pitch(args["id"])
+            finally:
+                pipeline.store.kv_set("sponsor_running", False)
+            return True, f"pitch drafted for {deal['brand']}"
+        return False, f"unknown sponsor op {op}"
+    except (KeyError, ValueError) as exc:
+        return False, str(exc)[:300]
+    except Exception as exc:
+        log.exception("sponsor %s failed", args.get("op"))
+        return False, f"{type(exc).__name__}: {exc}"[:300]
+
+
+def public_kit(pipeline, path: str) -> bytes | None:
+    """The shared media kit (/kit/<token>), or None when the link isn't the current one."""
+    share = pipeline.store.kv_get("media_kit_share") or {}
+    given = path.removeprefix("/kit/").strip("/")
+    if not (share.get("token") and given and pysecrets.compare_digest(given.encode(), str(share["token"]).encode())):
+        return None
+    from .. import sponsors
+    return pages.render_public_kit(sponsors.media_kit(pipeline.store, pipeline.config)).encode()
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -326,6 +365,10 @@ def make_handler(pipeline, token: str | None = None):
 
         # ---- GET ----------------------------------------------------------------------
         def do_GET(self):  # noqa: N802
+            if urlparse(self.path).path.startswith("/kit/"):        # the shared media kit: no login, link only
+                body = public_kit(pipeline, urlparse(self.path).path)
+                return self._send(200, body, headers={"X-Robots-Tag": "noindex"}) if body else \
+                    self._send(404, b"Not found", "text/plain")
             if not self._authed():
                 return self._send(401, b"Unauthorized: open /?token=...", "text/plain")
             url = urlparse(self.path)
@@ -364,6 +407,9 @@ def make_handler(pipeline, token: str | None = None):
                     except ValueError as exc:
                         msg = str(exc)[:300]
                     return self._redirect(f"/connect?flash={quote(msg)}")
+                if path == "/sponsors":
+                    return self._send(200, pages.render_sponsors(pipeline, data.status(pipeline), flash,
+                                                                 self._base_url()).encode())
                 if path == "/community":
                     return self._send(200, pages.render_community(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
@@ -544,6 +590,31 @@ def make_handler(pipeline, token: str | None = None):
                     msg = {"scout": "Scouting…", "remix": "Studying the video and writing our version…",
                            "add": "Added — studying it and writing our version…"}[op]
                 return self._redirect(f"/viral?flash={quote(msg)}")
+            if path in ("/sponsors/share", "/sponsors/unshare"):
+                if path.endswith("unshare"):
+                    store.kv_set("media_kit_share", None)
+                    msg = "The share link is switched off; the old link no longer opens."
+                elif not cloud:
+                    msg = "Share links come from the cloud dashboard (a local address can't be opened by brands)."
+                else:
+                    store.kv_set("media_kit_share", {"token": pysecrets.token_urlsafe(18),
+                                                     "at": datetime.now(UTC).isoformat()})
+                    msg = "Share link created: copy it from the media kit box."
+                return self._redirect(f"/sponsors?flash={quote(msg)}")
+            if path in ("/sponsors/add", "/sponsors/update", "/sponsors/pitch"):
+                op = path.rsplit("/", 1)[1]
+                args = {"op": op, **{k: form.get(k, "")[:2000] for k in ("brand", "contact", "value", "notes", "status",
+                                                                       "due", "id")}}
+                if cloud:
+                    store.enqueue("sponsor", None, args, source="cloud dashboard")
+                    msg = "Sent to your worker — it appears here after its next sync."
+                elif op == "pitch":
+                    if not store.kv_get("sponsor_running"):
+                        _background("sponsor", lambda: run_sponsor(pipeline, args))
+                    msg = "Drafting the pitch…"
+                else:
+                    msg = run_sponsor(pipeline, args)[1]
+                return self._redirect(f"/sponsors?flash={quote(msg)}")
             if path in ("/connect/save", "/connect/remove"):
                 try:
                     msg = save_connection(pipeline, form.get("service", ""), form, remove=path.endswith("remove"))

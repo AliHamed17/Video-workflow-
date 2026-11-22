@@ -11,7 +11,13 @@ from .config import AppConfig, Secrets
 from .llm import LLMRouter
 from .notify import build_dispatcher
 from .pipeline import Pipeline
-from .publishers import InstagramPublisher, Publisher, TikTokPublisher, YouTubePublisher
+from .publishers import (
+    FacebookPublisher,
+    InstagramPublisher,
+    Publisher,
+    TikTokPublisher,
+    YouTubePublisher,
+)
 from .store import Store
 from .video import Editor, VideoGenerator
 from .video.handoff import HandoffGenerator
@@ -70,6 +76,9 @@ def build_publishers(config: AppConfig, secrets: Secrets, data_dir: Path) -> dic
             secrets.tiktok_client_key, _s(secrets.tiktok_client_secret),
             _s(secrets.tiktok_access_token), _s(secrets.tiktok_refresh_token), pc.tiktok,
             pc.ai_disclosure, token_path=data_dir / "tiktok.token.json")
+    if "facebook" in wanted and secrets.facebook_page_token and secrets.facebook_page_id:
+        pubs["facebook"] = FacebookPublisher(_s(secrets.facebook_page_token), secrets.facebook_page_id, pc.facebook,
+                                             pc.ai_disclosure, graph_version=secrets.instagram_graph_version)
     for missing in sorted(wanted - pubs.keys()):
         log.info("%s publisher not configured (missing credentials) — it will be skipped", missing)
     return pubs

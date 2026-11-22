@@ -90,6 +90,21 @@ class TikTokPublisher(HTTPPublisher):
             return payload.get("data", {})
         raise PublishError(f"TikTok {path} failed after token refresh")
 
+    def fetch_audience(self) -> dict:
+        """Followers and likes (needs the user.info.stats scope)."""
+        from .. import net
+
+        if not self.access_token:
+            self._refresh()
+        resp = net.send(self.http, "GET", f"{API}/v2/user/info/", sleep=self.sleep,
+                        params={"fields": "display_name,follower_count,likes_count,video_count"},
+                        headers={"Authorization": f"Bearer {self.access_token}"})
+        user = (resp.json().get("data") or {}).get("user", {}) if resp.status_code < 400 else {}
+        if not user:
+            raise PublishError(f"TikTok user info unavailable: {resp.status_code}")
+        return {"followers": to_int(user.get("follower_count")), "likes": to_int(user.get("likes_count")),
+                "videos": to_int(user.get("video_count")), "name": user.get("display_name", "")}
+
     # ---- publish ----------------------------------------------------------------------
     def publish(self, item: ContentItem, video: Path) -> PublishResult:
         if item.packaging is None:

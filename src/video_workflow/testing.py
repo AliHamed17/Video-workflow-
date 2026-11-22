@@ -39,6 +39,7 @@ from .models import (
     ShotPrompt,
     ShotQA,
     SocialMeta,
+    SponsorPitch,
     TrendRadar,
     TrendTopic,
     ViralAnalysis,
@@ -142,6 +143,10 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
         CompilationCopy: CompilationCopy(title="This Week's Wildest Animal Facts, Counted Down (#1 Will Surprise You)",
                                          description="Our best Shorts of the week in one place, from #5 to the one "
                                                      "everyone shared.", tags=["animal facts", "octopus", "biology"]),
+        SponsorPitch: SponsorPitch(
+            subject="Reef-safe sunscreen × 48k ocean fans",
+            body="Hi Coral Co team — our viewers watch octopuses and reefs every day, so a 30-second Short on what "
+                 "reef-safe actually means would fit right in. Numbers: {media_kit_link}. — Octo Facts"),
         Playbook: Playbook(
             summary="Animal superpowers shown up close beat everything else 3 to 1; the opening second decides it.",
             rules=[PlaybookRule(do="Open on the impossible visual and say the number in the first second",
@@ -289,6 +294,12 @@ class FakePlatforms:
             meta = json.loads(body.split("\r\n\r\n", 1)[1].split("\r\n--", 1)[0])
             self.posted.append(("youtube.caption", {**meta["snippet"], "srt": body.split("\r\n\r\n")[2]}))
             return httpx.Response(200, json={"id": f"cap{len(self.posted)}"})
+        if host == "www.googleapis.com" and path == "/youtube/v3/channels":
+            return httpx.Response(200, json={"items": [{"snippet": {"title": "Octo Facts"}, "statistics": {
+                "subscriberCount": "48200", "viewCount": "1900000", "videoCount": "61", "hiddenSubscriberCount": False}}]})
+        if host == "open.tiktokapis.com" and path == "/v2/user/info/":
+            return httpx.Response(200, json={"data": {"user": {"display_name": "octofacts", "follower_count": 23100,
+                                                                "likes_count": 410000, "video_count": 58}}, **ok})
         if host == "suggestqueries.google.com":
             q = req.url.params.get("q", "")
             return httpx.Response(200, json=[q, [f"{q} explained", f"{q} facts", f"why do {q}", f"{q} shorts"]])
@@ -310,6 +321,39 @@ class FakePlatforms:
         if host == "www.googleapis.com" and path == "/youtube/v3/videos":
             return httpx.Response(200, json={"items": [{"statistics": {"viewCount": "12400", "likeCount": "910",
                                                                        "commentCount": "64"}}]})
+        # Facebook Reels (Page 777, Reel ids start with fbv)
+        if host == "graph.facebook.com" and path.endswith("/777/video_reels"):
+            phase = req.url.params.get("upload_phase")
+            if phase == "start":
+                self.counters["facebook"] += 1
+                vid = f"fbv{self.counters['facebook']}"
+                return httpx.Response(200, json={"video_id": vid,
+                                                 "upload_url": f"https://rupload.facebook.com/video-upload/v25.0/{vid}"})
+            self.posted.append(("facebook.finish", dict(req.url.params)))
+            return httpx.Response(200, json={"success": True})
+        if host == "graph.facebook.com" and "/fbv" in path:
+            if path.endswith("/video_insights"):
+                return httpx.Response(200, json={"data": [{"name": "blue_reels_play_count", "values": [{"value": 5400}]}]})
+            if path.endswith("/comments") and req.method == "POST":
+                self.posted.append(("facebook.comment", dict(req.url.params)))
+                return httpx.Response(200, json={"id": "fbc1"})
+            if path.endswith("/comments"):
+                return httpx.Response(200, json={"data": [
+                    {"id": "fbc-9", "message": "Shared this with my whole family", "like_count": 7,
+                     "from": {"id": "123", "name": "Dana"}, "created_time": "2026-11-20T09:00:00+0000"},
+                    {"id": "fbc-10", "message": "Thanks for watching!", "like_count": 1,
+                     "from": {"id": "777", "name": "Octo Facts"}, "created_time": "2026-11-20T10:00:00+0000"}]})
+            if "status" in req.url.params.get("fields", ""):
+                return httpx.Response(200, json={"status": {"video_status": "ready"}})
+            return httpx.Response(200, json={"likes": {"summary": {"total_count": 320}},
+                                             "comments": {"summary": {"total_count": 12}}})
+        if host == "graph.facebook.com" and path.endswith("/777"):
+            return httpx.Response(200, json={"name": "Octo Facts", "followers_count": 9100})
+        if host == "graph.facebook.com" and "/fbc-" in path and req.method == "POST":
+            self.posted.append(("facebook.reply", {"comment": path.split("/")[-2], **dict(req.url.params)}))
+            return httpx.Response(200, json={"id": "fbr1"})
+        if host == "rupload.facebook.com" and "/video-upload/" in path:
+            return httpx.Response(200, json={"success": True})
         # Instagram
         if host == "graph.facebook.com":
             if path.endswith("/media") and req.method == "POST":
@@ -336,7 +380,8 @@ class FakePlatforms:
                 return httpx.Response(200, json={"status_code": "FINISHED"})
             if path.rsplit("/", 1)[-1].startswith("ig"):
                 return httpx.Response(200, json={"permalink": "https://www.instagram.com/reel/demo/"})
-            return httpx.Response(200, json={"id": "42", "username": "demo_channel"})
+            return httpx.Response(200, json={"id": "42", "username": "demo_channel", "followers_count": 15600,
+                                             "media_count": 60})
         if host == "rupload.facebook.com":
             return httpx.Response(200, json={"success": True})
         # TikTok

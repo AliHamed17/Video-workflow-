@@ -58,6 +58,12 @@ SERVICES: tuple[Service, ...] = (
         Field("tiktok_access_token", "Access token"), Field("tiktok_refresh_token", "Refresh token")),
         how=("developers.tiktok.com → your app → Content Posting API (+ video.list for stats)",
              "Authorise your account once; paste the access and refresh tokens. They rotate by themselves")),
+    Service("facebook", "Facebook Reels", "post every video to your Page too (add facebook to publish.platforms)", (
+        Field("facebook_page_id", "Page ID", secret=False), Field("facebook_page_token", "Page access token")),
+        how=("developers.facebook.com → the same app as Instagram → add Facebook Login for Business",
+             "Graph API Explorer → your app → a User token with pages_manage_posts, pages_read_engagement, "
+             "pages_show_list (and pages_manage_engagement for replies) → /me/accounts → your Page's token and id",
+             "Prefer a long-lived Page token (exchange the user token first)")),
     Service("telegram", "Telegram", "reports, approvals and /pause on your phone", (
         Field("telegram_bot_token", "Bot token"), Field("telegram_chat_id", "Your chat ID", secret=False)),
         how=("Telegram → @BotFather → /newbot → copy the token",

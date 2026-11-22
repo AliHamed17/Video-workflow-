@@ -18,7 +18,8 @@ from ..models import ContentItem, Stage
 from .db import DB
 
 COMMAND_ACTIONS = {"approve", "final", "reject", "retry", "rerender", "publish", "ideas", "plan", "viral",
-                   "autopilot", "trends", "money", "growth", "community"}
+                   "autopilot", "trends", "money", "growth", "community",
+                   "sponsor"}
 
 
 class CloudStore:

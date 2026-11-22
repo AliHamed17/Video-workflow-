@@ -7,7 +7,7 @@ import html
 e = html.escape
 
 NAV = [("/", "Board"), ("/trends", "Trends"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
-       ("/growth", "Growth"), ("/community", "Community"), ("/metrics", "Metrics"), ("/money", "Money"), ("/connect", "Connect"), ("/health", "Health"), ("/selftest", "Self-test")]
+       ("/growth", "Growth"), ("/community", "Community"), ("/metrics", "Metrics"), ("/money", "Money"), ("/sponsors", "Sponsors"), ("/connect", "Connect"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """
 :root{--bg:#f5f6f8;--card:#fff;--ink:#14161b;--muted:#5d6472;--line:#e2e5ea;--accent:#4f46e5;

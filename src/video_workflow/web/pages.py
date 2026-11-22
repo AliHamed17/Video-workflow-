@@ -1181,3 +1181,104 @@ def render_connect(pipeline, st: dict, flash: str = "", base: str = "") -> str:
                      + form + "</section>")
     body = _flash(flash) + "<h2>Connect your accounts</h2>" + head + "".join(cards)
     return page("Connect", body, st, "/connect")
+
+
+def _kit_tiles(kit: dict) -> str:
+    def num(v, suffix=""):
+        return "–" if v is None else f"{v:,.0f}{suffix}" if v >= 100 else f"{v:g}{suffix}"
+    tiles = [(f"{kit['followers']:,}", "followers"), (f"{kit['views_30d']:,}", "views, last 30 days"),
+             (num(kit["median_views"]), "median views per video"), (num(kit["median_engagement"], "%"), "engagement"),
+             (num(kit["median_watched"], "%"), "of each video watched"), (num(kit["posts_per_week"]), "videos a week")]
+    return "<div class=kpis>" + "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>" for v, label in tiles) + "</div>"
+
+
+def _kit_body(kit: dict) -> str:
+    plats = "".join(f"<tr><td>{e(name.capitalize())}</td><td>{e(v.get('name') or '')}</td>"
+                    f"<td class=num>{(v.get('followers') or 0):,}</td></tr>" for name, v in kit["platforms"].items())
+    def video(t: dict) -> str:
+        title = e(t["title"])
+        if t["url"]:
+            title = f"<a href='{e(t['url'], quote=True)}' rel=noopener>{title}</a>"
+        return f"<li>{title} <span class=meta>· {t['views']:,} views</span></li>"
+
+    top = "".join(video(t) for t in kit["top"])
+    return (_kit_tiles(kit)
+            + (f"<section><h3>Where we post</h3><table>{plats}</table></section>" if plats else "")
+            + f"<section><h3>Audience</h3><p>{e(kit['audience_note'])}</p>"
+            + (f"<p class=meta>Topics: {e(', '.join(kit['pillars']))} · languages: {e(', '.join(kit['languages']))}</p>"
+               if kit["pillars"] else "") + "</section>"
+            + (f"<section><h3>Best videos</h3><ol>{top}</ol></section>" if top else ""))
+
+
+def render_public_kit(kit: dict) -> str:
+    """The media kit a brand sees through the share link: numbers and best videos, nothing private."""
+    from .layout import CSS
+    contact = (f"<p><a class=btn href='mailto:{e(kit['contact'], quote=True)}'>✉ {e(kit['contact'])}</a></p>"
+               if kit["contact"] else "")
+    return ("<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,"
+            f"initial-scale=1'><meta name=robots content=noindex><title>{e(kit['channel'])} · media kit</title>"
+            f"<style>{CSS} main{{max-width:760px;margin:0 auto;padding:16px}}</style></head><body><main>"
+            f"<h1>{e(kit['channel'])}</h1><p class=meta>{e(kit['niche'])}"
+            + (f" · {e(kit['handle'])}" if kit["handle"] else "") + "</p>" + _kit_body(kit) + contact
+            + f"<p class=meta>Short videos made with AI-generated visuals and fact-checked scripts. Figures as of "
+              f"{e(kit['at'][:10])}.</p></main></body></html>")
+
+
+def render_sponsors(pipeline, st: dict, flash: str = "", base: str = "") -> str:
+    from .. import sponsors
+
+    store = pipeline.store
+    kit = sponsors.media_kit(store, pipeline.config)
+    share = store.kv_get("media_kit_share") or {}
+    cloud = bool(getattr(pipeline, "is_cloud", False))
+    link = f"{base}/kit/{share['token']}" if share.get("token") else ""
+    if link:
+        share_html = (f"<p>Share link: <input readonly value='{e(link, quote=True)}' style='width:100%;font:inherit;"
+                      "padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)'>"
+                      "</p><form method=post action='/sponsors/unshare'><button>Switch the link off</button></form>")
+    elif cloud:
+        share_html = "<form method=post action='/sponsors/share'><button class=primary>🔗 Create a share link</button></form>"
+    else:
+        share_html = "<p class=meta>Create the share link on the cloud dashboard (brands can't open a local address).</p>"
+    when = (kit.get("audience_at") or "")[:16].replace("T", " ")
+    kit_html = _section("📇 Media kit", f"<p class=meta>What a brand sees: {e(kit['channel'])}'s numbers and best videos, "
+                        f"nothing about money. Followers read {e(when) + ' UTC' if when else 'with the next stats run'}"
+                        + ("" if kit["contact"] else " · set channel.contact to show an email for enquiries")
+                        + ".</p>" + _kit_body(kit) + share_html)
+
+    records = sponsors.deals(store)
+    summary = sponsors.pipeline_summary(records)
+    cur = e(pipeline.config.money.currency)
+    field = ("font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);"
+             "color:var(--ink)")
+    busy = store.kv_get("sponsor_running")
+    rows = []
+    for d in sorted(records, key=lambda d: (d["status"] in ("paid", "lost"), d["created"]), reverse=False):
+        options = "".join(f"<option{' selected' if s == d['status'] else ''}>{s}</option>" for s in sponsors.STATUSES)
+        pitch = ""
+        if d.get("pitch"):
+            body = d["pitch"]["body"].replace("{media_kit_link}", link or "[media kit link]")
+            pitch = (f"<details><summary class=meta>Pitch: {e(d['pitch']['subject'])}</summary>"
+                     f"<textarea readonly rows=8 style='width:100%;{field}'>{e(d['pitch']['subject'])}\n\n{e(body)}"
+                     "</textarea></details>")
+        rows.append(
+            f"<section><b>{e(d['brand'])}</b> <span class=meta>{e(d['contact'])}</span>"
+            + (f"<div class=meta>{e(d['notes'][:200])}</div>" if d["notes"] else "")
+            + f"<form method=post action='/sponsors/update' class=actions style='align-items:center'>"
+              f"<input type=hidden name=id value='{e(d['id'])}'><select name=status style='{field}'>{options}</select>"
+              f"<input name=value type=number step=1 min=0 value='{d['value']:g}' style='width:7em;{field}' title='fee'>"
+              f"<input name=due type=date value='{e(d.get('due') or '')}' style='{field}' title='payment due'>"
+              f"<button>Save</button><button formaction='/sponsors/pitch'>✍ Draft pitch</button></form>"
+            + (f"<p class=meta>In the books as expected income (ledger {e(d['ledger_id'])}).</p>" if d.get("ledger_id") else "")
+            + pitch + "</section>")
+    add = (f"<form method=post action='/sponsors/add' class=actions style='align-items:center'>"
+           f"<input name=brand required placeholder='Brand' style='{field}'><input name=contact placeholder='contact email' "
+           f"style='{field}'><input name=value type=number min=0 placeholder='fee ({cur})' style='width:8em;{field}'>"
+           f"<input name=notes placeholder='what they sell, why they fit' style='flex:1;min-width:160px;{field}'>"
+           "<button class=primary>➕ Add a deal</button></form>")
+    head = (f"<p class=meta>{summary['open']} open · booked {summary['booked_value']:,.0f} {cur} · paid "
+            f"{summary['paid_value']:,.0f} {cur}. Booking a deal with a fee puts it in Money as an expected payment; "
+            "pitches are drafted for you to send — nothing is emailed from here.</p>"
+            + ("<p class=warn>Drafting a pitch…</p>" if busy else ""))
+    body = (_flash(flash) + "<h2>Sponsors</h2>" + kit_html + "<h2>Deals</h2>" + head + add + "".join(rows))
+    return page("Sponsors", body, st, "/sponsors", every_ms=3000 if busy else 30000)

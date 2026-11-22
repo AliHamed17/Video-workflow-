@@ -24,6 +24,7 @@ from video_workflow.models import (
     ShotPrompt,
     ShotQA,
     SocialMeta,
+    SponsorPitch,
     YouTubeMeta,
 )
 from video_workflow.testing import ScriptedLLM, demo_content
@@ -84,6 +85,8 @@ def default_responses(shots: int = 2) -> dict:
         FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
         ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
         ComplianceCheck: ComplianceCheck(verdict="pass", issues=[]),
+        SponsorPitch: SponsorPitch(subject="Your gear, our 40k ocean-curious viewers",
+                                   body="Hi! Our viewers love the deep sea... See {media_kit_link}. — Test Channel"),
         CompilationCopy: CompilationCopy(title="5 Animal Superpowers That Sound Fake (#1 Is Real)",
                                          description="Our best five this week, counted down. Stay for #1.",
                                          tags=["animal facts", "octopus", "science"]),

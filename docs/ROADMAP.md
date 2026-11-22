@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.9: Facebook Reels and sponsorships ✅
+
+- [x] Facebook Reels as an opt-in fourth platform (draft by default): publish, plays/likes/comments, replies, Page followers
+- [x] Follower counts from YouTube, Instagram, TikTok and Facebook
+- [x] Media kit from real numbers, shared through a revocable no-login link; nothing about money on it
+- [x] Deal pipeline with the books kept in step (booked → expected income, paid, lost); AI-drafted pitch emails; /deals
+
 ## Phase 2.8: Experiments and subtitles ✅
 
 - [x] A/B tests on our own videos: a catalog (length, hook style, captions, sound design, music, posting time), balanced assignment, per-video settings for writing, editing and scheduling

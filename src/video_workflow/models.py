@@ -242,6 +242,13 @@ class CompilationCopy(BaseModel):
     tags: list[str] = Field(description="8-15 search tags")
 
 
+class SponsorPitch(BaseModel):
+    subject: str = Field(description="Email subject line, under 70 characters, specific to the brand")
+    body: str = Field(description="The email, under 170 words: why their audience overlaps ours (with our real "
+                                  "numbers), one concrete sponsored-video idea, the deliverable, and a clear ask. "
+                                  "Use {media_kit_link} where the media kit link goes. Sign off as the channel.")
+
+
 class Playbook(BaseModel):
     summary: str = Field(description="Two sentences: how the channel is doing and the single biggest lever")
     rules: list[PlaybookRule] = Field(description="What to do more of, best-supported first")

@@ -552,6 +552,37 @@ def compile_week(force: Annotated[bool, typer.Option("--force", help="Build it n
 
 
 @app.command()
+def sponsors(add: Annotated[str | None, typer.Option("--add", help="Add a deal for this brand")] = None,
+             value: Annotated[float, typer.Option("--value", help="The fee")] = 0.0,
+             status: Annotated[str | None, typer.Option("--status", help="New status for --deal")] = None,
+             deal: Annotated[str | None, typer.Option("--deal", help="Deal id (prefix) to change or pitch")] = None,
+             pitch: Annotated[bool, typer.Option("--pitch", help="Draft a pitch email for --deal")] = False,
+             config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Sponsorship deals and the media kit: add, move along, draft a pitch."""
+    from . import sponsors as deals_mod
+    from .web.server import run_sponsor
+
+    pipe = _setup(config, data, publishers=False)
+    if add:
+        console.print(run_sponsor(pipe, {"op": "add", "brand": add, "value": value})[1])
+    elif deal and status:
+        console.print(run_sponsor(pipe, {"op": "update", "id": deal, "status": status, "value": value or None})[1])
+    elif deal and pitch:
+        ok, detail = run_sponsor(pipe, {"op": "pitch", "id": deal})
+        console.print(detail)
+        if ok:
+            p = deals_mod.find(pipe.store, deal)["pitch"]
+            console.print(f"\n[bold]{p['subject']}[/]\n\n{p['body']}")
+    table = Table("id", "brand", "status", "fee", "due")
+    for d in deals_mod.deals(pipe.store):
+        table.add_row(d["id"], d["brand"], d["status"], f"{d['value']:,.0f}", d.get("due") or "")
+    console.print(table)
+    kit = deals_mod.media_kit(pipe.store, pipe.config)
+    console.print(f"Media kit: {kit['followers']:,} followers · {kit['views_30d']:,} views in 30 days · median "
+                  f"{kit['median_views'] or 0:,.0f} views per video")
+
+
+@app.command()
 def digest(send: Annotated[bool, typer.Option("--send", help="Also send it to the notify channels")] = False,
            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Summary: what is waiting for you, what's scheduled, views and spend."""
@@ -634,7 +665,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 25:
+    if passed != len(results) or len(results) < 26:
         raise typer.Exit(1)
 
 

@@ -54,6 +54,7 @@ stage.
 | | `flows/community.py` | Replies to viewers: drafts from the video's own script, send/skip, auto-reply, first comment |
 | | `flows/compilation.py` | The weekly long-form compilation (picks, copy, chapters, YouTube-only publish) |
 | | `flows/experiments.py` | A/B tests: assignment, per-video settings (`config_for`), judging, adopt/undo (`config_overrides`) |
+| | `flows/sponsors.py` | Follower counts for the media kit, pitch drafting |
 | | `flows/sound.py` | Narration per shot (Higgsfield or fallback), music track, extra-language versions |
 | | `flows/reporting.py` | Post stats, performance feedback for ideation, the daily digest (output, spend, trends, money, setup gaps, alerts) |
 | LLM | `llm/router.py` | Task → `[provider:model, ...]` with fallback and lazy provider construction |
@@ -68,7 +69,7 @@ stage.
 | Voice | `voice.py` | Per-shot narration: OpenAI TTS, ElevenLabs, or offline flite; cached by text hash |
 | Edit | `video/editor.py` | Parallel normalise to 1080x1920@30, stitch, fit narration per shot, ASS word captions + headline, music with sidechain ducking, loudnorm −14 LUFS, thumbnail |
 | Schedule | `schedule.py`, `pipeline._assign_slot` | Next free posting slot per timezone and daily cap; every platform posts together; trend videos (`timely_for_hours`) take the earliest slot and post at once rather than miss their window |
-| Publish | `publishers/*.py` | YouTube resumable upload; Instagram resumable Reels; TikTok chunked FILE_UPLOAD (draft or direct); `fetch_metrics` on each |
+| Publish | `publishers/*.py` | YouTube resumable upload; Instagram resumable Reels; TikTok chunked FILE_UPLOAD (draft or direct); Facebook Reels (start → upload → finish, draft or published); `fetch_metrics`, comments and `fetch_audience` on each |
 | Network | `net.py` | Retries with backoff and Retry-After; non-idempotent calls never retried after an ambiguous 5xx |
 | Trends | `trends.py` | Wikipedia most-read, Google News/Trends RSS, Reddit, YouTube most-popular (fail-soft; feeds with a DTD are refused) |
 | Notify | `notify.py`, `telegram_bot.py` | Telegram (Approve/Reject buttons), Slack, Discord, webhook; bot commands from the owner chat only |
@@ -81,6 +82,7 @@ stage.
 | Search | `seo.py` | YouTube autocomplete phrases for the packager (free, fail-soft) |
 | Compile | `video/compile.py` | Countdown compilation: blurred 16:9 fill, labels, intro/outro cards, chapters, one encode per segment |
 | Experiments | `experiments.py` | The test catalog, dotted-path settings, balanced assignment, permutation test on medians |
+| Sponsors | `sponsors.py` | Deal pipeline (status changes keep the ledger in step), media kit from synced state |
 | Ops | `maintenance.py` | Housekeeping: intermediates, old shots, rejected media, old events; disk usage + alert |
 | Money | `money.py` | Ledger (costs per video, subscriptions, revenue imports, invoices), P&L, cash, runway, per-video ROI |
 | Growth | `kit.py`, `sources.py`, `flows/sound.py` (`localize`), `flows/trends.py` (`plan`) | Publish kit zip; ideas from an article; language versions; content calendar |

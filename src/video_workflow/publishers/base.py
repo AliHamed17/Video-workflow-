@@ -13,7 +13,7 @@ from .. import net
 from ..models import ContentItem, PostMetrics, PublishResult
 
 # (min_seconds, max_seconds) accepted for short-form vertical video on each platform.
-DURATION_LIMITS = {"youtube": (1, 180), "instagram": (3, 900), "tiktok": (3, 600)}
+DURATION_LIMITS = {"youtube": (1, 180), "instagram": (3, 900), "tiktok": (3, 600), "facebook": (3, 90)}
 
 
 class PublishError(RuntimeError):

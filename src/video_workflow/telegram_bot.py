@@ -33,6 +33,7 @@ HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, wit
         "/replies — drafted answers to viewers · /send <n> [your own words] · /skip <n>\n"
         "/compile — this week's best Shorts as one long YouTube video\n"
         "/experiments — the A/B test running on new videos and past results\n"
+        "/deals — sponsorship deals and what's booked\n"
         "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
         "/alerts · /plan — the content calendar · /digest — summary now\n"
         "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
@@ -135,6 +136,8 @@ class TelegramBot:
             self.say(self.remix(rest.strip()))
         elif command == "/insights":
             self.say(self.insights_text())
+        elif command == "/deals":
+            self.say(self.deals_text())
         elif command == "/experiments":
             self.say(self.experiments_text())
         elif command == "/compile":
@@ -369,6 +372,23 @@ class TelegramBot:
         ok, detail = run_community(self.pipeline, {"op": command[1:], "item_id": item.id,
                                                    "comment_id": draft.comment_id, "text": text.strip()})
         return ("✅ " if ok else "⚠️ ") + detail
+
+    def deals_text(self) -> str:
+        from . import sponsors
+
+        records = sponsors.deals(self.store)
+        if not records:
+            return "No sponsorship deals yet. Add brands on the dashboard's Sponsors page."
+        cur = self.pipeline.config.money.currency
+        s = sponsors.pipeline_summary(records)
+        lines = [f"🤝 {s['open']} open · booked {s['booked_value']:,.0f} {cur} · paid {s['paid_value']:,.0f} {cur}"]
+        for d in [d for d in records if d["status"] not in ("paid", "lost")][:8]:
+            lines.append(f"• {d['brand']} — {d['status']}" + (f", {d['value']:,.0f} {cur}" if d["value"] else "")
+                         + (f", due {d['due']}" if d.get("due") else ""))
+        late = sponsors.overdue(records)
+        if late:
+            lines.append("🔴 Overdue: " + ", ".join(d["brand"] for d in late))
+        return "\n".join(lines)
 
     def experiments_text(self) -> str:
         records = self.store.kv_get("experiments", []) or []

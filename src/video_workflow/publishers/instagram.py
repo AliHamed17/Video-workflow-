@@ -155,6 +155,12 @@ class InstagramPublisher(HTTPPublisher):
                           headers=self._auth(), params={"message": text})
         return str(resp.json().get("id", ""))
 
+    def fetch_audience(self) -> dict:
+        me = self._send("GET", f"{self.base}/{self.user_id}", "Instagram account", headers=self._auth(),
+                        params={"fields": "username,followers_count,media_count"}).json()
+        return {"followers": to_int(me.get("followers_count")), "videos": to_int(me.get("media_count")),
+                "name": f"@{me['username']}" if me.get("username") else ""}
+
     def fetch_metrics(self, post_id: str) -> PostMetrics:
         values: dict[str, int | None] = {}
         try:

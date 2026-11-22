@@ -70,6 +70,7 @@ The bot obeys only that chat. Commands:
 | `/trends [refresh]` | What's trending for this channel, with momentum, time left and our angle |
 | `/compile` | This week's best Shorts as one long YouTube video |
 | `/experiments` | The A/B test running on new videos, and past results |
+| `/deals` | Sponsorship deals: open, booked, paid, overdue |
 | `/replies`, `/send <n> [your words]`, `/skip <n>` | Drafted answers to viewers' comments: send or skip ([COMMUNITY.md](COMMUNITY.md)) |
 | `/insights`, `/followup <n>`, `/ask <n>` | What works on our channel, hits to follow up, what viewers asked for; act on them |
 | `/money` | This month's income and costs, cash, burn, runway, overdue payments, best-earning videos |

@@ -170,6 +170,19 @@ class YouTubePublisher(HTTPPublisher):
                                    "Content-Type": f"multipart/related; boundary={boundary}"})
         return str(resp.json().get("id", ""))
 
+    def fetch_audience(self) -> dict:
+        """Subscribers and lifetime views of our channel (youtube.readonly)."""
+        resp = self._send("GET", "https://www.googleapis.com/youtube/v3/channels", "YouTube channel",
+                          headers={"Authorization": f"Bearer {self.access_token()}"},
+                          params={"part": "snippet,statistics", "mine": "true"})
+        items = resp.json().get("items") or []
+        if not items:
+            return {}
+        st = items[0].get("statistics", {})
+        return {"followers": None if st.get("hiddenSubscriberCount") else to_int(st.get("subscriberCount")),
+                "views": to_int(st.get("viewCount")), "videos": to_int(st.get("videoCount")),
+                "name": items[0].get("snippet", {}).get("title", "")}
+
     def fetch_comments(self, post_id: str, limit: int = 30) -> list[Comment]:
         """Top-level comments, most relevant first (youtube.readonly scope)."""
         resp = self._send("GET", COMMENTS_URL, "YouTube comments",

@@ -39,6 +39,8 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Connect** | Connect YouTube (one click with Google), Instagram, TikTok, Telegram and API keys on the cloud dashboard: encrypted with your cloud secret, never shown again, picked up by the worker at its next sync. The worker itself only needs `VW_CLOUD_URL` + `VW_CLOUD_SECRET` |
 | **Compilation** | Weekly: the week's best Shorts as one long 16:9 YouTube video (long-form earns far more per view), counted down to #1, with chapters, intro and outro; your handle as a watermark on every video; daily housekeeping keeps the worker's disk clean |
 | **Experiments** | A/B tests on your own videos (length, hook style, captions, sound design, music, posting time): new videos alternate sides, a permutation test calls a winner only when the difference is real, one click adopts it (and undoes it). Narration uploaded as YouTube subtitles in every language |
+| **Sponsors** | A media kit with your real numbers (followers on every platform, reach, engagement, best videos) behind a revocable share link; a deal pipeline whose booked deals land in the books; AI-drafted pitch emails for you to send ([docs/SPONSORS.md](docs/SPONSORS.md)) |
+| **Facebook Reels** | Opt-in fourth platform: every video also on your Page (draft by default), with stats, comments and replies |
 | **Money** | Costs per video (credits + AI usage) and subscriptions, YouTube ad revenue per video, Stripe sponsor payments, CSV imports, invoices with due dates, cash, burn and runway, ROI/RPM per video; budget, runway and overdue-payment alerts ([docs/MONEY.md](docs/MONEY.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
@@ -180,7 +182,7 @@ src/video_workflow/
 api/index.py     Vercel entry point (vercel.json, requirements.txt)
 config/          channel.example.yaml: the brand bible every agent reads
 .claude/skills/  higgsfield-render: Claude Code renders shots via Higgsfield MCP
-docs/            AUTOPILOT · GROWTH · COMMUNITY · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
+docs/            AUTOPILOT · GROWTH · COMMUNITY · SPONSORS · MONEY · ARCHITECTURE · SETUP · OPERATIONS · CLOUD · VIRAL · HIGGSFIELD · ROADMAP
 ```
 
 Coding agents: `AGENTS.md` (Codex and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI).

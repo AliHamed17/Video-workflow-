@@ -19,6 +19,7 @@ channel:
     - "medical advice"
     - "politics"
     - "real, identifiable private people"
+  contact: ""            # an email for brand enquiries, shown on the media kit (Sponsors page)
   visual_style: >-
     Cinematic, high-contrast, vibrant teal-and-orange grade, macro detail,
     smooth dolly and orbit camera moves, volumetric light, photoreal.
@@ -185,6 +186,8 @@ publish:
   tiktok:
     mode: draft         # until the TikTok app passes its audit: lands in your TikTok inbox (1 tap to post)
     privacy_level: SELF_ONLY   # unaudited TikTok apps can only post SELF_ONLY
+  facebook:             # Facebook Reels on your Page: add facebook to platforms above to use it
+    state: draft        # draft: waits on your Page for you to post | published: posts straight away
   schedule:
     timezone: "UTC"     # e.g. "America/New_York"
     slots: []           # e.g. ["12:30", "19:00"]; every platform posts at the same slot. [] = immediately

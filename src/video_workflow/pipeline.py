@@ -41,6 +41,7 @@ from .agents import (
     GrowthAnalyst,
     HookLab,
     Packager,
+    PitchWriter,
     Scriptwriter,
     Translator,
     TrendAnalyst,
@@ -60,6 +61,7 @@ from .flows import (
     GrowthFlow,
     ReportingFlow,
     SoundFlow,
+    SponsorFlow,
     TrendFlow,
     ViralFlow,
 )
@@ -81,7 +83,7 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 @dataclass
 class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, CompilationFlow, SoundFlow,
-               ExperimentFlow, ReportingFlow):
+               ExperimentFlow, SponsorFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -111,6 +113,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         self.growth_analyst = GrowthAnalyst(self.config, self.router)
         self.compliance = ComplianceReviewer(self.config, self.router)
         self.community_manager = CommunityManager(self.config, self.router)
+        self.pitch_writer = PitchWriter(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)

@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
-Platform = Literal["youtube", "instagram", "tiktok"]
+Platform = Literal["youtube", "instagram", "tiktok", "facebook"]
+# Published by default; Facebook Reels is opt-in (add "facebook" to publish.platforms).
 ALL_PLATFORMS: tuple[Platform, ...] = ("youtube", "instagram", "tiktok")
 
 
@@ -39,6 +40,9 @@ class Secrets(BaseSettings):
     tiktok_client_secret: SecretStr | None = None
     tiktok_access_token: SecretStr | None = None
     tiktok_refresh_token: SecretStr | None = None
+
+    facebook_page_id: str | None = None
+    facebook_page_token: SecretStr | None = None
 
     elevenlabs_api_key: SecretStr | None = None
 
@@ -75,6 +79,7 @@ class ChannelConfig(BaseModel):
     content_pillars: list[str] = Field(default_factory=list)
     banned_topics: list[str] = Field(default_factory=list)
     visual_style: str = ""
+    contact: str = ""               # an email for brand enquiries, shown on the media kit ("" = none)
 
 
 class UnitCosts(BaseModel):
@@ -257,6 +262,10 @@ class InstagramConfig(BaseModel):
     share_to_feed: bool = True
 
 
+class FacebookConfig(BaseModel):
+    state: Literal["draft", "published"] = "draft"   # draft: the Reel waits on your Page for you to post it
+
+
 class TikTokConfig(BaseModel):
     mode: Literal["draft", "direct"] = "draft"
     privacy_level: str = "SELF_ONLY"
@@ -278,6 +287,7 @@ class PublishConfig(BaseModel):
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
     instagram: InstagramConfig = Field(default_factory=InstagramConfig)
     tiktok: TikTokConfig = Field(default_factory=TikTokConfig)
+    facebook: FacebookConfig = Field(default_factory=FacebookConfig)
 
 
 class TrendSourceConfig(BaseModel):

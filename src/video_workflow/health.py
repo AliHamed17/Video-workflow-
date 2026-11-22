@@ -100,8 +100,10 @@ def check_llms(config: AppConfig, secrets: Secrets, live: bool) -> list[Check]:
 
 def check_publishers(publishers: dict, live: bool) -> list[Check]:
     out = []
-    for name in ("youtube", "instagram", "tiktok"):
+    for name in ("youtube", "instagram", "tiktok", "facebook"):
         pub = publishers.get(name)
+        if name == "facebook" and pub is None:
+            continue                                   # opt-in: only checked when it's set up
         if pub is None:
             out.append(Check(f"publish {name}", None, "no credentials"))
         elif not live:
@@ -114,6 +116,11 @@ def check_publishers(publishers: dict, live: bool) -> list[Check]:
                                headers=pub._auth(), params={"fields": "id,username"}).json()
                 return f"@{me.get('username', '?')}"
             out.append(_guard("publish instagram", ig))
+        elif name == "facebook":
+            def fb(pub=pub):
+                page = pub.fetch_audience()
+                return f"Page {page.get('name') or '?'} · {page.get('followers') or 0:,} followers"
+            out.append(_guard("publish facebook", fb))
         else:
             def tt(pub=pub):
                 info = pub._api("/v2/post/publish/creator_info/query/", {})
