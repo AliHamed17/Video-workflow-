@@ -34,6 +34,8 @@ class CloudPipeline:
 
     is_cloud = True
     publishers: dict = {}
+    vault_secret: str | None = None   # VW_CLOUD_SECRET: seals the accounts connected on the Connect page
+    http = None                       # for the Google sign-in (tests inject a mock)
 
     def __init__(self, store: CloudStore):
         self.store = store
@@ -133,7 +135,8 @@ def watchdog(pipeline, store, now=None, http=None) -> dict:
     return result
 
 
-def make_cloud_handler(db_url: str | None = None, token: str | None = None, secret: str | None = None):
+def make_cloud_handler(db_url: str | None = None, token: str | None = None, secret: str | None = None,
+                       http=None):
     db_url = db_url or os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL") \
         or os.environ.get("VW_CLOUD_DB") or "sqlite:////tmp/vw-cloud.sqlite3"
     token = token if token is not None else os.environ.get("DASHBOARD_TOKEN")
@@ -141,6 +144,7 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
     cron_secret = os.environ.get("CRON_SECRET")   # Vercel Cron sends it as a Bearer token
     store = CloudStore(DB(db_url))
     pipeline = CloudPipeline(store)
+    pipeline.vault_secret, pipeline.http = secret, http
 
     def resolve(item, path):
         name = PurePath(path).name
@@ -194,7 +198,7 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
 
                 from .sync import RESTORE_KV
                 since = (datetime.now(UTC) - timedelta(days=2)).isoformat()
-                body = json.dumps(store.export(RESTORE_KV, since), default=str).encode()
+                body = json.dumps(store.export(RESTORE_KV + ("connections_vault",), since), default=str).encode()
                 if "gzip" in self.headers.get("Accept-Encoding", ""):  # stay under Vercel's 4.5 MB response cap
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -247,6 +251,7 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                     report["media_pruned"] = store.prune_media(store.item_ids())
                 report["media"] = store.media_shas()
                 report["commands"] = store.pending_commands()
+                report["connections"] = store.kv_get("connections_vault")   # the worker keeps the latest copy
                 return self._json(report)
             if path == "/api/cloud/ack":
                 if not self._worker_ok():

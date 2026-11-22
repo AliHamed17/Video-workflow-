@@ -37,6 +37,16 @@ class LLMRouter:
         # Called after every attempt: (task, label, outcome, latency_ms, input_tokens, output_tokens, error)
         self.listeners: list[Callable[..., None]] = []
 
+    def reset_secrets(self, secrets: Secrets) -> None:
+        """New credentials (e.g. a key connected on the dashboard): rebuild the built-in providers on next use.
+        Providers passed in explicitly (tests, custom ones) are kept."""
+        with self._lock:
+            self.secrets = secrets
+            self._factories = self._default_factories()
+            for name in list(self._providers):
+                if name in self._factories:
+                    del self._providers[name]
+
     def _emit(self, *args) -> None:
         for listener in self.listeners:
             try:

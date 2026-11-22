@@ -228,6 +228,10 @@ class Daemon:
         if self.cloud is not None:
             try:
                 report["cloud"] = self.cloud.sync()["commands"]
+                from .factory import refresh_connections
+                changed = refresh_connections(self.pipeline)   # accounts connected on the dashboard
+                if changed:
+                    report["connections"] = changed
             except Exception as exc:
                 log.warning("cloud sync failed: %s", exc)
                 report["cloud"] = "failed"

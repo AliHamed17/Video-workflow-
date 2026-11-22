@@ -1038,3 +1038,63 @@ def render_community(pipeline, st: dict, flash: str = "") -> str:
     body = (_flash(flash) + f"<h2>Community <span class=meta>· {len(pending)} waiting</span></h2>" + head + button
             + inbox + history)
     return page("Community", body, st, "/community", every_ms=3000 if busy else 30000)
+
+
+def render_connect(pipeline, st: dict, flash: str = "", base: str = "") -> str:
+    """Connect your accounts: one card per service, what's set (and where), how to get it, a form to save it."""
+    from .. import connections
+    from .server import connect_editable, vault_secret
+
+    store = pipeline.store
+    editable = connect_editable(pipeline)
+    secret = vault_secret(pipeline)
+    try:
+        status = connections.status(store.kv_get(connections.KV_KEY), secret, getattr(pipeline, "secrets", None))
+    except Exception:
+        status = {n: {"source": None, "hint": ""} for n in connections.FIELDS}
+        flash = flash or "The saved connections can't be opened with this VW_CLOUD_SECRET."
+    worker = {c["name"]: c for c in (store.kv_get("readiness") or {}).get("checks", [])}
+    if editable:
+        head = ("<p class=meta>Paste each account's keys once. They are encrypted (AES-GCM, with a key from your "
+                "<code>VW_CLOUD_SECRET</code>) before they are stored, are never shown again, and reach your worker "
+                "with its next sync. A value set in the worker's environment always wins. The only variable your "
+                "worker needs itself is <code>VW_CLOUD_SECRET</code> (with <code>VW_CLOUD_URL</code>).</p>")
+    elif getattr(pipeline, "is_cloud", False):
+        head = "<p class=warn>Set VW_CLOUD_SECRET on the Vercel project to connect accounts here.</p>"
+    else:
+        cloud_url = getattr(getattr(pipeline, "secrets", None), "vw_cloud_url", None)
+        head = ("<p class=meta>What this worker has. Accounts are connected on your "
+                + (f"<a href='{e(cloud_url, quote=True)}/connect'>cloud dashboard</a>" if cloud_url else "cloud dashboard")
+                + " (they arrive here with each sync); on this machine you can also put them in <code>.env</code>.</p>")
+    field_style = ("width:100%;font:inherit;padding:7px 9px;border-radius:8px;border:1px solid var(--line);"
+                   "background:var(--card);color:var(--ink);margin:3px 0 8px")
+    cards = []
+    for svc in connections.SERVICES:
+        chips = []
+        for f in svc.fields:
+            src = status[f.name]["source"]
+            hint = f" …{e(status[f.name]['hint'])}" if status[f.name]["hint"] else ""
+            chips.append(f"{pill('✓ ' + ('environment' if src == 'environment' else 'saved') if src else 'missing', 'ok' if src else 'skipped')} "
+                         f"<span class=meta>{e(f.label)}{hint}</span>")
+        done = all(status[f.name]["source"] for f in svc.fields[:1])
+        checked = next((c for name, c in worker.items() if name.lower().startswith(svc.title.split()[0].lower())), None)
+        on_worker = (f"<div class=meta>Worker: {e(checked['detail'])}</div>" if checked else "")
+        how = "".join(f"<li>{e(step.format(base=base))}</li>" for step in svc.how)
+        form = ""
+        if editable:
+            inputs = "".join(
+                f"<label class=meta>{e(f.label)}<input name='{f.name}' type='{'password' if f.secret else 'text'}' "
+                f"autocomplete=off spellcheck=false maxlength=4096 placeholder='{'leave empty to keep' if status[f.name]['source'] else ''}' "
+                f"style='{field_style}'></label>" for f in svc.fields)
+            google = ("<a class=btn href='/connect/youtube/start'>🔑 Connect with Google</a>"
+                      if svc.oauth == "google" else "")
+            remove = ("<button formaction='/connect/remove' class=danger>Remove</button>"
+                      if any(status[f.name]["source"] == "dashboard" for f in svc.fields) else "")
+            form = (f"<form method=post action='/connect/save'><input type=hidden name=service value='{svc.key}'>"
+                    f"{inputs}<div class=actions><button class=primary>Save</button>{google}{remove}</div></form>")
+        cards.append(f"<section><h3>{'✅' if done else '⬜'} {e(svc.title)}</h3><p class=meta>{e(svc.why)}</p>"
+                     f"<div>{'<br>'.join(chips)}</div>{on_worker}"
+                     + (f"<details><summary class=meta>How to get it</summary><ol>{how}</ol></details>" if how else "")
+                     + form + "</section>")
+    body = _flash(flash) + "<h2>Connect your accounts</h2>" + head + "".join(cards)
+    return page("Connect", body, st, "/connect")

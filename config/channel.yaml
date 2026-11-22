@@ -72,6 +72,12 @@ video:
     generate: true               # an original instrumental per video, made with Higgsfield (≈3 credits)
     volume_db: -16
     duck: true                   # music dips under the narration
+  sound_design:                  # generated effects under the mix (nothing to license)
+    enabled: true
+    whooshes: true               # a soft whoosh on every cut
+    riser: true                  # a rising sweep into the last shot
+    end_hit: true                # a low hit as the video ends
+    volume_db: -12
   clip_audio_volume: 0.35        # the clips' own sound under narration
   loudness_lufs: -14
 

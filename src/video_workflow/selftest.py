@@ -228,10 +228,12 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         assert (info["width"], info["height"]) == (width, height) and info["has_audio"]
         assert item.quality and not item.quality.failed, [c.name for c in item.quality.failed]
         assert len(item.voice_clips) == 3 and item.music_track
+        assert (store.item_dir(item.id) / "edit" / "sfx.wav").exists(), "no sound design track"
         state["item"] = item
         warn = len(item.quality.warnings)
         return (f"final approved from Telegram → finals rendered from the drafts → {info['duration']:.1f}s "
-                f"{width}x{height} cut with narration ({pipe.voice.name}), ducked music, word captions · "
+                f"{width}x{height} cut with narration ({pipe.voice.name}), ducked music, sound design (whooshes, "
+                f"riser, end hit), word captions · "
                 f"quality {item.quality.score:.0f}/100 ({warn} warning(s), 0 failures)")
 
     def publish():

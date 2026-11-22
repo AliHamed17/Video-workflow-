@@ -7,7 +7,7 @@ import html
 e = html.escape
 
 NAV = [("/", "Board"), ("/trends", "Trends"), ("/viral", "Viral"), ("/calendar", "Calendar"), ("/activity", "Activity"), ("/workflow", "Workflow"),
-       ("/growth", "Growth"), ("/community", "Community"), ("/metrics", "Metrics"), ("/money", "Money"), ("/health", "Health"), ("/selftest", "Self-test")]
+       ("/growth", "Growth"), ("/community", "Community"), ("/metrics", "Metrics"), ("/money", "Money"), ("/connect", "Connect"), ("/health", "Health"), ("/selftest", "Self-test")]
 
 CSS = """
 :root{--bg:#f5f6f8;--card:#fff;--ink:#14161b;--muted:#5d6472;--line:#e2e5ea;--accent:#4f46e5;
@@ -23,8 +23,8 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px so
 nav{display:flex;gap:4px;flex-wrap:wrap}nav a{padding:5px 10px;border-radius:7px;color:var(--muted)}
 nav a.on{background:var(--chip);color:var(--ink);font-weight:600}nav a:hover{text-decoration:none;color:var(--ink)}
 .strip{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 10px;font-size:13px}
-.chip{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:99px;background:var(--chip);
-color:var(--ink);white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chip{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:14px;max-width:100%;background:var(--chip);
+color:var(--ink);white-space:normal}.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
 .dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}.dot.info{background:var(--info)}
 main{padding:16px 20px 40px;max-width:1500px;margin:auto}
 h2{font-size:15px;margin:22px 0 10px}h3{margin:0 0 8px;font-size:15px}

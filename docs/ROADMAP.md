@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.6: Connect from the dashboard, sound design ✅
+
+- [x] Connect page on the cloud dashboard: every account's keys sealed with AES-GCM (key from VW_CLOUD_SECRET), never shown again; the worker gets them with each sync and rebuilds publishers, notifications, voice and LLM keys
+- [x] Connect with Google: YouTube OAuth on the dashboard (one-time state, 15-minute expiry); no `vw auth-youtube` on a computer
+- [x] Setup checklist points at the Connect page
+- [x] Sound design, generated: a whoosh on every cut, a riser into the last shot, a hit at the end, mixed under narration and music
+
 ## Phase 2.5: Community and discoverability ✅
 
 - [x] Replies to viewers: drafted from the video's fact-checked script (questions first, spam skipped, our own comments ignored), sent from the dashboard, Telegram, the terminal or the cloud; optional auto-reply and first comment

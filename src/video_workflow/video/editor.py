@@ -4,7 +4,8 @@
 2. Fit each shot's narration into its shot (speeding it up a little if needed).
 3. Burn captions: word-by-word from the narration (with the shot's headline on top), or the
    shot's on-screen text.
-4. Mix: clip audio under narration, music ducked under the voice, loudness-normalised.
+4. Mix: clip audio under narration, music ducked under the voice, generated sound design (whooshes on
+   the cuts, a riser into the last shot, a hit at the end), loudness-normalised.
 5. Export a thumbnail.
 """
 
@@ -244,6 +245,10 @@ class Editor:
                 build_ass(timings, self.video.captions, *size), "utf-8")
             vf = "ass=captions.ass"
 
+        # Sound design: whooshes on the cuts, a riser into the payoff, a hit at the end (generated).
+        from . import sfx
+        effects = sfx.build(durations, work / "sfx.wav", self.video.sound_design)
+
         # Audio mix.
         args = ["ffmpeg", "-y", "-i", stitched]
         graph, labels, idx = [], ["[amb]"], 1
@@ -268,6 +273,11 @@ class Editor:
                 labels.append("[musd]")
             else:
                 labels.append("[mus]")
+        if effects is not None:
+            args += ["-i", str(effects)]
+            graph.append(f"[{idx}:a]aformat=sample_rates=48000:channel_layouts=stereo[sfx]")
+            labels.append("[sfx]")
+            idx += 1
         lufs = self.video.loudness_lufs
         graph.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0,"
                      f"loudnorm=I={lufs}:TP=-1.5:LRA=11[a]")

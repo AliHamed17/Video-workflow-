@@ -74,7 +74,8 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
         sources.append("TikTok/Instagram")
     out.append(Need("Viral sources", "ok" if sources else "optional",
                     ", ".join(sources) if sources else "web search fallback (scheduled Claude runs)",
-                    "" if sources else "Set YOUTUBE_API_KEY (free) for real view counts; APIFY_TOKEN for TikTok"))
+                    "" if sources else "Dashboard → Connect → YouTube Data API key (free) for real view counts; "
+                                       "Apify for TikTok"))
 
     # Publishing.
     wanted = set(config.publish.platforms)
@@ -91,7 +92,7 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
             label = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok"}[platform]
             out.append(Need(label, "ok" if ok else "missing",
                             "credentials set" if ok else "not connected",
-                            "" if ok else f"Set {names} (docs/AUTOPILOT.md, 'What you need to set up')"))
+                            "" if ok else f"Dashboard → Connect → {label} (or set {names})"))
 
     # Memory between runs.
     cloud = bool(secrets.vw_cloud_url and secrets.vw_cloud_secret)
@@ -109,7 +110,7 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
     telegram = bool(secrets.telegram_bot_token and secrets.telegram_chat_id)
     out.append(Need("Telegram", "ok" if telegram else "optional",
                     "reports + /pause on your phone" if telegram else "not set",
-                    "" if telegram else "TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (docs/OPERATIONS.md)"))
+                    "" if telegram else "Dashboard → Connect → Telegram (bot token + chat ID)"))
     return out
 
 

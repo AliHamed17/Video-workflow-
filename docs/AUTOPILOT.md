@@ -62,7 +62,11 @@ shot prompts) so it renders the moment you top up.
 
 ## What you need to set up (once)
 
-Create the accounts, then put each value where your worker runs (see "Where it runs").
+Create the accounts, then connect them on the **cloud dashboard → Connect** page: paste each key once
+(it is encrypted before it is stored and never shown again), and for YouTube press **Connect with
+Google**, with no `vw auth-youtube` on a computer. Your worker picks them up at its next sync; the
+only variables it needs itself are `VW_CLOUD_URL` and `VW_CLOUD_SECRET`. Values set in the worker's
+environment still work, and win over the dashboard (see "Where it runs").
 
 ### 1. Higgsfield credits
 A 20-second video (4 shots: keyframe + 1080p shot each, narration and music) costs about **332 credits**. A video a

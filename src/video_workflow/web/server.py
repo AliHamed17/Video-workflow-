@@ -179,6 +179,88 @@ def run_community(pipeline, args: dict) -> tuple[bool, str]:
         return False, str(exc)[:300]
 
 
+# ---- connected accounts ------------------------------------------------------------------------
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 — a URL, not a secret
+OAUTH_TTL_S = 15 * 60
+
+
+def vault_secret(pipeline) -> str | None:
+    """The key the connections vault is sealed with (VW_CLOUD_SECRET), if this process has it."""
+    explicit = getattr(pipeline, "vault_secret", None)
+    if explicit:
+        return explicit
+    secrets = getattr(pipeline, "secrets", None)
+    return secrets.vw_cloud_secret.get_secret_value() if secrets is not None and secrets.vw_cloud_secret else None
+
+
+def connect_editable(pipeline) -> bool:
+    """Accounts are edited on the cloud dashboard only (one source of truth for every worker)."""
+    return bool(getattr(pipeline, "is_cloud", False) and vault_secret(pipeline))
+
+
+def save_connection(pipeline, service_key: str, form: dict, remove: bool = False) -> str:
+    from .. import connections
+
+    service = next((s for s in connections.SERVICES if s.key == service_key), None)
+    if service is None:
+        raise ValueError("unknown service")
+    if not connect_editable(pipeline):
+        raise ValueError("accounts are connected on the cloud dashboard")
+    names = [f.name for f in service.fields]
+    changes = {n: None for n in names} if remove else {n: form.get(n, "") for n in names if form.get(n, "").strip()}
+    if not changes:
+        return "Nothing to save: fill in at least one field."
+    connections.update(pipeline.store, vault_secret(pipeline), changes)
+    pipeline.store.kv_set("connections_changed", datetime.now(UTC).isoformat())
+    return (f"{service.title}: removed." if remove else
+            f"{service.title}: saved {len(changes)} field(s). Your worker picks them up at its next sync.")
+
+
+def google_start(pipeline, base: str) -> str:
+    """The Google consent URL for YouTube (state is remembered for 15 minutes)."""
+    from .. import connections
+    from ..auth import YOUTUBE_SCOPES
+
+    values = connections.unseal(pipeline.store.kv_get(connections.KV_KEY), vault_secret(pipeline))
+    if not (values.get("youtube_client_id") and values.get("youtube_client_secret")):
+        raise ValueError("save the OAuth client ID and secret first")
+    state = pysecrets.token_urlsafe(24)
+    pipeline.store.kv_set("oauth_state", {"state": state, "at": datetime.now(UTC).isoformat()})
+    from urllib.parse import urlencode
+    return GOOGLE_AUTH_URL + "?" + urlencode({
+        "client_id": values["youtube_client_id"], "redirect_uri": f"{base}/connect/youtube/callback",
+        "response_type": "code", "scope": YOUTUBE_SCOPES, "access_type": "offline", "prompt": "consent",
+        "include_granted_scopes": "true", "state": state})
+
+
+def google_finish(pipeline, base: str, code: str, state: str, http=None) -> str:
+    """Exchange Google's code for a refresh token and keep it in the vault."""
+    from .. import connections, net
+
+    saved = pipeline.store.kv_get("oauth_state") or {}
+    pipeline.store.kv_set("oauth_state", None)                         # one use only
+    fresh = saved.get("at") and (datetime.now(UTC) - datetime.fromisoformat(saved["at"])).total_seconds() < OAUTH_TTL_S
+    if not (state and saved.get("state") and fresh and pysecrets.compare_digest(state, saved["state"])):
+        raise ValueError("this sign-in link expired or wasn't started here — press Connect with Google again")
+    secret = vault_secret(pipeline)
+    values = connections.unseal(pipeline.store.kv_get(connections.KV_KEY), secret)
+    resp = net.send(http or net.default_client(), "POST", GOOGLE_TOKEN_URL, idempotent=False, retries=1, data={
+        "code": code, "client_id": values.get("youtube_client_id", ""),
+        "client_secret": values.get("youtube_client_secret", ""),
+        "redirect_uri": f"{base}/connect/youtube/callback", "grant_type": "authorization_code"})
+    body = resp.json() if resp.content else {}
+    if resp.status_code != 200:
+        raise ValueError(f"Google refused the sign-in: {body.get('error_description') or body.get('error') or resp.status_code}")
+    refresh = body.get("refresh_token")
+    if not refresh:
+        raise ValueError("Google sent no refresh token: remove the app at myaccount.google.com/permissions, then "
+                         "connect again")
+    connections.update(pipeline.store, secret, {"youtube_refresh_token": refresh})
+    pipeline.store.kv_set("connections_changed", datetime.now(UTC).isoformat())
+    return "YouTube connected. Your worker uses it from its next sync."
+
+
 def make_handler(pipeline, token: str | None = None):
     store = pipeline.store
 
@@ -216,6 +298,11 @@ def make_handler(pipeline, token: str | None = None):
         def _json(self, payload) -> None:
             self._send(200, json.dumps(payload, default=str).encode(), "application/json")
 
+        def _base_url(self) -> str:
+            cloud = bool(getattr(pipeline, "is_cloud", False))
+            proto = self.headers.get("X-Forwarded-Proto") or ("https" if cloud else "http")
+            return f"{proto}://{self.headers.get('Host', 'localhost')}"
+
         def _redirect(self, where: str):
             self.send_response(303)
             self.send_header("Location", where)
@@ -242,6 +329,25 @@ def make_handler(pipeline, token: str | None = None):
                     return self._send(200, pages.render_viral(pipeline, data.status(pipeline), flash).encode())
                 if path == "/growth":
                     return self._send(200, pages.render_growth(pipeline, data.status(pipeline), flash).encode())
+                if path == "/connect":
+                    return self._send(200, pages.render_connect(pipeline, data.status(pipeline), flash,
+                                                                self._base_url()).encode())
+                if path == "/connect/youtube/start":
+                    if not connect_editable(pipeline):
+                        return self._redirect(f"/connect?flash={quote('Connect YouTube on the cloud dashboard.')}")
+                    try:
+                        return self._redirect(google_start(pipeline, self._base_url()))
+                    except ValueError as exc:
+                        return self._redirect(f"/connect?flash={quote(str(exc))}")
+                if path == "/connect/youtube/callback":
+                    if q.get("error"):
+                        return self._redirect(f"/connect?flash={quote('Google: ' + q['error'][0][:100])}")
+                    try:
+                        msg = google_finish(pipeline, self._base_url(), q.get("code", [""])[0], q.get("state", [""])[0],
+                                            getattr(pipeline, "http", None))
+                    except ValueError as exc:
+                        msg = str(exc)[:300]
+                    return self._redirect(f"/connect?flash={quote(msg)}")
                 if path == "/community":
                     return self._send(200, pages.render_community(pipeline, data.status(pipeline), flash).encode())
                 if path == "/calendar":
@@ -422,6 +528,12 @@ def make_handler(pipeline, token: str | None = None):
                     msg = {"scout": "Scouting…", "remix": "Studying the video and writing our version…",
                            "add": "Added — studying it and writing our version…"}[op]
                 return self._redirect(f"/viral?flash={quote(msg)}")
+            if path in ("/connect/save", "/connect/remove"):
+                try:
+                    msg = save_connection(pipeline, form.get("service", ""), form, remove=path.endswith("remove"))
+                except ValueError as exc:
+                    msg = f"Not saved: {exc}"
+                return self._redirect(f"/connect?flash={quote(msg)}")
             if path in ("/community/send", "/community/skip", "/community/draft"):
                 op = path.rsplit("/", 1)[1]
                 args = {"op": op}

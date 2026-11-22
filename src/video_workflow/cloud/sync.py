@@ -340,6 +340,9 @@ class CloudSync:
                 snapshot["kv"]["token_vault"] = vault
             resp = self.client.sync(snapshot)
             self._pushed(snapshot)
+            vault = resp.get("connections")
+            if vault and vault != self.store.kv_get("connections_vault"):
+                self.store.kv_set("connections_vault", vault)   # the dashboard is the source of truth
             uploaded = self._upload_media(resp.get("media", {}))
             applied = self.apply(resp.get("commands", []))
             if applied:  # push the effect of the commands right away (e.g. the pause state)
@@ -399,6 +402,9 @@ class CloudSync:
                 self.store.save(item)
                 restored += 1
             kv = dict(data.get("kv") or {})
+            connections = kv.pop("connections_vault", None)
+            if connections and connections != self.store.kv_get("connections_vault"):
+                self.store.kv_set("connections_vault", connections)   # always the dashboard's latest copy
             tokens: list[str] = []
             if kv.get("token_vault"):
                 try:
@@ -413,7 +419,8 @@ class CloudSync:
             self.store.kv_set("cloud_pushed_ids", sorted(set(self.store.kv_get("cloud_pushed_ids", []))
                                                          | {i["id"] for i in data.get("items", [])}))
             report = {"items": restored, "clips_refetched": refetched, "flagged": flagged,
-                      "events": len(data.get("events", [])), "state": sorted(kv), "tokens": tokens}
+                      "events": len(data.get("events", [])), "state": sorted(kv), "tokens": tokens,
+                      "connections": sorted((connections or {}).get("fields", []))}
             span.detail = f"{restored} items, {refetched} clips re-fetched, {flagged} flagged"
         return report
 

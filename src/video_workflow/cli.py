@@ -47,7 +47,7 @@ def _setup(config: Path | None, data: Path, generator: str | None = None, publis
     path = resolve_config_path(config)
     if path == EXAMPLE_CONFIG_PATH:
         console.print("[yellow]Using config/channel.example.yaml — run `vw init` to make your own.[/]")
-    return build_pipeline(AppConfig.load(path), Secrets(), data, generator, publishers)
+    return build_pipeline(AppConfig.load(path), None, data, generator, publishers)
 
 
 def _row(item: ContentItem) -> list[str]:
@@ -687,7 +687,13 @@ def autopilot_run(config: ConfigOpt = None, data: DataOpt = Path("data"),
         pipe.config.autopilot.enabled = True
     cloud = build_cloud(pipe)
     if restore and cloud is not None:
-        console.print(f"Restored from the cloud: {cloud.restore()}")
+        report = cloud.restore()
+        console.print(f"Restored from the cloud: {report}")
+        if report.get("connections"):   # accounts connected on the dashboard: rebuild with them
+            pipe = _setup(config, data)
+            if force:
+                pipe.config.autopilot.enabled = True
+            cloud = build_cloud(pipe)
     if not pipe.config.autopilot.enabled:
         raise typer.BadParameter("autopilot.enabled is false in the channel config (or pass --force)")
     report = pipe.autopilot_day()

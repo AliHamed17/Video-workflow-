@@ -67,6 +67,18 @@ temporary SQLite file that is lost between invocations.
 
 Media and items that disappear from the worker are pruned in the cloud.
 
+## Connected accounts
+
+Dashboard → **Connect** holds the accounts the worker posts with (YouTube, Instagram, TikTok,
+Telegram, API keys). Each value is sealed with AES-GCM using a key derived from `VW_CLOUD_SECRET`
+before it is stored in Postgres, is never sent back to a browser (ids show their last characters),
+and travels to the worker inside the sync response. The worker merges it into its credentials at
+startup and after every sync (publishers, notifications, voice and LLM keys are rebuilt); a value
+in the worker's own environment always wins. **Connect with Google** runs YouTube's OAuth on the
+dashboard (register `https://<your-app>.vercel.app/connect/youtube/callback` as a redirect URI); a
+one-time `state` that expires after 15 minutes guards the callback. Only the cloud dashboard edits
+connections; a local dashboard shows what its worker has.
+
 ## Security
 
 - Every dashboard page and media file needs the password (cookie after sign-in, 30 days,

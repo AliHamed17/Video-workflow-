@@ -147,6 +147,16 @@ class MusicConfig(BaseModel):
     model: str = "elevenlabs_music_v2_5"
 
 
+class SoundDesignConfig(BaseModel):
+    """Generated effects under the mix: a whoosh on each cut, a riser into the last shot, a hit at the end."""
+
+    enabled: bool = True
+    whooshes: bool = True
+    riser: bool = True
+    end_hit: bool = True
+    volume_db: float = -12          # relative to the effects' own level; the whole mix is normalised after
+
+
 class VideoConfig(BaseModel):
     target_duration_s: int = 30
     aspect_ratio: str = "9:16"
@@ -155,6 +165,7 @@ class VideoConfig(BaseModel):
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     music: MusicConfig = Field(default_factory=MusicConfig)
+    sound_design: SoundDesignConfig = Field(default_factory=SoundDesignConfig)
     clip_audio_volume: float = 0.35  # level of the clips' own audio under narration
     loudness_lufs: float = -14
 
