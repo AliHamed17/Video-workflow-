@@ -52,6 +52,7 @@ stage.
 | | `flows/autopilot.py` | Daily target, source order (trend × viral format → remix → calendar), spend cap and balance checks, preview gate, pause |
 | | `flows/growth.py` | Comments and retention in, playbook out (rules, avoid, viewer requests, experiment); follow-ups of hits; learned posting times |
 | | `flows/community.py` | Replies to viewers: drafts from the video's own script, send/skip, auto-reply, first comment |
+| | `flows/compilation.py` | The weekly long-form compilation (picks, copy, chapters, YouTube-only publish) |
 | | `flows/sound.py` | Narration per shot (Higgsfield or fallback), music track, extra-language versions |
 | | `flows/reporting.py` | Post stats, performance feedback for ideation, the daily digest (output, spend, trends, money, setup gaps, alerts) |
 | LLM | `llm/router.py` | Task → `[provider:model, ...]` with fallback and lazy provider construction |
@@ -77,6 +78,8 @@ stage.
 | Viral | `viral.py`, `agents/viral_analyst.py`, `flows/viral.py` | Daily scout of top AI shorts → concept analysis → original idea with an inspiration brief for writer, critic, director |
 | Growth | `growth.py`, `agents/growth_analyst.py` | Per-video rows made comparable (index = views ÷ median once mature), breakdowns by format/pillar/hook/source/hour/length, hits, best slots |
 | Search | `seo.py` | YouTube autocomplete phrases for the packager (free, fail-soft) |
+| Compile | `video/compile.py` | Countdown compilation: blurred 16:9 fill, labels, intro/outro cards, chapters, one encode per segment |
+| Ops | `maintenance.py` | Housekeeping: intermediates, old shots, rejected media, old events; disk usage + alert |
 | Money | `money.py` | Ledger (costs per video, subscriptions, revenue imports, invoices), P&L, cash, runway, per-video ROI |
 | Growth | `kit.py`, `sources.py`, `flows/sound.py` (`localize`), `flows/trends.py` (`plan`) | Publish kit zip; ideas from an article; language versions; content calendar |
 | Proof | `selftest.py`, `testing.py` | Whole-system run with a scripted LLM and simulated platform APIs; asserts every expected step is traced |

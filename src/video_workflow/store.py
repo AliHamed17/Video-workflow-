@@ -209,6 +209,12 @@ class Store:
         return [{"id": r[0], "at": r[1], "item_id": r[2], "step": r[3], "status": r[4],
                  "duration_ms": r[5], "detail": r[6], "attrs": json.loads(r[7] or "{}")} for r in rows]
 
+    def prune_events(self, before: datetime) -> int:
+        """Delete trace events older than `before`. Returns how many went."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM events WHERE at < ?", (before.isoformat(),))
+            return cur.rowcount or 0
+
     def step_stats(self, since: datetime | None = None) -> list[dict]:
         """Per step: runs, errors, average and worst duration."""
         args: tuple = ()

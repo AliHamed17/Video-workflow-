@@ -527,6 +527,31 @@ def community(draft: Annotated[bool, typer.Option("--draft", help="Read new comm
 
 
 @app.command()
+def maintenance(dry_run: Annotated[bool, typer.Option("--dry-run", help="Only show what would be deleted")] = False,
+                config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Free disk: editing intermediates of finished videos, old rendered shots, rejected videos' media, old logs."""
+    from . import maintenance as housekeeping
+
+    pipe = _setup(config, data, publishers=False)
+    report = housekeeping.run(pipe.store, pipe.config.maintenance, dry_run=dry_run, tracer=pipe.tracer)
+    use = report["usage"]
+    console.print(f"{'Would free' if dry_run else 'Freed'} {report['freed_mb']} MB ({report['paths']} path(s): "
+                  f"{report['by_reason'] or 'nothing to do'}), {report['events_deleted']} old event(s) deleted")
+    console.print(f"Data folder {use['total_mb']} MB (db {use['db_mb']} MB, media {use['media_mb']} MB) · "
+                  f"{use['free_mb']:,.0f} MB free")
+
+
+@app.command("compile")
+def compile_week(force: Annotated[bool, typer.Option("--force", help="Build it now, whatever the weekday")] = True,
+            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """This week's best Shorts as one long YouTube video (published with the next `vw run`)."""
+    pipe = _setup(config, data, publishers=False)
+    item = pipe.make_compilation(force=force)
+    console.print(f"[green]Compilation {item.id}:[/] {item.idea.title} ({len(item.compiled_from)} Shorts) → "
+                  f"{item.final_video}" if item else "[yellow]Fewer than 2 new Shorts with a final cut this week.[/]")
+
+
+@app.command()
 def digest(send: Annotated[bool, typer.Option("--send", help="Also send it to the notify channels")] = False,
            config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
     """Summary: what is waiting for you, what's scheduled, views and spend."""
@@ -609,7 +634,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 23:
+    if passed != len(results) or len(results) < 24:
         raise typer.Exit(1)
 
 

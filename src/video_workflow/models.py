@@ -236,6 +236,12 @@ class ReplyBatch(BaseModel):
     replies: list[ReplyOption]
 
 
+class CompilationCopy(BaseModel):
+    title: str = Field(description="YouTube title for the compilation, under 90 characters, no #Shorts")
+    description: str = Field(description="2-3 sentences: what's inside and why to watch to the end")
+    tags: list[str] = Field(description="8-15 search tags")
+
+
 class Playbook(BaseModel):
     summary: str = Field(description="Two sentences: how the channel is doing and the single biggest lever")
     rules: list[PlaybookRule] = Field(description="What to do more of, best-supported first")
@@ -439,6 +445,9 @@ class Event(BaseModel):
 class ContentItem(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:10])
     channel: str
+    kind: Literal["short", "compilation"] = "short"
+    platforms: list[str] | None = None      # where this one goes (None: publish.platforms)
+    compiled_from: list[str] = Field(default_factory=list)   # a compilation's Shorts, in order
     stage: Stage = Stage.IDEA
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)

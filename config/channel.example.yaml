@@ -78,6 +78,7 @@ video:
     end_hit: true                # a low hit as the video ends
     volume_db: -12
   clip_audio_volume: 0.35        # the clips' own sound under narration
+  watermark: ""                  # your handle (e.g. "@octofacts"), small in a corner of every video
   loudness_lufs: -14
 
 llm:
@@ -263,6 +264,24 @@ seo:
   # YouTube's own autocomplete: what people type about the topic, used in titles, descriptions and tags.
   enabled: true
   region: US
+
+compilation:
+  # Every week, the week's best Shorts as ONE long video for YouTube (long-form earns far more per view
+  # than Shorts): 16:9 with a blurred background, counted down to #1, intro + outro, chapters.
+  enabled: false            # off by default: it posts a new kind of video
+  weekday: sun
+  min_videos: 5             # Shorts published in the last 7 days
+  max_videos: 10
+  landscape: true           # false: a long vertical video
+  platforms: [youtube]
+
+maintenance:
+  # Daily housekeeping (with the daemon, or `vw maintenance`): never touches videos in progress.
+  enabled: true
+  clean_edit_after_days: 7      # editing intermediates of finished videos (the final cut stays)
+  clean_clips_after_days: 45    # rendered shot files of published videos
+  delete_rejected_after_days: 14
+  keep_events_days: 120
 
 notify:
   # log | telegram | slack | discord | webhook (credentials in .env)

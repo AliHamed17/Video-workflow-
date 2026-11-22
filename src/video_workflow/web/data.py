@@ -204,6 +204,10 @@ def prometheus(pipeline) -> str:
     for model, v in m["models"].items():
         lines.append(f'vw_llm_calls_30d{{model="{model}",outcome="ok"}} {v["calls"] - v["errors"]}')
         lines.append(f'vw_llm_calls_30d{{model="{model}",outcome="error"}} {v["errors"]}')
+    disk = (pipeline.store.kv_get("maintenance_last") or {}).get("usage") or {}
+    if disk:
+        lines += ["# TYPE vw_data_mb gauge", f"vw_data_mb {disk.get('total_mb', 0)}",
+                  "# TYPE vw_disk_free_mb gauge", f"vw_disk_free_mb {disk.get('free_mb', 0)}"]
     # Money and autopilot (for Grafana / uptime alerts).
     from ..money import summary
     books = summary(pipeline.store, pipeline.config.money)

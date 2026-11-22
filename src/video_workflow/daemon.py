@@ -187,6 +187,13 @@ class Daemon:
             report["pitched"] = len(self.pipeline.ideate(need))
 
         # 3. Move everything forward (publishes whatever is due).
+        if self.pipeline.compilation_due():          # the weekly long-form video (compilation.enabled)
+            try:
+                made = self.pipeline.make_compilation()
+                report["compilation"] = made.id if made else "skipped"
+            except Exception as exc:
+                log.warning("compilation failed: %s", exc)
+                report["compilation"] = "failed"
         report["advanced"] = len(self.pipeline.run())
 
         # 4. Stats.
@@ -214,6 +221,16 @@ class Daemon:
             except Exception as exc:
                 log.warning("money refresh failed: %s", exc)
             self.store.kv_set("last_money", today.isoformat())
+
+        # Housekeeping, once a day: intermediates of finished videos, old trace events.
+        if self.config.maintenance.enabled and self.store.kv_get("last_maintenance") != today.isoformat():
+            try:
+                from . import maintenance
+                report["maintenance_mb"] = maintenance.run(self.store, self.config.maintenance,
+                                                           tracer=self.pipeline.tracer)["freed_mb"]
+            except Exception as exc:
+                log.warning("maintenance failed: %s", exc)
+            self.store.kv_set("last_maintenance", today.isoformat())
 
         # 5. Daily digest.
         if self._local_now().hour >= rt.digest_hour and self.store.kv_get("last_digest") != today.isoformat():

@@ -31,6 +31,7 @@ HELP = ("Commands:\n/list — items in progress\n/status <id> — one video, wit
         "/insights — what works on our channel, our hits, what viewers ask for\n"
         "/followup <n> — a follow-up of hit n · /ask <n> — make what viewers asked for (n from /insights)\n"
         "/replies — drafted answers to viewers · /send <n> [your own words] · /skip <n>\n"
+        "/compile — this week's best Shorts as one long YouTube video\n"
         "/autopilot — on/paused, today's spend vs cap · /ready — what's still missing to run alone\n"
         "/alerts · /plan — the content calendar · /digest — summary now\n"
         "/pause · /resume — stop or restart the autopilot (nothing new is written, rendered or posted while paused)")
@@ -133,6 +134,12 @@ class TelegramBot:
             self.say(self.remix(rest.strip()))
         elif command == "/insights":
             self.say(self.insights_text())
+        elif command == "/compile":
+            requests = self.store.kv_get("pending_requests", [])
+            requests.append({"growth": {"op": "compile"}})
+            self.store.kv_set("pending_requests", requests)
+            self.on_change()
+            self.say("🎞 Queued: this week's compilation is built on the next cycle.")
         elif command in ("/followup", "/ask"):
             self.say(self.queue_growth(command, rest.strip()))
         elif command == "/replies":

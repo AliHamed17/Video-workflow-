@@ -41,6 +41,12 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 2.7: Weekly compilation, watermark, housekeeping ✅
+
+- [x] Weekly long-form compilation for YouTube from the week's best Shorts: countdown, blurred 16:9, intro/outro, chapters
+- [x] Your handle as a watermark on every video (also with captions off)
+- [x] Daily housekeeping: editing intermediates, old rendered shots, rejected media, old events; Storage on the Health page; low-disk alert
+
 ## Phase 2.6: Connect from the dashboard, sound design ✅
 
 - [x] Connect page on the cloud dashboard: every account's keys sealed with AES-GCM (key from VW_CLOUD_SECRET), never shown again; the worker gets them with each sync and rebuilds publishers, notifications, voice and LLM keys

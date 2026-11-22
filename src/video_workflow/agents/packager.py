@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models import Packaging, Script
+from ..models import CompilationCopy, Packaging, Script
 from .base import Agent, load_prompt
 
 
@@ -27,3 +27,10 @@ class Packager(Agent):
         pkg.youtube.alt_titles = [t.strip() for t in pkg.youtube.alt_titles
                                   if t.strip() and t.strip() != pkg.youtube.title.strip()][:3]
         return pkg
+
+    def compilation(self, titles: list[str]) -> CompilationCopy:
+        disclosure = ("Every video in it is AI-generated; don't call it real footage."
+                      if self.config.publish.ai_disclosure else "")
+        prompt = load_prompt("compilation").substitute(
+            titles="\n".join(f"{len(titles) - n}. {t}" for n, t in enumerate(titles)), disclosure=disclosure)
+        return self.ask(prompt, CompilationCopy)

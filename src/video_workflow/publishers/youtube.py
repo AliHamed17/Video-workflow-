@@ -71,7 +71,7 @@ class YouTubePublisher(HTTPPublisher):
                           headers={"Authorization": f"Bearer {token}", "Content-Type": "video/mp4"})
         video_id = done.json()["id"]
         return PublishResult(platform=self.name, ok=True, post_id=video_id,
-                             url=f"https://youtube.com/shorts/{video_id}",
+                             url=f"https://youtube.com/{'watch?v=' if item.kind == 'compilation' else 'shorts/'}{video_id}",
                              detail=f"privacy={self.config.privacy}")
 
     def fetch_revenue(self, start: str, end: str) -> dict[str, dict]:

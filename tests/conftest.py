@@ -7,6 +7,7 @@ import pytest
 from video_workflow.config import AppConfig
 from video_workflow.models import (
     Claim,
+    CompilationCopy,
     ComplianceCheck,
     FactCheck,
     HookOption,
@@ -83,6 +84,9 @@ def default_responses(shots: int = 2) -> dict:
         FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
         ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
         ComplianceCheck: ComplianceCheck(verdict="pass", issues=[]),
+        CompilationCopy: CompilationCopy(title="5 Animal Superpowers That Sound Fake (#1 Is Real)",
+                                         description="Our best five this week, counted down. Stay for #1.",
+                                         tags=["animal facts", "octopus", "science"]),
         ReplyBatch: ReplyBatch(replies=[
             ReplyOption(index=0, reply="The one that pumps blood to the body pauses while it swims, so it prefers to "
                         "crawl! 🐙", skip=False, why="answers the question from the script"),

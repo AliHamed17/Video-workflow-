@@ -23,11 +23,15 @@ Telegram) the daemon:
    watched, then the top comments (and drafted replies to them), title rescue if it's on, then the
    growth numbers. The playbook is rewritten weekly
    ([GROWTH.md](GROWTH.md)).
-6. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`):
+6. Once a day: housekeeping (`maintenance:`) removes editing intermediates of finished videos,
+   rendered shots of videos published over 45 days ago, the media of long-rejected videos and old log
+   events; never anything in progress, never a final cut. On its weekday, the weekly compilation.
+   Health → Storage shows the data folder and free space; under 1 GB free raises an alert.
+7. Sends the daily digest after `runtime.digest_hour` (local time of `publish.schedule.timezone`):
    what went out today, what waits for you, the next post, views, the autopilot's spend against its
    cap, the Higgsfield balance, today's top trends, this month's money (income, costs, cash, runway,
    overdue payments), setup gaps and open alerts.
-7. With `VW_CLOUD_URL` set: pushes everything to the cloud dashboard and applies the commands
+8. With `VW_CLOUD_URL` set: pushes everything to the cloud dashboard and applies the commands
    you clicked there (checked every 30 s).
 
 Only one daemon can run per `data/` directory (file lock). The dashboard, the bot and manual
@@ -64,6 +68,7 @@ The bot obeys only that chat. Commands:
 | `/ideas [n] [topic or URL]` | Pitch new ideas on the next cycle |
 | `/viral`, `/remix <n>` | Today's top AI videos; make our own version of number *n* |
 | `/trends [refresh]` | What's trending for this channel, with momentum, time left and our angle |
+| `/compile` | This week's best Shorts as one long YouTube video |
 | `/replies`, `/send <n> [your words]`, `/skip <n>` | Drafted answers to viewers' comments: send or skip ([COMMUNITY.md](COMMUNITY.md)) |
 | `/insights`, `/followup <n>`, `/ask <n>` | What works on our channel, hits to follow up, what viewers asked for; act on them |
 | `/money` | This month's income and costs, cash, burn, runway, overdue payments, best-earning videos |

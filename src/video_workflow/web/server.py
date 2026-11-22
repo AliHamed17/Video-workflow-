@@ -147,6 +147,10 @@ def run_growth(pipeline, args: dict) -> tuple[bool, str]:
         if op == "follow_up":
             item = pipeline.follow_up(args["id"])
             return (True, f"follow-up {item.id}: {item.idea.title[:70]}") if item else (False, "no idea pitched")
+        if op == "compile":
+            item = pipeline.make_compilation(force=True)
+            return (True, f"compilation {item.id}: {item.idea.title[:70]}") if item else \
+                (False, "fewer than 2 new Shorts with a final cut this week")
         if op == "request":
             item = pipeline.pitch_request(int(args["index"]))
             return (True, f"idea {item.id}: {item.idea.title[:70]}") if item else (False, "no idea pitched")
@@ -558,8 +562,9 @@ def make_handler(pipeline, token: str | None = None):
                 else:
                     msg = run_community(pipeline, args)[1]
                 return self._redirect(f"/community?flash={quote(msg)}")
-            if path in ("/growth/refresh", "/growth/follow-up", "/growth/request"):
-                op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request"}[path.rsplit("/", 1)[1]]
+            if path in ("/growth/refresh", "/growth/follow-up", "/growth/request", "/growth/compile"):
+                op = {"refresh": "refresh", "follow-up": "follow_up", "request": "request",
+                      "compile": "compile"}[path.rsplit("/", 1)[1]]
                 args = {"op": op}
                 if op == "follow_up":
                     if not re.fullmatch(r"[0-9a-f]{6,32}", form.get("id", "")):
@@ -575,7 +580,8 @@ def make_handler(pipeline, token: str | None = None):
                 else:
                     if not store.kv_get("growth_running"):
                         _background("growth", lambda: run_growth(pipeline, args))
-                    msg = {"refresh": "Reading our results and rewriting the playbook…",
+                    msg = {"compile": "Building this week's compilation…",
+                           "refresh": "Reading our results and rewriting the playbook…",
                            "follow_up": "Writing a follow-up of the hit…",
                            "request": "Pitching what the viewers asked for…"}[op]
                 return self._redirect(f"/growth?flash={quote(msg)}")

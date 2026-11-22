@@ -61,7 +61,7 @@ def _stage_label(item: ContentItem) -> str:
 def _card(item: ContentItem, now_events: dict, now: datetime) -> str:
     thumb = _media(item, item.thumbnail)
     img = f"<img class=thumb src='{thumb}' alt='' loading=lazy>" if thumb else ""
-    bits = [f"{item.id}", e(_stage_label(item))]
+    bits = [f"{item.id}", e(_stage_label(item))] + (["🎞 compilation"] if item.kind == "compilation" else [])
     if item.review:
         bits.append(f"critic {item.review.score:.1f}")
     if item.quality:
@@ -549,6 +549,27 @@ def _args(args: dict | None) -> str:
     return " ".join(f"{k}={v}" for k, v in (args or {}).items() if v not in (None, "") and k != "op")[:80]
 
 
+def storage_html(pipeline) -> str:
+    """The worker's disk: data folder, free space, biggest videos, and what housekeeping last freed."""
+    last = pipeline.store.kv_get("maintenance_last")
+    if not last and getattr(pipeline, "is_cloud", False):
+        return ""
+    if last:
+        use = last.get("usage") or {}
+    else:
+        from .. import maintenance
+        use = maintenance.usage(pipeline.store)
+    tone = "bad" if (use.get("free_mb") or 1e9) < 1000 else ""
+    biggest = ", ".join(f"<a href='/item/{e(i)}'>{e(i)}</a> {mb:.0f} MB" for i, mb in use.get("biggest", [])[:3])
+    freed = (f"<p class=meta>Housekeeping {e(last['at'][:16].replace('T', ' '))} UTC: freed {last['freed_mb']} MB "
+             f"({last['paths']} path(s)), {last['events_deleted']} old event(s). `vw maintenance` runs it now.</p>"
+             if last else "<p class=meta>Housekeeping runs daily with the daemon (`vw maintenance`).</p>")
+    return (f"<h2>Storage</h2><section><p>Data folder <b>{use.get('total_mb', 0):.0f} MB</b> (database "
+            f"{use.get('db_mb', 0):.0f} MB, media {use.get('media_mb', 0):.0f} MB for {use.get('items', 0)} videos) · "
+            f"<b class='{tone}'>{use.get('free_mb', 0):,.0f} MB free</b></p>"
+            + (f"<p class=meta>Biggest: {biggest}</p>" if biggest else "") + freed + "</section>")
+
+
 def render_health(pipeline, st: dict, flash: str = "") -> str:
     health = pipeline.store.kv_get("health_last")
     running = pipeline.store.kv_get("health_running")
@@ -588,7 +609,7 @@ def render_health(pipeline, st: dict, flash: str = "") -> str:
     body = (_flash(flash) + readiness_html(pipeline) + "<h2>Alerts</h2>" + watch
             + (alerts_html(st) or "<p class=ok>No alerts. All good.</p>")
             + f"<h2>Connections</h2><section>{bal}<p class=meta>{when}</p>{buttons}<table>{rows}</table></section>"
-            + commands)
+            + storage_html(pipeline) + commands)
     return page("Health", body, st, "/health", every_ms=4000 if running else 5000)
 
 
@@ -905,9 +926,13 @@ def render_growth(pipeline, st: dict, flash: str = "") -> str:
             (num(g.get("median_hook_hold"), "%"), "median hook hold (3 s)"), (len(g.get("winners", [])), "hits")]
     kpi_html = "<div class=kpis>" + "".join(f"<div class=kpi><b>{v}</b><span>{label}</span></div>"
                                              for v, label in kpis) + "</div>"
+    cc = pipeline.config.compilation
     button = ("<p class=warn>Working on it…</p>" if busy else
               "<div class=actions><form method=post action='/growth/refresh'><button class=primary>📈 Re-read our "
-              "results</button></form></div>")
+              "results</button></form><form method=post action='/growth/compile'><button>🎞 Make this week's "
+              "compilation</button></form></div>"
+              "<p class=meta>Weekly compilation (long-form YouTube video from the week's best Shorts): "
+              + (f"on, every {cc.weekday}" if cc.enabled else "off (compilation.enabled)") + "</p>")
     errors = "".join(f"<p class=meta>⚠ {e(k)}: {e(v)}</p>" for k, v in (g.get("errors") or {}).items())
 
     pb = g.get("playbook")

@@ -290,6 +290,41 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
                 f"(our own comments skipped), one sent from Telegram · first comment on YouTube + Instagram · "
                 f"title rescue: 1,800 first-day views vs ~10,000 usual → \"{new[:40]}\" (description kept)")
 
+    def compilation():
+        import shutil as sh
+
+        from . import maintenance
+        made = store.get(state["item"].id)
+        older = sorted((i for i in store.list(Stage.PUBLISHED) if i.id != made.id and i.kind == "short"),
+                       key=lambda i: i.history[-1].at, reverse=True)[:2]
+        for other in older:                       # two earlier Shorts of the week, with their final cuts
+            dest = store.item_dir(other.id) / "final.mp4"
+            sh.copyfile(made.final_video, dest)
+            other.final_video = str(dest)
+            store.save(other)
+        item = pipe.make_compilation(force=True)
+        assert item and item.kind == "compilation" and len(item.compiled_from) == 3, item
+        info = probe(item.final_video)
+        assert (info["width"], info["height"]) == (1920, 1080) and info["has_audio"]
+        desc = item.packaging.youtube.description
+        assert "0:00 #3 · " in desc and "#1 · " in desc and "AI-generated" in desc, desc
+        result = pipe.publish(item)
+        urls = [r.url for r in result.publishes if r.ok]
+        assert result.stage == Stage.PUBLISHED and urls and "watch?v=" in urls[0] and len(urls) == 1, result.publishes
+        assert pipe.make_compilation(force=True) is None                     # the same Shorts aren't reused
+        # Housekeeping: a video rejected three weeks ago gives its media back.
+        old = next(i for i in store.list(Stage.REJECTED))
+        (store.item_dir(old.id) / "leftover.bin").write_bytes(b"x" * 200_000)
+        old.updated_at = datetime.now(UTC) - timedelta(days=21)
+        store.save(old)
+        dry = maintenance.run(store, pipe.config.maintenance, dry_run=True)
+        done = maintenance.run(store, pipe.config.maintenance)
+        assert dry["paths"] == done["paths"] >= 1 and not (store.item_dir(old.id) / "leftover.bin").exists()
+        assert (store.item_dir(made.id) / "final.mp4").exists()               # finished videos keep their cut
+        return (f"weekly compilation: 3 Shorts → {info['duration']:.0f}s 1920x1080 with countdown labels, intro/outro "
+                f"and chapters, posted to YouTube only ({urls[0].split('/')[-1][:20]}) · housekeeping freed "
+                f"{done['freed_mb']} MB, kept every final cut")
+
     def compliance():
         llm = pipe.router._providers["fake"]
         saved = {k: llm.responses[k] for k in (Script, ComplianceCheck)}
@@ -363,7 +398,8 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
     def digest():
         notice = pipe.digest()
         pipe.notify(notice)
-        assert any(line.startswith("Published today: 1 — ") for line in notice.lines), notice.lines
+        title = state["item"].idea.title[:40]
+        assert any(line.startswith("Published today: ") and title in line for line in notice.lines), notice.lines
         return notice.lines[0]
 
     def dashboard():
@@ -528,6 +564,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Growth: learn from results → follow up the hit", growth),
         ("Compliance: a risky script is fixed before rendering", compliance),
         ("Engagement: search phrases, replies to viewers, title rescue", engagement),
+        ("Weekly compilation + housekeeping", compilation),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

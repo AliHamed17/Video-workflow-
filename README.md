@@ -37,6 +37,7 @@ vw cloud deploy # the same dashboard on Vercel: watch and approve from your phon
 | **Growth** | Learns from our own results: every video's views against our median, % watched, hook hold at 3 s and the shot where viewers leave, engagement and what it was made of; a weekly playbook (what to repeat, what to drop, one experiment) that ideas, hooks and scripts follow; follow-ups of our hits; video ideas from viewers' comments; best posting times ([docs/GROWTH.md](docs/GROWTH.md)) |
 | **Community** | Drafted replies to viewers' comments (questions first, answered only from the video's fact-checked script; spam and bait skipped), sent from the dashboard or Telegram; optional first comment; real YouTube search phrases in titles and tags; title rescue for a video that underperforms on day one ([docs/COMMUNITY.md](docs/COMMUNITY.md)) |
 | **Connect** | Connect YouTube (one click with Google), Instagram, TikTok, Telegram and API keys on the cloud dashboard: encrypted with your cloud secret, never shown again, picked up by the worker at its next sync. The worker itself only needs `VW_CLOUD_URL` + `VW_CLOUD_SECRET` |
+| **Compilation** | Weekly: the week's best Shorts as one long 16:9 YouTube video (long-form earns far more per view), counted down to #1, with chapters, intro and outro; your handle as a watermark on every video; daily housekeeping keeps the worker's disk clean |
 | **Money** | Costs per video (credits + AI usage) and subscriptions, YouTube ad revenue per video, Stripe sponsor payments, CSV imports, invoices with due dates, cash, burn and runway, ROI/RPM per video; budget, runway and overdue-payment alerts ([docs/MONEY.md](docs/MONEY.md)) |
 | **Cloud control room** | The dashboard on **Vercel** + Neon Postgres: your worker syncs items, traces, previews and thumbnails; approve, re-render, publish or request ideas from anywhere; the worker picks commands up within ~30 s ([docs/CLOUD.md](docs/CLOUD.md)) |
 | **One video, many languages** | The same footage re-voiced, re-captioned and re-packaged per language (e.g. Spanish, Arabic with right-to-left captions); each version gets its own QA score |
@@ -118,6 +119,7 @@ For unattended runs use `video.generator: higgsfield_mcp` + `HIGGSFIELD_MCP_TOKE
 | `vw audio add <id> voice\|music <url>` | Register Higgsfield narration / music (the render skill does this) |
 | `vw growth [--stats] [--refresh] [--follow-up ID] [--request N]` | What our results say: the playbook, hits worth a follow-up, viewer requests |
 | `vw community [--draft] [--send N] [--skip N]` | Replies to viewers: draft, send, skip |
+| `vw compile` · `vw maintenance [--dry-run]` | This week's compilation now · free disk (intermediates, old shots, rejected videos, old logs) |
 | `vw money report\|add\|paid\|import` | The books: P&L, cash, runway, per-video ROI; record income, expenses, invoices |
 | `vw cloud restore` | Continue on a fresh machine (state, today's spend, rotated tokens) |
 | `vw viral [--remix N]` · `vw viral-add <url> [--remix]` | Today's top AI shorts · our own versions of their formats |

@@ -196,6 +196,12 @@ class AutopilotFlow:
             except Exception as exc:
                 log.warning("growth report failed: %s", exc)
         report = self.autopilot_fill()
+        if report["active"] and self.compilation_due():
+            try:
+                made = self.make_compilation()
+                report["compilation"] = made.id if made else "skipped"
+            except Exception as exc:   # a compilation must never stop the day's video
+                log.warning("compilation failed: %s", exc)
         if report["active"]:
             moved = self.run()
             report["published"] = sum(1 for i in moved if i.stage == Stage.PUBLISHED)

@@ -171,7 +171,7 @@ class GrowthFlow:
         update = getattr(self.publishers.get("youtube"), "update_title", None)
         if not (gc.title_rescue and update):
             return []
-        counted = [i for i in self.store.list(Stage.PUBLISHED) if "youtube" in i.early_views]
+        counted = [i for i in self.store.list(Stage.PUBLISHED) if "youtube" in i.early_views and i.kind == "short"]
         changed = []
         for item in counted:
             at = published_at(item)

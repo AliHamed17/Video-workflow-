@@ -54,6 +54,17 @@ follows still win over a rule.
 See [COMMUNITY.md](COMMUNITY.md#title-rescue): with `growth.title_rescue: true`, a video far below
 our usual first-day views switches to a reserve title the packager wrote, once.
 
+## Weekly compilation
+
+Shorts earn little per view; long videos earn far more. With `compilation.enabled: true`, every
+`compilation.weekday` the week's best Shorts (by views, up to `max_videos`, at least `min_videos`)
+become one long video for YouTube: 16:9 with the Short sharp in the middle of a blurred copy of itself,
+a countdown label on each (#5 … #1, the best last), an intro and an outro card (your
+`video.watermark` handle), and chapters in the description (the first at 0:00, as YouTube requires).
+The packager writes its title, description and tags. It goes to `compilation.platforms` (YouTube)
+with the next publish, as a regular video, never as a Short. A Short is never compiled twice.
+Dashboard → Growth → 🎞 Make this week's compilation, `/compile` on Telegram, or `vw compile`.
+
 ## Where you see it
 
 | Where | What |

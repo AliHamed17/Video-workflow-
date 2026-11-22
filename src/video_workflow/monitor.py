@@ -151,6 +151,14 @@ def scan(store: Store, config: AppConfig, now: datetime | None = None) -> list[A
             alerts.append(Alert("readiness", "warning", "Autopilot setup incomplete",
                                 "missing: " + ", ".join(ready.get("missing", [])) + " (Health → Autopilot setup)"))
 
+    # Disk space on the worker (recorded by the daily housekeeping).
+    disk = (store.kv_get("maintenance_last") or {}).get("usage") or {}
+    if disk.get("free_mb") is not None and disk["free_mb"] < 1000:
+        alerts.append(Alert("disk", "critical" if disk["free_mb"] < 300 else "warning",
+                            f"Worker disk almost full: {disk['free_mb']:.0f} MB free",
+                            f"data folder {disk.get('total_mb', 0):.0f} MB — run `vw maintenance`, or lower "
+                            "maintenance.clean_clips_after_days"))
+
     # Last live connection check.
     health = store.kv_get("health_last")
     if health:

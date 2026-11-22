@@ -83,7 +83,7 @@ def video_rows(items: list[ContentItem], now: datetime, tz: ZoneInfo, mature_hou
     rows = []
     for item in items:
         at = published_at(item)
-        if item.stage != Stage.PUBLISHED or at is None:
+        if item.stage != Stage.PUBLISHED or at is None or item.kind != "short":   # compilations aren't Shorts
             continue
         m = item.metrics
         views = item.total_views

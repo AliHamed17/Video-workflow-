@@ -55,6 +55,7 @@ from .config import AppConfig
 from .flows import (
     AutopilotFlow,
     CommunityFlow,
+    CompilationFlow,
     GrowthFlow,
     ReportingFlow,
     SoundFlow,
@@ -78,7 +79,8 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 
 @dataclass
-class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, SoundFlow, ReportingFlow):
+class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, CompilationFlow, SoundFlow,
+               ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -647,7 +649,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, S
             return item
         if not force and not schedule.is_due(item.scheduled_for, self.clock()):
             return item
-        targets = list(platforms or self.config.publish.platforms)
+        targets = list(platforms or item.platforms or self.config.publish.platforms)
         duration = probe(item.final_video)["duration"]
         done = item.published_platforms()
         jobs: dict[str, Publisher] = {}
@@ -658,7 +660,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, S
             if publisher is None:
                 log.warning("No publisher configured for %s — skipping", platform)
                 continue
-            lo, hi = DURATION_LIMITS[platform]
+            lo, hi = (1, 12 * 3600) if item.kind == "compilation" else DURATION_LIMITS[platform]   # long-form
             if not lo <= duration <= hi:
                 self._record_failure(item, platform, f"duration {duration:.1f}s outside {lo}-{hi}s")
                 continue

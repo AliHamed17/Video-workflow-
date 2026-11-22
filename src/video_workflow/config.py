@@ -166,6 +166,7 @@ class VideoConfig(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     music: MusicConfig = Field(default_factory=MusicConfig)
     sound_design: SoundDesignConfig = Field(default_factory=SoundDesignConfig)
+    watermark: str = ""            # your handle (e.g. "@octofacts"), small in a corner of every video; "" = none
     clip_audio_volume: float = 0.35  # level of the clips' own audio under narration
     loudness_lufs: float = -14
 
@@ -382,6 +383,29 @@ class GrowthConfig(BaseModel):
     rescue_min_videos: int = 3       # ... once this many earlier videos have a first-day count
 
 
+class CompilationConfig(BaseModel):
+    """A weekly long-form video for YouTube from the week's best Shorts (long videos earn far more per view)."""
+
+    enabled: bool = False            # off by default: it posts a new kind of video
+    weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "sun"
+    min_videos: int = 5              # Shorts published in the last 7 days needed
+    max_videos: int = 10             # the best ones by views, counted down to #1
+    landscape: bool = True           # 16:9 with a blurred background (false: a long vertical video)
+    platforms: list[Platform] = Field(default_factory=lambda: ["youtube"])
+    intro_s: float = 2.5
+    outro_s: float = 3.0
+
+
+class MaintenanceConfig(BaseModel):
+    """Housekeeping for an always-on worker: intermediate files and old logs, never anything still in use."""
+
+    enabled: bool = True
+    clean_edit_after_days: int = 7       # editing intermediates of finished videos (the final cut stays)
+    clean_clips_after_days: int = 45     # rendered shot files of published videos (no re-renders after this)
+    delete_rejected_after_days: int = 14  # media of rejected videos (the record stays)
+    keep_events_days: int = 120          # the step-by-step trace log
+
+
 class CommunityConfig(BaseModel):
     """Answering viewers. Replies are drafted from the video's own (fact-checked) script; they are sent
     when you approve them, or by themselves with auto_reply."""
@@ -434,6 +458,8 @@ class AppConfig(BaseModel):
     growth: GrowthConfig = Field(default_factory=GrowthConfig)
     compliance: ComplianceConfig = Field(default_factory=ComplianceConfig)
     community: CommunityConfig = Field(default_factory=CommunityConfig)
+    compilation: CompilationConfig = Field(default_factory=CompilationConfig)
+    maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     seo: SeoConfig = Field(default_factory=SeoConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)

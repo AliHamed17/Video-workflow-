@@ -15,6 +15,7 @@ import httpx
 from .models import (
     AudienceRequest,
     Claim,
+    CompilationCopy,
     ComplianceCheck,
     ComplianceIssue,
     ContentPlan,
@@ -138,6 +139,9 @@ def demo_content(shots: int = 2, duration: int = 3) -> dict:
                         "prefer crawling.", skip=False, why="answers the question from the script"),
             ReplyOption(index=1, reply="Noted! The pistol shrimp snaps a bubble hotter than the Sun's surface — "
                         "we'll take a look 🦐", skip=False, why="a request we can answer honestly")]),
+        CompilationCopy: CompilationCopy(title="This Week's Wildest Animal Facts, Counted Down (#1 Will Surprise You)",
+                                         description="Our best Shorts of the week in one place, from #5 to the one "
+                                                     "everyone shared.", tags=["animal facts", "octopus", "biology"]),
         Playbook: Playbook(
             summary="Animal superpowers shown up close beat everything else 3 to 1; the opening second decides it.",
             rules=[PlaybookRule(do="Open on the impossible visual and say the number in the first second",

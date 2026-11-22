@@ -82,7 +82,8 @@ def word_chunks(text: str, size: int) -> list[str]:
     return [" ".join(c) for c in chunks]
 
 
-def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, height: int) -> str:
+def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, height: int,
+              watermark: str = "") -> str:
     scale = height / 1920
     size = round(captions.font_size * scale)
     head = round(captions.font_size * 0.72 * scale)
@@ -103,6 +104,10 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
         style("Word", captions.highlight_color, size, 2, 560),
         style("Shot", "&H00FFFFFF", size, 2, 460),
         style("Headline", "&H00FFFFFF", head, 8, 240),
+        # The handle: small, top-right, ~55% opaque, thin outline (alpha 0x70 in ASS's &HAABBGGRR).
+        (f"Style: Brand,{captions.font},{round(34 * scale)},&H70FFFFFF,&H000000FF,&H90000000,&H00000000,"
+         f"-1,0,0,0,100,100,0,0,1,{max(1, outline // 3)},0,9,{round(40 * scale)},{round(40 * scale)},"
+         f"{round(150 * scale)},1"),
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -114,6 +119,11 @@ def build_ass(shots: list[ShotTiming], captions: CaptionConfig, width: int, heig
             lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},{style_name},,0,0,0,,"
                          f"{{\\fad({fade},{fade}){anim}}}{_ass_text(text)}")
 
+    if watermark.strip() and shots:
+        total_end = shots[-1].start + shots[-1].duration
+        lines.append(f"Dialogue: 1,{_ass_time(0)},{_ass_time(total_end)},Brand,,0,0,0,,{_ass_text(watermark.strip())}")
+    if not captions.burn_in:
+        return "\n".join(lines) + "\n"
     use_words = captions.mode == "words" or (
         captions.mode == "auto" and any(s.speech for s in shots))
     for shot in shots:
@@ -234,15 +244,15 @@ class Editor:
                   "-c", "copy", "voice.wav"], cwd=work)
             voice_track = work / "voice.wav"
 
-        # Captions.
+        # Captions (and the watermark, which shows even with captions off).
         vf = "null"
-        if self.video.captions.burn_in:
+        if self.video.captions.burn_in or self.video.watermark.strip():
             timings, t = [], 0.0
             for (on_screen, spoken), dur, sp in zip(lines, durations, speech, strict=True):
                 timings.append(ShotTiming(t, dur, on_screen, spoken, sp))
                 t += dur
             (work / "captions.ass").write_text(
-                build_ass(timings, self.video.captions, *size), "utf-8")
+                build_ass(timings, self.video.captions, *size, watermark=self.video.watermark), "utf-8")
             vf = "ass=captions.ass"
 
         # Sound design: whooshes on the cuts, a riser into the payoff, a hit at the end (generated).
