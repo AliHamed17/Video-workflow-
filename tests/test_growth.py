@@ -1,6 +1,7 @@
 """Language versions, publish kit, content calendar, ideas from a source."""
 
 import io
+import re
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,7 +55,7 @@ def test_language_versions_reuse_the_footage(config, tmp_path):
         assert (info["width"], info["height"]) == (360, 640) and info["has_audio"]
         assert v.quality and not v.quality.failed and len(v.voice_clips) == 2
         ass = Path(v.final_video).parent / f"edit_{v.language}" / "captions.ass"
-        assert "Un pulpo tiene" in ass.read_text()
+        assert "Un pulpo tiene" in re.sub(r"\{[^}]*\}", "", ass.read_text())   # kinetic tags between words
     assert ("arabic-voice", "Un pulpo tiene tres corazones.") in voice.texts  # per-language voice
     steps = {e["step"] for e in pipe.store.events(step_prefix="localize.")}
     assert steps == {"localize.es", "localize.ar"}

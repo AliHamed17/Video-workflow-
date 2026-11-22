@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -85,8 +86,8 @@ def test_edit_with_voice_music_and_word_captions(config, tmp_path):
     assert Path(item.music_track).name == "awe-epic-build.wav"  # mood "awe" matched
     info = probe(item.final_video)
     assert info["has_audio"] and 3.8 <= info["duration"] <= 4.3
-    ass = (pipe.store.item_dir(item.id) / "edit" / "captions.ass").read_text()
-    assert "Word" in ass and "line 0" in ass and "Headline" in ass
+    ass = re.sub(r"\{[^}]*\}", "", (pipe.store.item_dir(item.id) / "edit" / "captions.ass").read_text())
+    assert "Word" in ass and "line 0" in ass and "Headline" in ass      # (kinetic tags stripped)
 
     # Re-editing reuses cached narration.
     item = pipe.edit(item)
