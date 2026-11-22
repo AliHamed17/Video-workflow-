@@ -120,3 +120,22 @@ def test_doctor_does_not_ask_for_an_elevenlabs_key_when_higgsfield_speaks(config
     assert result.ok is True and "Higgsfield voices" in result.detail
     config.video.voice.provider = "elevenlabs"
     assert check_voice(config, Secrets(_env_file=None), httpx.Client(), live=False).ok is False
+
+
+def test_live_checks_skip_a_missing_key_and_know_every_trend_source(config):
+    from video_workflow.config import Secrets, TrendSourceConfig
+    from video_workflow.health import check_llms, check_trends
+
+    config.llm.routes = {"scripting": ["anthropic:claude-opus-5-5", "cli:claude"]}
+    llm = {c.name: c for c in check_llms(config, Secrets(_env_file=None, anthropic_api_key=None), live=True)}
+    assert llm["llm anthropic"].ok is None and llm["llm anthropic"].detail == "no key"   # skipped, not FAIL
+
+    def wiki(request):
+        day = request.url.path.rsplit("/", 3)
+        return httpx.Response(200, json={"items": [{"articles": [
+            {"article": "Anglerfish", "views": 90_000, "rank": 3}, {"article": "Main_Page", "views": 9e6, "rank": 1}]}]},
+            headers={"x-day": "/".join(day)})
+    config.trends.enabled = True
+    config.trends.sources = [TrendSourceConfig(type="wikipedia")]
+    checks = check_trends(config, httpx.Client(transport=httpx.MockTransport(wiki)), live=True)
+    assert [(c.name, c.ok, c.detail) for c in checks] == [("trends wikipedia", True, "1 signals")]

@@ -62,13 +62,14 @@ def check_llms(config: AppConfig, secrets: Secrets, live: bool) -> list[Check]:
             continue
         if name == "anthropic":
             key = _s(secrets.anthropic_api_key)
+            if not key:                       # no key is "not set up", not a failure (cli:claude may cover it)
+                out.append(Check("llm anthropic", None, "no key"))
+                continue
 
             def anthropic_check(key=key):
                 import anthropic
-                client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
-                return f"{len(client.models.list(limit=5).data)} models visible"
-            out.append(_guard("llm anthropic", anthropic_check) if live else
-                       Check("llm anthropic", bool(key) or None, "key set" if key else "no key"))
+                return f"{len(anthropic.Anthropic(api_key=key).models.list(limit=5).data)} models visible"
+            out.append(_guard("llm anthropic", anthropic_check) if live else Check("llm anthropic", True, "key set"))
         elif name == "openai":
             key = _s(secrets.openai_api_key)
             if not key:
@@ -217,12 +218,13 @@ def check_voice(config: AppConfig, secrets: Secrets, http: httpx.Client, live: b
     return _guard("voice", el)
 
 
-def check_trends(config: AppConfig, http: httpx.Client, live: bool) -> list[Check]:
+def check_trends(config: AppConfig, http: httpx.Client, live: bool, youtube_key: str | None = None) -> list[Check]:
     if not config.trends.enabled:
         return [Check("trends", None, "disabled")]
     if not live:
         return [Check(f"trends {s.type}", True, "configured") for s in config.trends.sources]
-    return [_guard(f"trends {s.type}", lambda s=s: f"{len(trends.fetch_source(s, http))} signals")
+    # The same fetcher the trend radar uses, so every source type the radar knows is checked for real.
+    return [_guard(f"trends {s.type}", lambda s=s: f"{len(trends.fetch_signals(s, http, youtube_key))} signals")
             for s in config.trends.sources]
 
 
@@ -266,7 +268,7 @@ def run_checks(config: AppConfig, secrets: Secrets, publishers: dict, live: bool
     checks.append(check_voice(config, secrets, http, live))
     checks += check_publishers(publishers, live)
     checks += check_notify(config, secrets, http, live)
-    checks += check_trends(config, http, live)
+    checks += check_trends(config, http, live, _s(secrets.youtube_api_key))
     checks += check_viral(config, secrets, http, live)
     if store is not None:
         from datetime import UTC, datetime

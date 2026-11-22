@@ -204,7 +204,8 @@ def fetch_source(source: TrendSourceConfig, http: httpx.Client) -> list[str]:
         resp = net.send(http, "GET", source.url, headers=UA, retries=1)
         resp.raise_for_status()
         return _rss_titles(resp.text, source.limit)
-    raise ValueError(f"Unknown trend source {source.type}")
+    # Every other source (wikipedia, youtube_popular ...): the trend radar's fetcher.
+    return [sig.title for sig in fetch_signals(source, http)]
 
 
 def collect(config: TrendsConfig, http: httpx.Client | None = None) -> list[str]:
