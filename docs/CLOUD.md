@@ -83,7 +83,10 @@ connections; a local dashboard shows what its worker has.
 
 - Every dashboard page and media file needs the password (cookie after sign-in, 30 days,
   `HttpOnly; Secure; SameSite=Lax`).
-- The worker API (`/api/cloud/*`) needs `Authorization: Bearer <VW_CLOUD_SECRET>`.
+- The worker API (`/api/cloud/*`) needs `Authorization: Bearer <VW_CLOUD_SECRET>`. A worker in a Claude
+  Code cloud environment can hold it as a network secret instead of in `.env`: it then has only
+  `VW_CLOUD_URL`, and `/api/cloud/connections` returns the connected accounts already unsealed (only
+  with that bearer — whoever holds the secret could open the vault anyway).
 - Commands are a fixed list (approve, final, reject, retry, rerender, publish, ideas, plan);
   the worker validates each one against the item's current stage before applying it.
 - Platform credentials, LLM keys and Higgsfield never leave the worker.

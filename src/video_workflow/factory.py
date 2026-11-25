@@ -137,10 +137,14 @@ def refresh_connections(pipeline) -> list[str]:
 
 
 def build_cloud(pipeline, secrets: Secrets | None = None):
-    """CloudSync for this worker, or None when VW_CLOUD_URL / VW_CLOUD_SECRET aren't set."""
-    from .cloud.sync import CloudClient, CloudSync
+    """CloudSync for this worker, or None when VW_CLOUD_URL isn't set.
+
+    Without VW_CLOUD_SECRET the worker sends a placeholder: in a cloud environment that saved the secret as a
+    network secret for the dashboard's host, the network proxy puts the real one in its place.
+    """
+    from .cloud.sync import PROXY_SECRET, CloudClient, CloudSync
 
     secrets = secrets or Secrets()
-    if not (secrets.vw_cloud_url and secrets.vw_cloud_secret):
+    if not secrets.vw_cloud_url:
         return None
-    return CloudSync(pipeline, CloudClient(secrets.vw_cloud_url, _s(secrets.vw_cloud_secret)))
+    return CloudSync(pipeline, CloudClient(secrets.vw_cloud_url, _s(secrets.vw_cloud_secret) or PROXY_SECRET))

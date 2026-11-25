@@ -147,14 +147,40 @@ def merge(secrets: Secrets, vault: dict | None) -> tuple[Secrets, list[str]]:
     return (secrets.model_copy(update=update_) if update_ else secrets), sorted(update_)
 
 
-def load_secrets(store=None) -> Secrets:
-    """Environment / .env first, then whatever was connected on the dashboard (if this worker has it)."""
+def merge_values(secrets: Secrets, values: dict[str, str]) -> tuple[Secrets, list[str]]:
+    """Secrets with these (already unsealed) values filled in wherever the environment has none."""
+    update_: dict = {}
+    for name, value in values.items():
+        if name in FIELDS and value and getattr(secrets, name, None) in (None, ""):
+            annotation = str(Secrets.model_fields[name].annotation)
+            update_[name] = SecretStr(value) if "SecretStr" in annotation else value
+    return (secrets.model_copy(update=update_) if update_ else secrets), sorted(update_)
+
+
+def load_secrets(store=None, http=None) -> Secrets:
+    """Environment / .env first, then whatever was connected on the dashboard.
+
+    The vault is opened here with VW_CLOUD_SECRET. A worker whose secret is held by its environment's network
+    secret (so it isn't readable here) asks the dashboard for the unsealed values instead.
+    """
+    import logging
+
+    log = logging.getLogger(__name__)
     secrets = Secrets()
     vault = store.kv_get(KV_KEY) if store is not None else None
-    if vault:
+    if not vault:
+        return secrets
+    if secrets.vw_cloud_secret:
         try:
-            secrets, _ = merge(secrets, vault)
-        except Exception:   # wrong VW_CLOUD_SECRET or a damaged record: run on the environment alone
-            import logging
-            logging.getLogger(__name__).warning("could not open the dashboard's connections (check VW_CLOUD_SECRET)")
-    return secrets
+            return merge(secrets, vault)[0]
+        except Exception:   # wrong VW_CLOUD_SECRET or a damaged record
+            log.warning("could not open the dashboard's connections here (check VW_CLOUD_SECRET)")
+    if secrets.vw_cloud_url:
+        from .cloud.sync import PROXY_SECRET, CloudClient
+
+        try:
+            key = secrets.vw_cloud_secret.get_secret_value() if secrets.vw_cloud_secret else PROXY_SECRET
+            return merge_values(secrets, CloudClient(secrets.vw_cloud_url, key, http=http).connections())[0]
+        except Exception as exc:
+            log.warning("could not get the dashboard's connections: %s", str(exc)[:200])
+    return secrets   # run on the environment alone

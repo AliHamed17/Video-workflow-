@@ -194,6 +194,13 @@ def make_cloud_handler(db_url: str | None = None, token: str | None = None, secr
                 if not allowed or not any(pysecrets.compare_digest(sent, s) for s in allowed):
                     return self._send(401, b"Unauthorized", "text/plain")
                 return self._json(watchdog(pipeline, store))
+            if path == "/api/cloud/connections":
+                # For a worker whose VW_CLOUD_SECRET is held by its environment's network secret (it can't
+                # open the vault itself). Whoever holds that secret can already open the vault: nothing new.
+                if not self._worker_ok():
+                    return self._deny_worker()
+                from ..connections import unseal
+                return self._json({"values": unseal(store.kv_get("connections_vault"), secret)})
             if path == "/api/cloud/export":
                 if not self._worker_ok():
                     return self._deny_worker()

@@ -40,6 +40,11 @@ class CloudError(RuntimeError):
     pass
 
 
+# Sent when VW_CLOUD_SECRET isn't in this worker's environment: a network secret for the dashboard's host
+# (Claude Code cloud environments) replaces it with the real one on the way out.
+PROXY_SECRET = "held-by-the-environments-network-secret"
+
+
 class CloudClient:
     def __init__(self, url: str, secret: str, http: httpx.Client | None = None):
         self.url = url.rstrip("/")
@@ -50,9 +55,21 @@ class CloudClient:
         return {"Authorization": f"Bearer {self.secret}", **extra}
 
     def _check(self, resp: httpx.Response, what: str) -> httpx.Response:
+        if resp.status_code == 401:
+            host = self.url.split("//", 1)[-1].split("/", 1)[0]
+            raise CloudError(f"{what}: the dashboard refused this worker (HTTP 401). "
+                             + ("Save VW_CLOUD_SECRET as a network secret (Authorization: Bearer) for "
+                                f"{host} in this environment, or put it in .env"
+                                if self.secret == PROXY_SECRET else "VW_CLOUD_SECRET doesn't match the dashboard's"))
         if resp.status_code >= 400:
             raise CloudError(f"{what}: HTTP {resp.status_code} {resp.text[:300]}")
         return resp
+
+    def connections(self) -> dict[str, str]:
+        """The accounts connected on the dashboard, unsealed by the dashboard (for a worker without the secret)."""
+        resp = self._check(net.send(self.http, "GET", f"{self.url}/api/cloud/connections", headers=self._headers()),
+                           "connections")
+        return dict(resp.json().get("values") or {})
 
     def sync(self, snapshot: dict) -> dict:
         body = gzip.compress(json.dumps(snapshot, default=str).encode())

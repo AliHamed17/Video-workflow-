@@ -207,3 +207,52 @@ def test_the_cloud_app_can_seal_on_vercel():
 
     requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text()
     assert any(line.split(">=")[0].strip() == "cryptography" for line in requirements.splitlines())
+
+
+def test_a_worker_whose_secret_is_a_network_secret(clean_env, monkeypatch, config):
+    """Claude Code cloud environment: VW_CLOUD_SECRET is saved as a network secret, so the worker only has
+    VW_CLOUD_URL. The proxy swaps the placeholder bearer for the real secret; here a transport plays the proxy."""
+    from video_workflow.cloud.sync import PROXY_SECRET, CloudError
+    from video_workflow.factory import build_cloud
+    from video_workflow.readiness import check
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_cloud_handler(
+        db_url=str(clean_env / "cloud.sqlite3"), token="pw", secret=SECRET))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        cloud_store = CloudStore(DB(str(clean_env / "cloud.sqlite3")))
+        connections.update(cloud_store, SECRET, {"telegram_bot_token": "123:ABC", "telegram_chat_id": "42"})
+
+        def proxy(saved: str | None):
+            def forward(request: httpx.Request) -> httpx.Response:
+                headers = dict(request.headers)
+                if saved and headers.get("authorization") == f"Bearer {PROXY_SECRET}":
+                    headers["authorization"] = f"Bearer {saved}"
+                return httpx.Client().request(request.method, str(request.url), headers=headers,
+                                              content=request.content)
+            return httpx.Client(transport=httpx.MockTransport(forward))
+
+        monkeypatch.setenv("VW_CLOUD_URL", base)
+        store = Store(clean_env / "worker")
+        pipe = build_pipeline(config, None, clean_env / "worker", "mock", with_publishers=False)
+        cloud = build_cloud(pipe)
+        assert cloud is not None and cloud.client.secret == PROXY_SECRET
+        cloud.client.http = proxy(SECRET)                       # the network secret is saved
+        cloud.restore()
+        assert pipe.store.kv_get("connections_vault")            # the sealed copy arrived...
+        assert pipe.secrets is None or pipe.secrets.telegram_bot_token is None
+        loaded = connections.load_secrets(pipe.store, http=proxy(SECRET))
+        assert loaded.telegram_bot_token.get_secret_value() == "123:ABC"   # ...and the dashboard unsealed it
+        assert loaded.telegram_chat_id == "42"
+        assert {n.name: n.status for n in check(config, Secrets(_env_file=None, vw_cloud_url=base), store)}[
+            "Cloud memory"] == "ok"
+
+        cloud.client.http = proxy(None)                          # the network secret isn't saved
+        with pytest.raises(CloudError, match="Save VW_CLOUD_SECRET as a network secret"):
+            cloud.sync()
+        assert connections.load_secrets(pipe.store, http=proxy(None)).telegram_bot_token is None   # env only
+        assert httpx.get(f"{base}/api/cloud/connections").status_code == 401
+    finally:
+        server.shutdown()
+        server.server_close()

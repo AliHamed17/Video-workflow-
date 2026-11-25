@@ -99,11 +99,13 @@ def check(config: AppConfig, secrets: Secrets, store=None) -> list[Need]:
 
     # Memory between runs.
     cloud = bool(secrets.vw_cloud_url and secrets.vw_cloud_secret)
-    out.append(Need("Cloud memory", "ok" if cloud else "missing",
+    proxied = bool(secrets.vw_cloud_url) and not secrets.vw_cloud_secret
+    out.append(Need("Cloud memory", "ok" if cloud or proxied else "missing",
                     "state, spend and tokens carried between runs" if cloud else
-                    ("VW_CLOUD_SECRET missing" if secrets.vw_cloud_url else "VW_CLOUD_URL / VW_CLOUD_SECRET missing"),
-                    "" if cloud else "Copy VW_CLOUD_SECRET from Vercel → project → Settings → Environment Variables "
-                                     "into the environment's variables"))
+                    "VW_CLOUD_SECRET expected from the environment's network secret (a failed sync says if it isn't)"
+                    if proxied else "VW_CLOUD_URL / VW_CLOUD_SECRET missing",
+                    "" if cloud or proxied else "Set VW_CLOUD_URL, and VW_CLOUD_SECRET in .env or as a network secret "
+                                                "(Authorization: Bearer) for the dashboard's host"))
     priced = config.money.credit_usd > 0
     out.append(Need("Money tracking", "ok" if priced else "optional",
                     f"videos costed at {config.money.credit_usd} {config.money.currency}/credit" if priced

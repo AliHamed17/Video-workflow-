@@ -767,20 +767,29 @@ def autopilot_run(config: ConfigOpt = None, data: DataOpt = Path("data"),
         pipe.config.autopilot.enabled = True
     cloud = build_cloud(pipe)
     if restore and cloud is not None:
-        report = cloud.restore()
-        console.print(f"Restored from the cloud: {report}")
-        if report.get("connections"):   # accounts connected on the dashboard: rebuild with them
-            pipe = _setup(config, data)
-            if force:
-                pipe.config.autopilot.enabled = True
-            cloud = build_cloud(pipe)
+        try:
+            report = cloud.restore()
+        except Exception as exc:   # still make today's video; say plainly that it won't reach the dashboard
+            console.print(f"[red]Cloud restore failed — this run's work will NOT reach the dashboard:[/] {exc}")
+            cloud = None
+        else:
+            console.print(f"Restored from the cloud: {report}")
+            if report.get("connections"):   # accounts connected on the dashboard: rebuild with them
+                pipe = _setup(config, data)
+                if force:
+                    pipe.config.autopilot.enabled = True
+                cloud = build_cloud(pipe)
     if not pipe.config.autopilot.enabled:
         raise typer.BadParameter("autopilot.enabled is false in the channel config (or pass --force)")
     report = pipe.autopilot_day()
     console.print(f"Autopilot: {report}")
     _table(sorted(pipe.store.list(), key=lambda i: i.updated_at, reverse=True)[:10])
     if cloud is not None:
-        console.print(f"Synced to the cloud: {cloud.sync()}")
+        try:
+            console.print(f"Synced to the cloud: {cloud.sync()}")
+        except Exception as exc:
+            console.print(f"[red]Cloud sync failed — run `vw cloud sync` again before this session ends:[/] {exc}")
+            raise typer.Exit(1) from exc
 
 
 @autopilot_app.command("ready")

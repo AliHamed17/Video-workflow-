@@ -17,8 +17,9 @@ Paste this into a new Claude Code session (or say "read docs/HANDOFF.md and cont
 
 `.env` holds `DASHBOARD_TOKEN`, `VW_CLOUD_URL`, `VW_CLOUD_SECRET`, `CRON_SECRET`. The owner has a private
 copy (`handoff.env`): put it at the repo root as `.env`. Never print, commit or paste these.
-Without `VW_CLOUD_SECRET` the worker can't sync with the dashboard. The scheduled task also needs
-`VW_CLOUD_SECRET` in its environment (still to do).
+Without `VW_CLOUD_SECRET` the worker can't sync with the dashboard. The daily scheduled task gets it
+as a **network secret** for `video-workflow-six.vercel.app` (Authorization: Bearer) saved on the
+"video-workflow" environment; the code sends a placeholder the proxy replaces (see docs/AUTOPILOT.md).
 
 ## Setup and checks
 
@@ -63,7 +64,8 @@ Read `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/VIDEO_
 2. Top up Higgsfield credits (≈332 per video).
 3. Connect accounts on Dashboard → Connect (YouTube via "Connect with Google", Instagram, TikTok,
    Telegram; optional Facebook Page + add `facebook` to `publish.platforms`).
-4. Add `VW_CLOUD_SECRET` to the scheduled task's environment; enable the Higgsfield connector for it.
+4. Save `VW_CLOUD_SECRET` as the network secret above (if not done yet); enable the Higgsfield
+   connector for the "Daily video autopilot" scheduled task.
 5. Allow `www.reddit.com` and `suggestqueries.google.com` in the environment's network settings
    (the change was rejected when proposed from the session). Optional keys: `YOUTUBE_API_KEY`,
    `APIFY_TOKEN` for more viral sources.

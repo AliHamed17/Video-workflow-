@@ -121,10 +121,12 @@ balance before every render.
 **A. A daily Claude session (no server needed).** A scheduled Claude Code session starts every
 day in this repo's cloud environment and follows `.claude/skills/autopilot/SKILL.md`: restore
 state from the cloud dashboard → scout → write → render with your Higgsfield connector →
-publish → sync. Put the values above in the environment's settings (session title bar →
-environment → Edit → environment variables), plus `VW_CLOUD_URL` and `VW_CLOUD_SECRET` (Vercel →
-project → Settings → Environment Variables). Without `YOUTUBE_API_KEY` the session finds viral
-videos with a web search instead.
+publish → sync. `VW_CLOUD_URL` goes in the environment's variables; `VW_CLOUD_SECRET` goes in as a
+**network secret** for the dashboard's host (`Authorization: Bearer`, value from Vercel → project →
+Settings → Environment Variables), so it's never stored in plain text: the worker sends a placeholder
+and the environment's network proxy puts the real secret in its place, and the dashboard unseals the
+accounts you connected for that worker. Without it the run still makes today's script but can't save
+it (it says so). Without `YOUTUBE_API_KEY` the session finds viral videos with a web search instead.
 
 **B. Your own always-on computer or server.** `vw daemon` (or `docker compose up -d`) runs the
 same autopilot every 15 minutes. Headless rendering needs `HIGGSFIELD_MCP_TOKEN`
