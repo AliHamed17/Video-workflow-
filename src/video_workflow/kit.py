@@ -54,7 +54,7 @@ CHECKLIST = """# Posting checklist
 - [ ] **Label AI-generated content**: YouTube → "Altered or synthetic content" = Yes;
       TikTok → "AI-generated content" toggle; Instagram → "Add AI label"
 - [ ] Optional: upload `captions_<language>.srt` as subtitles (YouTube) for accessibility
-- [ ] Use the thumbnail as the cover where the app allows it
+- [ ] Use cover.jpg as the cover / thumbnail where the app allows it
 - [ ] Post at your scheduled slot{slot}
 - [ ] After posting, paste the links into the dashboard / `vw` so stats can be tracked
 """
@@ -70,6 +70,8 @@ def build(item: ContentItem) -> bytes:
         z.write(item.final_video, f"{name}/{name}.mp4")
         if item.thumbnail and Path(item.thumbnail).exists():
             z.write(item.thumbnail, f"{name}/thumbnail.jpg")
+        if item.cover and Path(item.cover).exists():
+            z.write(item.cover, f"{name}/cover.jpg")
         z.writestr(f"{name}/captions_main.srt", srt([s.voiceover or s.on_screen_text for s in item.script.shots], durations))
         z.writestr(f"{name}/copy_main.md", copy_md(item.idea.title, item.packaging, "main"))
         for v in item.versions:

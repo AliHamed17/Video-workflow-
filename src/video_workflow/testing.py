@@ -9,6 +9,7 @@ import json
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qsl
 
 import httpx
 
@@ -259,6 +260,19 @@ class FakePlatforms:
         # YouTube
         if host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "yt-token"})
+        # Pexels (free stock footage)
+        if host == "api.pexels.com" and path == "/videos/search":
+            q = req.url.params.get("query", "")
+            self.posted.append(("pexels.search", {"query": q, "orientation": req.url.params.get("orientation")}))
+            base = 9000 + 10 * (sum(map(ord, q)) % 50)
+            return httpx.Response(200, json={"total_results": 3, "videos": [
+                {"id": base + n, "width": 1080, "height": 1920, "duration": 10 + n,
+                 "url": f"https://www.pexels.com/video/{base + n}/", "user": {"name": f"Creator {n}"},
+                 "video_files": [{"file_type": "video/mp4", "width": 1080, "height": 1920,
+                                  "link": f"https://videos.pexels.com/video-files/{base + n}-hd.mp4"}]}
+                for n in range(3)]})
+        if host == "videos.pexels.com":
+            return httpx.Response(200, content=b"\x00\x00\x00\x18ftypmp42")
         if host == "www.googleapis.com" and path == "/upload/youtube/v3/videos":
             return httpx.Response(200, headers={"Location": "https://www.googleapis.com/upload/session/1"})
         if host == "www.googleapis.com" and path == "/upload/session/1":
@@ -301,6 +315,10 @@ class FakePlatforms:
                 "title": "An octopus has THREE hearts 🐙 #Shorts", "description": "Three hearts, blue blood.",
                 "tags": ["octopus"], "categoryId": "28", "channelId": "UCours", "publishedAt": "2026-11-20T09:00:00Z",
                 "thumbnails": {}}}]})
+        if host == "www.googleapis.com" and path == "/upload/youtube/v3/thumbnails/set":
+            self.posted.append(("youtube.thumbnail", {"videoId": req.url.params.get("videoId"),
+                                                      "bytes": len(req.content), "type": req.headers.get("content-type")}))
+            return httpx.Response(200, json={"items": [{"default": {"url": "https://i.ytimg.com/x.jpg"}}]})
         if host == "www.googleapis.com" and path == "/upload/youtube/v3/captions":
             body = req.content.decode("utf-8")
             meta = json.loads(body.split("\r\n\r\n", 1)[1].split("\r\n--", 1)[0])
@@ -369,6 +387,7 @@ class FakePlatforms:
         # Instagram
         if host == "graph.facebook.com":
             if path.endswith("/media") and req.method == "POST":
+                self.posted.append(("instagram.container", dict(parse_qsl(req.content.decode()))))
                 return httpx.Response(200, json={"id": "c1", "uri": "https://rupload.facebook.com/ig-api-upload/v25.0/c1"})
             if path.endswith("/media_publish"):
                 self.counters["instagram"] += 1
@@ -402,6 +421,7 @@ class FakePlatforms:
                 return httpx.Response(200, json={"data": {"creator_username": "demo",
                                                           "privacy_level_options": ["SELF_ONLY"]}, **ok})
             if path in ("/v2/post/publish/video/init/", "/v2/post/publish/inbox/video/init/"):
+                self.posted.append(("tiktok.init", json.loads(req.content)))
                 return httpx.Response(200, json={"data": {"publish_id": "tt-pub-1",
                                                           "upload_url": "https://upload.tiktokapis.test/1"}, **ok})
             if path == "/v2/post/publish/status/fetch/":

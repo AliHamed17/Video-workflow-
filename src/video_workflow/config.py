@@ -50,6 +50,7 @@ class Secrets(BaseSettings):
     # TikTok / Instagram discovery.
     youtube_api_key: SecretStr | None = None
     apify_token: SecretStr | None = None
+    pexels_api_key: SecretStr | None = None     # free stock footage (video.generator: stock / budget_fallback)
 
     # Money: a restricted (read-only) Stripe key to import sponsor payments, fees and payouts.
     stripe_api_key: SecretStr | None = None
@@ -118,16 +119,40 @@ class HiggsfieldConfig(BaseModel):
     # drop parameters the model doesn't take, skip media roles it doesn't support.
     check_model: bool = True
     retry_failed_shots: bool = True   # resubmit shots that failed (once), keeping the ones that worked
+    # How shots become moving pictures:
+    #   video  — every shot is a generated video (best, ≈80 credits a 1080p shot)
+    #   hybrid — the beats in hybrid_beats get video; the rest are keyframe stills animated here (≈2 credits)
+    #   stills — every shot is an animated still: a 30-second video for ≈12 credits
+    render_mode: Literal["video", "hybrid", "stills"] = "video"
+    hybrid_beats: list[str] = Field(default_factory=lambda: ["hook", "twist", "payoff"])
     draft_preview: bool = True    # render cheap drafts, approve the preview, then finalize full-res
     draft_params: dict = Field(default_factory=lambda: {"draft": True})
     unit_costs: UnitCosts = Field(default_factory=UnitCosts)
 
-    def estimate(self, shots: int, phase: str = "all") -> float:
+    def video_shot_count(self, shots: int) -> int:
+        """How many of ``shots`` are generated videos under this render mode (hybrid: an estimate by beat)."""
+        if self.render_mode == "stills":
+            return 0
+        if self.render_mode == "hybrid":
+            return min(shots, len(self.hybrid_beats))
+        return shots
+
+    def estimate(self, shots: int, phase: str = "all", video_shots: int | None = None) -> float:
         """Credits for a video: keyframes + drafts + finals (phase: all | draft | final)."""
         c = self.unit_costs
-        draft_part = shots * ((c.keyframe if self.keyframes else 0) + (c.draft if self.draft_preview else 0))
-        final_part = shots * c.final
+        video = self.video_shot_count(shots) if video_shots is None else video_shots
+        keyframes = shots if self.keyframes else shots - video     # an animated still always needs its keyframe
+        draft_part = keyframes * c.keyframe + video * (c.draft if self.draft_preview else 0)
+        final_part = video * c.final
         return {"draft": draft_part, "final": final_part}.get(phase, draft_part + final_part)
+
+    def pass_estimate(self, shots: int, phase: str, video_shots: int | None = None) -> float:
+        """Credits for one render pass; the first pass (draft, or final without drafts) makes the keyframes."""
+        c = self.unit_costs
+        video = self.video_shot_count(shots) if video_shots is None else video_shots
+        first = phase == "draft" or not self.draft_preview
+        keyframes = (shots if self.keyframes else shots - video) * c.keyframe if first else 0
+        return keyframes + video * (c.draft if phase == "draft" else c.final)
 
 
 class CaptionConfig(BaseModel):
@@ -179,7 +204,10 @@ class SoundDesignConfig(BaseModel):
 class VideoConfig(BaseModel):
     target_duration_s: int = 30
     aspect_ratio: str = "9:16"
-    generator: Literal["handoff", "higgsfield_mcp", "mock"] = "handoff"
+    generator: Literal["handoff", "higgsfield_mcp", "mock", "stock"] = "handoff"
+    # When the autopilot can't afford a render (daily cap or balance): wait for credits, or make the video
+    # with free stock footage (Pexels, needs PEXELS_API_KEY) so the day still gets its video.
+    budget_fallback: Literal["wait", "stock"] = "wait"
     higgsfield: HiggsfieldConfig = Field(default_factory=HiggsfieldConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
@@ -274,6 +302,7 @@ class YouTubeConfig(BaseModel):
     privacy: Literal["private", "unlisted", "public"] = "private"
     category_id: str = "28"
     captions: bool = True            # upload the narration as subtitle tracks (main language + every version)
+    custom_thumbnail: bool = True    # set the designed cover as the thumbnail (needs a phone-verified channel)
 
 
 class InstagramConfig(BaseModel):

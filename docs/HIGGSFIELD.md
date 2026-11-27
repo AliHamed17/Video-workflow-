@@ -88,6 +88,9 @@ audio?") to browse the catalog. Some options at the time of writing:
 | `grok_video_v15` | Physics and camera motion from a start image or references |
 | `minimax_h3` | Keyframes, mixed image/video references |
 
+To spend less, set `render_mode: hybrid` (video only for the hook, twist and payoff) or `stills`
+(keyframes animated locally, ≈12 credits a video); see [VIDEO_QUALITY.md](VIDEO_QUALITY.md#5-cheaper-videos).
+
 (Catalog checked Nov 2026 with `models_explore`.) You don't have to tune `params` by hand when you
 switch: with `check_model: true` the renderer reads the model's catalog entry before spending and
 drops or clamps whatever that model doesn't take. Put how the model reads prompts in

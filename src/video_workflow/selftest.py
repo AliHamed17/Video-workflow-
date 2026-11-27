@@ -394,6 +394,34 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
                 f"headless Higgsfield: model checked ({result.note.split('adapted to the model: ')[-1]}), shot 1 "
                 "morphs into shot 2, a refused shot retried toned down")
 
+    def cheaper_videos():
+        from .video.stock import StockGenerator
+
+        item = store.get(state["item"].id)
+        assert item.cover and Path(item.cover).exists() and item.cover_time_s is not None, "no cover"
+        thumbs = [b for k, b in platforms.posted if k == "youtube.thumbnail"]
+        assert thumbs, "the designed cover wasn't set as the YouTube thumbnail"
+        container = next(b for k, b in platforms.posted if k == "instagram.container")
+        assert container.get("thumb_offset") == str(int(item.cover_time_s * 1000)), container
+        # Hybrid: generated video only for the hero beats; the rest are keyframes animated here.
+        hf = pipe.config.video.higgsfield.model_copy(update={"render_mode": "hybrid", "keyframes": True})
+        trial = ContentItem(channel=item.channel, idea=item.idea, script=item.script, render_plan=item.render_plan,
+                            render_phase="draft")
+        hybrid = MockGenerator(width=360, height=640, higgsfield=hf).render(trial, trial.render_plan, workdir / "hybrid")
+        kinds = [c.kind for c in hybrid.clips]
+        assert "still" in kinds and "video" in kinds, kinds
+        full, budget = hf.model_copy(update={"render_mode": "video"}), hf.model_copy(update={"render_mode": "stills"})
+        shots = 6
+        # Stock: free Pexels footage per shot, no repeats.
+        stock = StockGenerator("px-key", http=platforms.client()).render(trial, trial.render_plan, workdir / "stock")
+        sources = [c.source for c in stock.clips]
+        assert len(set(sources)) == len(sources) == len(trial.render_plan.shots) and stock.credits == 0, sources
+        return (f"cover {Path(item.cover).name} set as the YouTube thumbnail, Instagram/TikTok cover at the hook "
+                f"({item.cover_time_s:.1f}s); hybrid render {kinds.count('video')} video + {kinds.count('still')} "
+                f"animated still(s); a {shots}-shot video costs ≈{full.estimate(shots):.0f} credits as video, "
+                f"≈{hf.estimate(shots):.0f} hybrid, ≈{budget.estimate(shots):.0f} as stills, 0 with Pexels stock "
+                f"({len(sources)} clips, none repeated)")
+
     def sponsors_and_facebook():
         from . import money
         from . import sponsors as deals
@@ -683,6 +711,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Experiments: an A/B test on new videos", experiment),
         ("Facebook Reels + sponsorships", sponsors_and_facebook),
         ("Better videos: beats, kinetic captions, transitions, morphs", better_videos),
+        ("Cheaper videos + covers: hybrid/stills, stock footage, thumbnails", cheaper_videos),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

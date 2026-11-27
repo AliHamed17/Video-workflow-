@@ -131,6 +131,8 @@ def media_files(item: ContentItem) -> list[tuple[str, Path, str]]:
     out: list[tuple[str, Path, str]] = []
     if item.thumbnail and Path(item.thumbnail).exists():
         out.append((Path(item.thumbnail).name, Path(item.thumbnail), "image/jpeg"))
+    if item.cover and Path(item.cover).exists():
+        out.append((Path(item.cover).name, Path(item.cover), "image/jpeg"))
     if item.final_video and Path(item.final_video).exists():
         out.append((Path(item.final_video).name, Path(item.final_video), "video/mp4"))
     for clip in item.clips:
@@ -411,7 +413,7 @@ class CloudSync:
                             refetched += 1
                         except Exception as exc:
                             log.warning("could not re-fetch %s shot %d: %s", item.id, clip.shot_index, exc)
-                for attr in ("final_video", "thumbnail"):
+                for attr in ("final_video", "thumbnail", "cover"):
                     value = getattr(item, attr)
                     if value and not Path(value).exists():
                         setattr(item, attr, None)

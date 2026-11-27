@@ -168,9 +168,31 @@ def keyframe_params(hf: HiggsfieldConfig, aspect: str, plan: RenderPlan, shot: S
     return params
 
 
-def reference_shot(hf: HiggsfieldConfig, plan: RenderPlan) -> int | None:
+def reference_shot(hf: HiggsfieldConfig, plan: RenderPlan, among: set[int] | None = None) -> int | None:
     """Index of the shot whose keyframe anchors the others (None when consistency is off)."""
-    return plan.shots[0].index if hf.consistent_subject and len(plan.shots) > 1 else None
+    shots = [s.index for s in plan.shots if among is None or s.index in among]
+    return shots[0] if hf.consistent_subject and len(shots) > 1 else None
+
+
+def still_indices(hf: HiggsfieldConfig, item: ContentItem, shots: list[ShotPrompt]) -> set[int]:
+    """Shots made as animated keyframe stills under the render mode (hybrid: the beats not in hybrid_beats)."""
+    if hf.render_mode == "video":
+        return set()
+    if hf.render_mode == "stills" or item.script is None:
+        return {s.index for s in shots} if hf.render_mode == "stills" else set()
+    beats = {s.index: s.beat for s in item.script.shots}
+    return {s.index for s in shots if beats.get(s.index) not in hf.hybrid_beats}
+
+
+def still_clip(item: ContentItem, shot: ShotPrompt, keyframe: str | Path, out_dir: Path, phase: str,
+               keyframe_job: str | None = None) -> Clip:
+    """An animated still for this shot: its keyframe with the director's camera move, made locally."""
+    from .motion import SIZES, animate_still
+
+    path = animate_still(keyframe, out_dir / f"shot_{shot.index:02d}_{phase}.mp4", shot.duration_s, shot.camera,
+                         SIZES.get(phase, SIZES["final"]))
+    return Clip(shot_index=shot.index, source=f"still:{keyframe_job or Path(keyframe).name}", path=str(path),
+                phase=phase, keyframe=str(keyframe), keyframe_job=keyframe_job, kind="still")
 
 
 # ---- sound: narration and music generated with Higgsfield --------------------------------

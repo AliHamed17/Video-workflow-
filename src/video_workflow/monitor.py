@@ -107,9 +107,9 @@ def scan(store: Store, config: AppConfig, now: datetime | None = None) -> list[A
                 continue
             shots = len(item.render_plan.shots)
             if item.stage in (Stage.APPROVED, Stage.AWAITING_RENDER):
-                need += hf.estimate(shots, item.render_phase if hf.draft_preview else "final")
+                need += hf.pass_estimate(shots, item.render_phase if hf.draft_preview else "final")
             elif item.awaiting_final_approval:
-                need += hf.estimate(shots, "final")
+                need += hf.pass_estimate(shots, "final")
         if need > balance["credits"]:
             alerts.append(Alert("credits-low", "critical", "Not enough Higgsfield credits",
                                 f"balance {balance['credits']:.0f} ({balance.get('plan') or 'plan ?'}), "

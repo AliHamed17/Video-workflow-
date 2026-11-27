@@ -238,6 +238,16 @@ def clips_add(item_id: str, shot_index: int, source: str,
     _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url, morph)])
 
 
+@clips_app.command("still")
+def clips_still(item_id: str, shot_index: int,
+                keyframe_url: Annotated[str, typer.Option(help="The shot's keyframe image (https URL or file)")],
+                keyframe_job: Annotated[str | None, typer.Option(help="Higgsfield keyframe job id")] = None,
+                config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Register a still shot (render mode hybrid/stills): its keyframe, animated here with the camera move."""
+    pipe = _setup(config, data, publishers=False)
+    _table([pipe.add_still(pipe.store.get(item_id), shot_index, keyframe_url, keyframe_job)])
+
+
 @app.command("rewrite")
 def rewrite(item_id: str, note: Annotated[str, typer.Option(help="What the writers should change")] = "",
             now: Annotated[bool, typer.Option("--now", help="Write it straight away instead of on the next run")] = False,
@@ -689,7 +699,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 27:
+    if passed != len(results) or len(results) < 28:
         raise typer.Exit(1)
 
 

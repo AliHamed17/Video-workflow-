@@ -129,7 +129,7 @@ class TikTokPublisher(HTTPPublisher):
                     "disable_duet": False,
                     "disable_comment": False,
                     "disable_stitch": False,
-                    "video_cover_timestamp_ms": 500,
+                    "video_cover_timestamp_ms": int((item.cover_time_s if item.cover_time_s is not None else 0.5) * 1000),
                     "is_aigc": self.ai_disclosure,
                 },
                 "source_info": source,

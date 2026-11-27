@@ -19,6 +19,7 @@ VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 REPLY_URL = "https://www.googleapis.com/youtube/v3/comments"
 CAPTIONS_URL = "https://www.googleapis.com/upload/youtube/v3/captions"
+THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 
 
 class YouTubePublisher(HTTPPublisher):
@@ -71,9 +72,22 @@ class YouTubePublisher(HTTPPublisher):
         done = self._send("PUT", session_url, "YouTube upload", content=data,
                           headers={"Authorization": f"Bearer {token}", "Content-Type": "video/mp4"})
         video_id = done.json()["id"]
+        detail = f"privacy={self.config.privacy}"
+        if self.config.custom_thumbnail and item.cover and Path(item.cover).exists():
+            detail += ", " + self.set_thumbnail(video_id, Path(item.cover))
         return PublishResult(platform=self.name, ok=True, post_id=video_id,
                              url=f"https://youtube.com/{'watch?v=' if item.kind == 'compilation' else 'shorts/'}{video_id}",
-                             detail=f"privacy={self.config.privacy}")
+                             detail=detail)
+
+    def set_thumbnail(self, video_id: str, image: Path) -> str:
+        """The designed cover as the video's thumbnail. Best effort: unverified channels can't set one."""
+        try:
+            self._send("POST", THUMBNAIL_URL, "YouTube thumbnail", params={"videoId": video_id, "uploadType": "media"},
+                       headers={"Authorization": f"Bearer {self.access_token()}", "Content-Type": "image/jpeg"},
+                       content=image.read_bytes())
+            return "custom thumbnail set"
+        except PublishError as exc:
+            return f"thumbnail not set ({str(exc)[:120]})"
 
     def fetch_revenue(self, start: str, end: str) -> dict[str, dict]:
         """{video_id: {"revenue": float, "views": int}} for a date range (YYYY-MM-DD), from YouTube Analytics.

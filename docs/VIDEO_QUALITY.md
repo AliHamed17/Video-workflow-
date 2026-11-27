@@ -65,6 +65,35 @@ prompts (the example config has Seedance's).
   (`vw virality <id> <score> --notes …`); they show on the video's page. Advice only; it costs
   credits.
 
+## 5. Cheaper videos
+
+`video.higgsfield.render_mode` decides how shots become moving pictures:
+
+| Mode | What happens | A 6-shot (30 s) video |
+|---|---|---|
+| `video` (default) | every shot is a generated video | ≈582 credits with drafts, ≈492 without |
+| `hybrid` | the beats in `hybrid_beats` (hook, twist, payoff) are videos; the rest are Higgsfield keyframes animated here with the shot's camera move | ≈297 |
+| `stills` | every shot is an animated keyframe | ≈12 |
+
+Animated stills follow the director's camera: push in, pull back, pan, tilt or a gentle drift, eased in
+and out, rendered locally from the 2-credit keyframe. Finals of still shots are made from the
+preview's keyframe at full resolution for free.
+
+**Free stock footage:** `video.generator: stock` makes every shot from Pexels (free, no credits; a
+free `PEXELS_API_KEY`, also on Dashboard → Connect). Each shot is searched from the script's
+plain-language visual, vertical clips at least as long as the shot are preferred, and no clip is used
+twice in a video. `video.budget_fallback: stock` keeps the autopilot going on days it can't afford
+Higgsfield: the video is made with stock footage instead of waiting.
+
+## 6. Covers
+
+Every final cut gets a **designed cover**: a clean frame of the hook with its headline large in the
+caption style (punch words in the accent colour) over a soft fade. It becomes the YouTube thumbnail
+(`publish.youtube.custom_thumbnail`; needs a phone-verified channel, skipped quietly otherwise), shows on
+the video's page and goes in the publish kit. Instagram and TikTok take a moment of the video as the
+cover: the hook while its animated headline is on screen. (A TikTok draft goes to your TikTok inbox,
+where you pick the cover yourself.)
+
 The video's page on the dashboard shows all of it: the beat under each shot number, the punch
 words highlighted in the narration, and a **Direction** section with each shot's framing, camera,
 motion and transition (✓ when a morph was rendered as one).

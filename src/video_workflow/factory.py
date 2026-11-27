@@ -49,6 +49,9 @@ def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None
         return MockGenerator(higgsfield=config.video.higgsfield)
     if name == "handoff":
         return HandoffGenerator(config.video)
+    if name == "stock":
+        from .video.stock import StockGenerator
+        return StockGenerator(_s(secrets.pexels_api_key))
     if name == "higgsfield_mcp":
         url, token = secrets.higgsfield_mcp_url, _s(secrets.higgsfield_mcp_token)
         return HiggsfieldMCPGenerator(config.video.higgsfield, config.video.aspect_ratio,
@@ -105,7 +108,16 @@ def build_pipeline(config: AppConfig, secrets: Secrets | None = None, data_dir: 
         voice=build_voice(config.video.voice, secrets, http),
         http=http,
         secrets=secrets,
+        fallback_generator=build_fallback(config, secrets),
     )
+
+
+def build_fallback(config: AppConfig, secrets: Secrets):
+    """The renderer the autopilot uses when it can't afford Higgsfield (video.budget_fallback), if set up."""
+    if config.video.budget_fallback == "stock" and secrets.pexels_api_key:
+        from .video.stock import StockGenerator
+        return StockGenerator(_s(secrets.pexels_api_key))
+    return None
 
 
 def refresh_connections(pipeline) -> list[str]:
@@ -132,6 +144,9 @@ def refresh_connections(pipeline) -> list[str]:
     pipeline.notifier = build_dispatcher(config.notify, new, http)
     pipeline.voice = build_voice(config.video.voice, new, http)
     pipeline.router.reset_secrets(new)
+    pipeline.fallback_generator = build_fallback(config, new)
+    if "pexels_api_key" in changed and getattr(pipeline.generator, "name", "") == "stock":
+        pipeline.generator = build_generator(config, new, "stock", store)
     pipeline.tracer.event("connections.refresh", "ok", detail=f"{len(changed)} credential(s) updated from the dashboard")
     return changed
 

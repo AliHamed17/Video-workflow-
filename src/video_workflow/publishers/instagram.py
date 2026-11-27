@@ -95,6 +95,9 @@ class InstagramPublisher(HTTPPublisher):
                                  "upload_type": "resumable",
                                  "caption": caption,
                                  "share_to_feed": "true" if self.config.share_to_feed else "false",
+                                 # the cover: the hook while its headline is on screen
+                                 **({"thumb_offset": str(int(item.cover_time_s * 1000))}
+                                    if item.cover_time_s is not None else {}),
                              }).json()
         container_id = created["id"]
         upload_uri = created.get("uri") or (

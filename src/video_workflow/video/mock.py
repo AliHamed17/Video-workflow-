@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..config import HiggsfieldConfig, VideoConfig
 from ..models import Clip, ContentItem, RenderPlan
-from .base import AudioAsset, RenderResult, audio_requests
+from .base import AudioAsset, RenderResult, audio_requests, still_clip, still_indices
 
 _COLORS = ["0x10233f", "0x2b1055", "0x0b3d3a", "0x3d0b2e", "0x1d2b53", "0x3a2a0b"]
 
@@ -55,6 +55,7 @@ class MockGenerator:
         phase = item.render_phase
         drafts = {c.shot_index for c in item.clips if c.phase == "draft"}
         use_keyframes = self.hf.keyframes and not (phase == "final" and drafts)
+        stills = still_indices(self.hf, item, plan.shots)
         # Drafts are rendered at half size, like Higgsfield's 480p drafts.
         w, h = (self.width // 2 // 2 * 2, self.height // 2 // 2 * 2) if phase == "draft" else (self.width, self.height)
         clips = []
@@ -84,14 +85,19 @@ class MockGenerator:
                     check=True,
                 )
             keyframe = None
-            if use_keyframes:
+            if use_keyframes or shot.index in stills:
                 keyframe = out_dir / f"keyframe_{shot.index:02d}.jpg"
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-frames:v", "1",
-                                "-q:v", "3", str(keyframe)], check=True)
+                if not (shot.index in stills and keyframe.exists() and phase == "final" and drafts):
+                    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-frames:v", "1",
+                                    "-q:v", "3", str(keyframe)], check=True)
+            if shot.index in stills:      # the render mode's animated still, made exactly like the real one
+                clips.append(still_clip(item, shot, keyframe, out_dir, phase, f"mock-keyframe-{shot.index}"))
+                continue
             clips.append(Clip(shot_index=shot.index, source=f"mock-{phase}-{item.id}-{shot.index}",
                               path=str(path), phase=phase, keyframe=str(keyframe) if keyframe else None,
                               keyframe_job=f"mock-keyframe-{shot.index}" if keyframe else None))
         audio = self._sound(item, out_dir)
         note = (f"mock {phase} animatic" + (" from keyframes" if use_keyframes else "")
+                + (f" + {len(stills)} animated still(s) ({self.hf.render_mode})" if stills else "")
                 + (f", {len(audio)} sound file(s)" if audio else ""))
         return RenderResult(clips=clips, audio=audio, note=note)

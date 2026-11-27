@@ -400,6 +400,7 @@ class Clip(BaseModel):
     keyframe: str | None = None      # local path of the keyframe still, if one was used
     keyframe_job: str | None = None  # Higgsfield job id of the keyframe
     morph: bool = False              # rendered to end on the next shot's keyframe: the editor cuts straight on
+    kind: Literal["video", "still", "stock"] = "video"   # generated video, animated keyframe, or stock footage
 
 
 class VoiceClip(BaseModel):
@@ -534,6 +535,8 @@ class ContentItem(BaseModel):
     music_generated: str | None = None  # an original track made for this video (Higgsfield)
     final_video: str | None = None
     thumbnail: str | None = None
+    cover: str | None = None           # designed cover image (YouTube thumbnail, dashboard, publish kit)
+    cover_time_s: float | None = None  # the hook moment Instagram and TikTok use as the cover
     scheduled_for: datetime | None = None
     publishes: list[PublishResult] = Field(default_factory=list)
     metrics: dict[str, PostMetrics] = Field(default_factory=dict)

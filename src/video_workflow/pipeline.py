@@ -96,6 +96,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     tracer: Tracer | None = None
     secrets: Any = None                      # Secrets, for sources that need keys (viral scout)
+    fallback_generator: Any = None           # free footage when the autopilot can't afford a render
 
     def __post_init__(self) -> None:
         self.scout = TrendScout(self.config, self.router)
@@ -154,10 +155,12 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
     def _balance_line(self, shots: int) -> str:
         hf = self.config.video.higgsfield
         parts = []
+        mode = "" if hf.render_mode == "video" else f" ({hf.render_mode} mode)"
         if hf.draft_preview:
-            parts.append(f"preview ≈{hf.estimate(shots, 'draft'):.0f} + final ≈{hf.estimate(shots, 'final'):.0f} credits")
+            parts.append(f"preview ≈{hf.pass_estimate(shots, 'draft'):.0f} + final ≈{hf.pass_estimate(shots, 'final'):.0f}"
+                         f" credits{mode}")
         else:
-            parts.append(f"render ≈{hf.estimate(shots, 'final') + (shots * hf.unit_costs.keyframe if hf.keyframes else 0):.0f} credits")
+            parts.append(f"render ≈{hf.pass_estimate(shots, 'final'):.0f} credits{mode}")
         bal = self.store.kv_get("higgsfield_balance")
         if bal and bal.get("credits") is not None:
             parts.append(f"balance {bal['credits']:.0f} ({bal.get('plan') or '?'})")
@@ -449,10 +452,15 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         self._expect(item, Stage.APPROVED, Stage.AWAITING_RENDER)
         if item.stage == Stage.AWAITING_RENDER:
             return self._maybe_complete_render(item)
-        plan = self._missing_plan(item)
+        plan = self._local_stills(item, self._missing_plan(item))
         if not plan.shots:
             return self._maybe_complete_render(item)
         blocked = self._budget_block(item, plan) if self.autopilot_active else None
+        generator = self.generator
+        if blocked and self.fallback_generator is not None:
+            # Can't afford Higgsfield today: make the video with free stock footage instead of skipping the day.
+            self.tracer.event("render.fallback", "warn", item.id, f"{blocked} → {self.fallback_generator.name} footage")
+            generator, blocked = self.fallback_generator, None
         if not blocked and item.attention and item.attention.startswith(BUDGET_HOLDS):
             item.attention = None  # the cap reset / credits were topped up
         if blocked:
@@ -463,9 +471,9 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                 self.notify(Notice(kind="alert", title=f"Autopilot paused a render: {item.idea.title}",
                                    lines=[blocked], item_id=item.id))
             return item
-        with self.tracer.span(f"render.{item.render_phase}", item.id, generator=self.generator.name,
+        with self.tracer.span(f"render.{item.render_phase}", item.id, generator=generator.name,
                               shots=len(plan.shots)) as span:
-            result = self.generator.render(item, plan, self.store.item_dir(item.id) / "clips")
+            result = generator.render(item, plan, self.store.item_dir(item.id) / "clips")
             span.detail = result.note
             span.attrs["credits"] = result.credits
             if result.pending:
@@ -501,6 +509,48 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         self.tracer.event("qa.virality", "ok" if score >= 50 else "warn", item.id,
                           f"virality {score:.0f}/100" + (f": {notes.strip()[:160]}" if notes.strip() else ""))
         return self.store.save(item)
+
+    def _local_stills(self, item: ContentItem, plan: RenderPlan) -> RenderPlan:
+        """Final-phase still shots (render mode hybrid/stills): animated here from the draft's keyframe, free."""
+        from .video.base import still_clip, still_indices
+
+        if item.render_phase != "final":
+            return plan
+        stills = still_indices(self.config.video.higgsfield, item, plan.shots)
+        keyframes = {c.shot_index: c for c in item.clips
+                     if c.phase == "draft" and c.keyframe and Path(c.keyframe).exists()}
+        local = [s for s in plan.shots if s.index in stills and s.index in keyframes]
+        if not local:
+            return plan
+        out_dir = self.store.item_dir(item.id) / "clips"
+        with self.tracer.span("render.stills", item.id, shots=len(local)) as span:
+            self._merge_clips(item, [still_clip(item, s, keyframes[s.index].keyframe, out_dir, "final",
+                                                keyframes[s.index].keyframe_job) for s in local])
+            span.detail = f"{len(local)} animated still(s) at full resolution, no credits"
+        self.store.save(item)
+        done = {s.index for s in local}
+        return plan.model_copy(update={"shots": [s for s in plan.shots if s.index not in done]})
+
+    def add_still(self, item: ContentItem, shot_index: int, keyframe: str,
+                  keyframe_job: str | None = None) -> ContentItem:
+        """Register a still shot from its keyframe (URL or file): animated here with the shot's camera move."""
+        from .video.base import still_clip
+
+        self._expect(item, Stage.APPROVED, Stage.AWAITING_RENDER, Stage.RENDERED)
+        shot = next((s for s in item.render_plan.shots if s.index == shot_index), None)
+        if shot is None:
+            raise ValueError(f"No shot {shot_index}")
+        clip_dir = self.store.item_dir(item.id) / "clips"
+        image = clip_dir / f"keyframe_{shot_index:02d}.jpg"
+        if keyframe.startswith(("http://", "https://")):
+            download(keyframe, image)
+        elif Path(keyframe).resolve() != image.resolve():
+            image.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(keyframe, image)
+        clip = still_clip(item, shot, image, clip_dir, item.render_phase, keyframe_job)
+        self._merge_clips(item, [clip])
+        self.tracer.event("render.clip", "ok", item.id, f"shot {shot_index + 1} ({item.render_phase}) animated still")
+        return self._maybe_complete_render(item)
 
     def _merge_clips(self, item: ContentItem, clips: list[Clip]) -> None:
         new = {(c.shot_index, c.phase) for c in clips}
@@ -621,6 +671,9 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                 editor = self._editor_for(item)
                 final, thumb = editor.assemble(item, self.store.item_dir(item.id), voiceover, music, phase=phase)
                 item.final_video, item.thumbnail = str(final), str(thumb)
+                if phase == "final":
+                    cover = getattr(editor, "cover", None)
+                    item.cover, item.cover_time_s = (str(cover) if cover else None), getattr(editor, "cover_time", None)
                 span.detail = (f"{probe(final)['duration']:.1f}s {phase} cut" + (f", music {music.name}" if music else "")
                                + (f", {editor.transitions}" if getattr(editor, "transitions", "") else ""))
             with self.tracer.span("qa.technical", item.id) as span:

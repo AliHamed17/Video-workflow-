@@ -73,7 +73,8 @@ def test_handoff_request_spells_out_reference_and_sound(tmp_path):
     assert "medias" not in shots[0]["keyframe"]
     assert shots[2]["keyframe"]["medias"] == [{"role": "image_references", "value": REFERENCE_PLACEHOLDER}]
     assert request["strategy"] | {} == {"keyframes": True, "draft_preview": True, "reference_shot": 0,
-                                        "narration_lines": 3, "music": True}
+                                        "narration_lines": 3, "music": True, "render_mode": "video",
+                                        "still_shots": []}
     assert len(request["audio"]["narration"]) == 3 and request["audio"]["music"]["force_instrumental"]
     assert request["estimated_credits"] == pytest.approx(3 * (2 + 80) + 3 * 0.3 + 3.2)
     steps = " ".join(request["steps"])

@@ -160,6 +160,12 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
         label = "Low-res preview" if item.render_phase == "draft" and item.stage == Stage.EDITED else "Final cut"
         video = (f"<video controls playsinline preload=metadata {f'poster={poster}' if poster else ''} src='{video_url}'></video>"
                  f"<div class=meta>{label}</div>")
+        cover = _media(item, item.cover)
+        if cover:
+            at = f" · Instagram and TikTok use the hook at {item.cover_time_s:.1f}s" if item.cover_time_s is not None else ""
+            video += (f"<figure style='margin:10px 0 0'><img src='{cover}' alt='cover' style='max-width:160px;"
+                      f"border-radius:8px'><figcaption class=meta>Cover (YouTube thumbnail, publish kit){at}</figcaption>"
+                      "</figure>")
     else:
         video = "<section class=meta>No video yet.</section>"
 
@@ -314,9 +320,12 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
 
         plan = item.render_plan
         morphed = {c.shot_index for c in item.clips if c.morph}
+        made_as = {c.shot_index: {"still": "animated still", "stock": "stock footage"}.get(c.kind, "")
+                   for c in sorted(item.clips, key=lambda c: c.phase == "final")}
 
         def direction(s) -> str:
-            bits = [SHOT_SIZES.get(s.shot_size, ""), s.camera, f"motion: {s.motion}" if s.motion else ""]
+            bits = [made_as.get(s.index, ""), SHOT_SIZES.get(s.shot_size, ""), s.camera,
+                    f"motion: {s.motion}" if s.motion else ""]
             into = ("morph ✓" if s.index in morphed else s.transition) if s.transition != "cut" else ""
             return (" · ".join(e(b) for b in bits if b)
                     + (f" · then {pill(into, 'info')}" if into and s.index < len(plan.shots) - 1 else ""))

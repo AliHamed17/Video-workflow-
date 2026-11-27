@@ -228,6 +228,25 @@ def check_trends(config: AppConfig, http: httpx.Client, live: bool, youtube_key:
             for s in config.trends.sources]
 
 
+def check_stock(config: AppConfig, secrets: Secrets, http: httpx.Client, live: bool) -> list[Check]:
+    """Free stock footage (Pexels), when it's the renderer or the autopilot's budget fallback."""
+    if config.video.generator != "stock" and config.video.budget_fallback != "stock":
+        return []
+    key = _s(secrets.pexels_api_key)
+    if not key:
+        return [Check("stock footage", False if config.video.generator == "stock" else None,
+                      "set PEXELS_API_KEY (free at pexels.com/api) or connect it on the dashboard")]
+    if not live:
+        return [Check("stock footage", True, "Pexels key set")]
+
+    def pexels():
+        resp = net.send(http, "GET", "https://api.pexels.com/videos/search", headers={"Authorization": key},
+                        params={"query": "ocean", "per_page": 1}, retries=1)
+        resp.raise_for_status()
+        return f"Pexels works ({resp.json().get('total_results', 0):,} ocean clips)"
+    return [_guard("stock footage", pexels)]
+
+
 def check_viral(config: AppConfig, secrets: Secrets, http: httpx.Client, live: bool) -> list[Check]:
     from . import viral
 
@@ -270,6 +289,7 @@ def run_checks(config: AppConfig, secrets: Secrets, publishers: dict, live: bool
     checks += check_notify(config, secrets, http, live)
     checks += check_trends(config, http, live, _s(secrets.youtube_api_key))
     checks += check_viral(config, secrets, http, live)
+    checks += check_stock(config, secrets, http, live)
     if store is not None:
         from datetime import UTC, datetime
         store.kv_set("health_last", {"at": datetime.now(UTC).isoformat(), "live": live,

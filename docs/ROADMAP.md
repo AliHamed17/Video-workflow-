@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 3.1: Cheaper videos and covers ✅
+
+- [x] Render modes: video / hybrid (hero beats only) / stills, with local camera-move animation of keyframes
+- [x] Free Pexels stock footage renderer; the autopilot falls back to it when it can't afford a render
+- [x] Designed covers: YouTube thumbnail, Instagram thumb_offset and TikTok cover timestamp at the hook
+- [x] Daily runs can hold the cloud secret as an environment network secret
+
 ## Phase 3.0: Better videos ✅
 
 - [x] Story beats (hook → escalation → twist → payoff → loop) and punch words in every script; the critic checks craft

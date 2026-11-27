@@ -33,7 +33,8 @@ video:
   #   higgsfield_mcp -> headless: this program calls the Higgsfield MCP server itself
   #                     (needs HIGGSFIELD_MCP_TOKEN).
   #   mock           -> local ffmpeg placeholder clips, for testing the pipeline for free.
-  generator: "handoff"
+  generator: "handoff"            # ... or stock: free Pexels footage for every shot (PEXELS_API_KEY)
+  budget_fallback: wait          # autopilot can't afford a render: wait for credits | stock (free Pexels footage)
   higgsfield:
     model: "seedance_2_5"        # see `models_explore` in the Higgsfield MCP for the catalog
     shot_duration_s: 5
@@ -57,6 +58,9 @@ video:
     end_role: end_image          # the model's media role for a last frame
     check_model: true            # read the model's catalog entry first; clamp/drop what it doesn't take
     retry_failed_shots: true     # resubmit a failed shot once (toned down if refused), keep the rest
+    render_mode: video           # video: every shot generated (≈80/shot) | hybrid: video for hybrid_beats, the
+                                 # rest are keyframes animated here (≈2/shot) | stills: all animated (≈12 a video)
+    hybrid_beats: [hook, twist, payoff]
     prompt_guide: >-             # how this model reads prompts (passed to the director)
       Seedance follows the order of the prompt: framing, then the subject and what it does, then
       the camera, then light and look. One continuous action per shot reads best; name the camera
@@ -195,6 +199,7 @@ publish:
     privacy: public     # YouTube keeps API uploads private until the Google project passes its audit
     category_id: "28"   # 28 = Science & Technology, 22 = People & Blogs, 24 = Entertainment
     captions: true      # upload the narration as subtitle tracks (main language + every version)
+    custom_thumbnail: true   # the designed cover as thumbnail (needs a phone-verified channel; skipped if not)
   instagram:
     share_to_feed: true
   tiktok:

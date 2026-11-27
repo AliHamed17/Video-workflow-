@@ -34,6 +34,8 @@ from .base import (
     keyframe_params,
     morph_target,
     reference_shot,
+    still_clip,
+    still_indices,
     video_params,
 )
 
@@ -259,7 +261,12 @@ class HiggsfieldMCPGenerator:
     async def _render(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> RenderResult:
         hf, phase = self.config, item.render_phase
         drafts = {c.shot_index: c.source for c in item.clips if c.phase == "draft"}
-        use_keyframes = hf.keyframes and not (phase == "final" and drafts)
+        first_pass = not (phase == "final" and drafts)
+        # Render mode: some (hybrid) or all (stills) shots are keyframes animated here instead of videos.
+        stills = still_indices(hf, item, plan.shots)
+        video_shots = [s for s in plan.shots if s.index not in stills]
+        kf_set = ({s.index for s in plan.shots} if hf.keyframes else set(stills)) if first_pass else set()
+        use_keyframes = bool(kf_set)
 
         morphs = {c.shot_index for c in item.clips if c.phase == "draft" and c.morph}   # finals inherit them
         notes: list[str] = []
@@ -267,20 +274,22 @@ class HiggsfieldMCPGenerator:
             # 0. What the model takes (duration range, parameters, media roles) — adapt before spending.
             info = await self._model(caller)
             # 1. Price and balance checks before spending anything.
-            first = plan.shots[0]
-            probe = video_params(hf, self.aspect_ratio, plan, first, phase,
-                                 draft_job=drafts.get(first.index) if phase == "final" else None)
-            probe.pop("medias", None)
-            probe = self._adapted(info, probe, notes)
-            per_shot = extract_credits(await caller.call("generate_video",
-                                                         {"params": probe | {"get_cost": True}, "context": CONTEXT}))
-            if per_shot is None:
-                per_shot = hf.unit_costs.draft if phase == "draft" else hf.unit_costs.final
+            per_shot = per_kf = 0.0
+            if video_shots:
+                first = video_shots[0]
+                probe = video_params(hf, self.aspect_ratio, plan, first, phase,
+                                     draft_job=drafts.get(first.index) if phase == "final" else None)
+                probe.pop("medias", None)
+                probe = self._adapted(info, probe, notes)
+                per_shot = extract_credits(await caller.call(
+                    "generate_video", {"params": probe | {"get_cost": True}, "context": CONTEXT}))
+                if per_shot is None:
+                    per_shot = hf.unit_costs.draft if phase == "draft" else hf.unit_costs.final
             if use_keyframes:
-                kf = keyframe_params(hf, self.aspect_ratio, plan, first) | {"get_cost": True}
-                per_shot += extract_credits(await caller.call("generate_image", {"params": kf, "context": CONTEXT})) \
+                kf = keyframe_params(hf, self.aspect_ratio, plan, plan.shots[0]) | {"get_cost": True}
+                per_kf = extract_credits(await caller.call("generate_image", {"params": kf, "context": CONTEXT})) \
                     or hf.unit_costs.keyframe
-            estimate = per_shot * len(plan.shots)
+            estimate = per_shot * len(video_shots) + per_kf * len(kf_set)
             if estimate > hf.max_credits_per_video:
                 raise BudgetExceeded(f"Estimated {estimate:.0f} credits > budget {hf.max_credits_per_video:.0f}")
             credits, plan_type = extract_balance(await caller.call("balance", {}))
@@ -295,11 +304,12 @@ class HiggsfieldMCPGenerator:
             keyframe_jobs: dict[int, str] = {}
             keyframe_paths: dict[int, Path] = {}
             if use_keyframes:
-                ref = reference_shot(hf, plan)
+                ref = reference_shot(hf, plan, among=kf_set)
                 ref_job = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job),
                                None) if ref is not None else None
-                waves = [[s for s in plan.shots if s.index == ref], [s for s in plan.shots if s.index != ref]] \
-                    if ref is not None else [list(plan.shots)]
+                wanted = [s for s in plan.shots if s.index in kf_set]
+                waves = [[s for s in wanted if s.index == ref], [s for s in wanted if s.index != ref]] \
+                    if ref is not None else [wanted]
                 for wave in waves:
                     if not wave:
                         continue
@@ -323,7 +333,7 @@ class HiggsfieldMCPGenerator:
             known = {c.shot_index: c.keyframe_job for c in item.clips if c.keyframe_job} | keyframe_jobs
             full_order = item.render_plan.shots if item.render_plan else plan.shots
             requests = []
-            for s in plan.shots:
+            for s in video_shots:
                 target = morph_target(full_order, s) if use_keyframes and keyframe_jobs.get(s.index) else None
                 params = self._adapted(info, video_params(
                     hf, self.aspect_ratio, plan, s, phase, keyframe_job=keyframe_jobs.get(s.index),
@@ -386,12 +396,26 @@ class HiggsfieldMCPGenerator:
             clips.append(Clip(shot_index=index, source=job_id, url=url, path=str(path), phase=phase,
                               keyframe=str(keyframe_paths[index]) if index in keyframe_paths else None,
                               keyframe_job=keyframe_jobs.get(index), morph=index in morphs))
+        # Animated stills: the keyframe made in this pass (or the draft's, for a final) with the camera move.
+        existing = {c.shot_index: c for c in item.clips if c.keyframe and Path(c.keyframe).exists()}
+        for shot in plan.shots:
+            if shot.index not in stills:
+                continue
+            source = keyframe_paths.get(shot.index) or (existing[shot.index].keyframe if shot.index in existing else None)
+            if source is None:
+                failures[shot.index] = "no keyframe to animate"
+                continue
+            job = keyframe_jobs.get(shot.index) or (existing[shot.index].keyframe_job if shot.index in existing else None)
+            clips.append(still_clip(item, shot, source, out_dir, phase, job))
+        clips.sort(key=lambda c: c.shot_index)
         sound_credits = (hf.unit_costs.narration * sum(1 for a in audio if a.kind == "voice")
                          + hf.unit_costs.music * sum(1 for a in audio if a.kind == "music"))
         morphed = sorted(i + 1 for i in morphs if any(c.shot_index == i for c in clips))
         return RenderResult(clips=clips, audio=audio, credits=estimate + sound_credits, failed=failures,
-                            note=f"{len(clips)} {phase} shot(s) on {hf.model}"
-                                 + (" from keyframes" if use_keyframes else "")
+                            note=f"{sum(c.kind == 'video' for c in clips)} {phase} video shot(s) on {hf.model}"
+                                 + (" from keyframes" if use_keyframes and video_shots else "")
+                                 + (f" + {sum(c.kind == 'still' for c in clips)} animated still(s) ({hf.render_mode})"
+                                    if stills else "")
                                  + (f", morphing shot(s) {', '.join(map(str, morphed))}" if morphed else "")
                                  + (f", {len(audio)} sound file(s)" if audio else "")
                                  + (f"; adapted to the model: {'; '.join(notes)}" if notes else ""))

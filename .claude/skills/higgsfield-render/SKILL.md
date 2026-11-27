@@ -39,6 +39,10 @@ may have another name — use whichever Higgsfield tools are available: `balance
    shot `morph_into`. One `generate_video_batch` call with `{index, params: shot.video}` for every
    shot; `jobs_wait` until all are terminal. Never resubmit a shot whose outcome is unknown —
    look up its job id first.
+5b. **Still shots** (render mode `hybrid` / `stills`): a shot with `"still": true` has a `keyframe` and
+   no `video` — don't generate one. When its keyframe is done, register it with
+   `vw clips still <id> <index> --keyframe-url <url> --keyframe-job <job_id>`: it's animated here with
+   the shot's camera move, at no credit cost. (In the final phase stills are animated automatically.)
 6. **Register every finished shot** (the video job id is required to finalize drafts later):
    `vw clips add <id> <index> <video_url> --job <video_job_id> [--keyframe-job <id> --keyframe-url <url>]`,
    adding `--morph` for shots with `morph_into` or `morph: true`.

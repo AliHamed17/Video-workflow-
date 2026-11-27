@@ -22,6 +22,7 @@ from .base import (
     keyframe_params,
     morph_target,
     reference_shot,
+    still_indices,
     video_params,
 )
 
@@ -35,8 +36,11 @@ class HandoffGenerator:
     def build_request(self, item: ContentItem, plan: RenderPlan) -> dict:
         hf, phase = self.video.higgsfield, item.render_phase
         drafts = {c.shot_index: c.source for c in item.clips if c.phase == "draft"}
-        use_keyframes = hf.keyframes and not (phase == "final" and drafts)
-        ref = reference_shot(hf, plan) if use_keyframes else None
+        stills = still_indices(hf, item, plan.shots)        # render mode: animated here from their keyframe
+        first_pass = not (phase == "final" and drafts)
+        kf_set = ({s.index for s in plan.shots} if hf.keyframes else set(stills)) if first_pass else set()
+        use_keyframes = bool(kf_set)
+        ref = reference_shot(hf, plan, among=kf_set) if use_keyframes else None
         # A re-render of some shots keeps the existing reference keyframe when there is one.
         existing_ref = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job), None) \
             if ref is not None else None
@@ -48,15 +52,19 @@ class HandoffGenerator:
         for shot in plan.shots:
             draft_job = drafts.get(shot.index) if phase == "final" else None
             anchor = None if shot.index == ref or ref is None else (existing_ref or REFERENCE_PLACEHOLDER)
-            target = morph_target(full_order, shot) if use_keyframes and hf.morph else None
+            keyframe = keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor) \
+                if shot.index in kf_set else None
+            if shot.index in stills:          # no video: the keyframe is animated here, for free
+                shots.append({"index": shot.index, "keyframe": keyframe, "video": None, "still": True})
+                continue
+            target = morph_target(full_order, shot) if shot.index in kf_set and hf.morph else None
             # The next shot's keyframe: made in this request (placeholder) or already there from before.
             end = (NEXT_KEYFRAME_PLACEHOLDER if target in rendering else known.get(target)) if target is not None else None
             entry = {
                 "index": shot.index,
-                "keyframe": keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor)
-                if use_keyframes else None,
+                "keyframe": keyframe,
                 "video": video_params(hf, self.video.aspect_ratio, plan, shot, phase,
-                                      keyframe_job=KEYFRAME_PLACEHOLDER if use_keyframes else None,
+                                      keyframe_job=KEYFRAME_PLACEHOLDER if shot.index in kf_set else None,
                                       draft_job=draft_job, use_unlim=hf.use_unlim, end_keyframe_job=end),
             }
             if end:
@@ -66,8 +74,9 @@ class HandoffGenerator:
             shots.append(entry)
         narration, music = audio_requests(item, self.video)
         unit = hf.unit_costs
-        per_shot = (unit.keyframe if use_keyframes else 0) + (unit.draft if phase == "draft" else unit.final)
-        estimate = per_shot * len(plan.shots) + unit.narration * len(narration) + (unit.music if music else 0)
+        videos = [s for s in shots if not s.get("still")]
+        estimate = (unit.keyframe * len(kf_set) + (unit.draft if phase == "draft" else unit.final) * len(videos)
+                    + unit.narration * len(narration) + (unit.music if music else 0))
         steps = []
         if use_keyframes and ref is not None and any(s["index"] == ref for s in shots):
             steps.append(f"generate_image with shot {ref}'s `keyframe` params FIRST; jobs_wait; it is the "
@@ -76,16 +85,21 @@ class HandoffGenerator:
             steps.append("generate_image_batch with the other shots' `keyframe` params; jobs_wait")
         elif use_keyframes:
             steps.append("generate_image_batch with every shot's `keyframe` params; jobs_wait; keep each job_id")
-        if use_keyframes:
+        if use_keyframes and videos:
             steps.append(f"replace {KEYFRAME_PLACEHOLDER} in each shot's video.medias with that shot's keyframe job_id")
+        if stills:
+            steps.append("for shots with `still: true` there is NO video to generate: once its keyframe is done, "
+                         "vw clips still <item> <index> --keyframe-job <id> --keyframe-url <url> (animated here, free)")
         if any("morph_into" in s for s in shots):
             steps.append(f"for shots with `morph_into`: replace {NEXT_KEYFRAME_PLACEHOLDER} in video.medias with the "
                          "keyframe job_id of shot `morph_into` (the shot ends on that frame)")
-        if hf.check_model:
+        if hf.check_model and videos:
             steps.append(f"models_explore get {hf.model}: if a `video` param, its value, the duration or a media role "
                          "isn't offered by the model, drop or clamp it (and tell the user) before submitting")
-        steps.append("generate_video_batch with every shot's `video` params; jobs_wait")
-        steps.append("for each finished shot: vw clips add <item> <index> <video_url> --job <video_job_id>"
+        if videos:
+            steps.append("generate_video_batch with every shot's `video` params (shots whose `video` is null are "
+                         "stills); jobs_wait")
+        steps.append("for each finished video shot: vw clips add <item> <index> <video_url> --job <video_job_id>"
                      + (" --keyframe-job <id> --keyframe-url <url>" if use_keyframes else "")
                      + (" (add --morph for shots with `morph_into` or `morph`)" if any(
                          "morph_into" in s or s.get("morph") for s in shots) else ""))
@@ -102,7 +116,8 @@ class HandoffGenerator:
             "title": item.idea.title,
             "phase": phase,
             "strategy": {"keyframes": use_keyframes, "draft_preview": hf.draft_preview,
-                         "reference_shot": ref, "narration_lines": len(narration), "music": bool(music)},
+                         "reference_shot": ref, "narration_lines": len(narration), "music": bool(music),
+                         "render_mode": hf.render_mode, "still_shots": sorted(stills)},
             "estimated_credits": estimate,
             "max_credits": hf.max_credits_per_video,
             "steps": steps,

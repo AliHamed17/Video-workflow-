@@ -42,12 +42,10 @@ class AutopilotFlow:
                 total += e["attrs"].get("credits", 0) or 0
         return total
 
-    def _render_estimate(self, phase: str, shots: int) -> float:
+    def _render_estimate(self, phase: str, shots: int, video_shots: int | None = None) -> float:
         hf = self.config.video.higgsfield
-        estimate = hf.estimate(shots, phase)
+        estimate = hf.pass_estimate(shots, phase, video_shots)   # keyframes come with the first pass
         first_pass = phase == "draft" or not hf.draft_preview
-        if hf.keyframes and first_pass:      # keyframes come with the first pass
-            estimate += shots * hf.unit_costs.keyframe
         if first_pass:                       # so do narration and music
             video = self.config.video
             estimate += (shots * hf.unit_costs.narration if video.voice.provider == "higgsfield" else 0) \
@@ -56,7 +54,10 @@ class AutopilotFlow:
 
     def _budget_block(self, item: ContentItem, plan: RenderPlan) -> str | None:
         """Why the autopilot must not start this render (daily cap or balance), else None."""
-        estimate = self._render_estimate(item.render_phase, len(plan.shots))
+        from ..video.base import still_indices
+
+        stills = still_indices(self.config.video.higgsfield, item, plan.shots)
+        estimate = self._render_estimate(item.render_phase, len(plan.shots), len(plan.shots) - len(stills))
         spent = self.credits_spent_today()
         cap = self.config.autopilot.max_credits_per_day
         if spent + estimate > cap:

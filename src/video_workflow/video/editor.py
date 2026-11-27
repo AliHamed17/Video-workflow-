@@ -270,6 +270,8 @@ class Editor:
         self.video, self.width, self.height, self.fps = video, width, height, fps
         self.workers = workers
         self.transitions = ""      # what the last assemble() put between shots (for the trace)
+        self.cover: Path | None = None          # the designed cover of the last final cut
+        self.cover_time: float | None = None    # its hook moment, for the platforms' cover pickers
 
     def _normalize(self, src: Path, dst: Path, max_duration: float, size: tuple[int, int]) -> float:
         info = probe(src)
@@ -478,6 +480,20 @@ class Editor:
                  "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                  "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(final)]
         _run(args, cwd=work)
+
+        # Cover: the hook while its headline is up (Instagram / TikTok cover moment) and a designed image.
+        self.cover = self.cover_time = None
+        if phase == "final" and durations:
+            from .cover import cover_moment, cover_text, make_cover
+
+            hook = durations[0]
+            self.cover_time = cover_moment(final, min(0.6, hook * 0.3), max(hook - 0.2, 0.8))
+            try:
+                self.cover = make_cover(stitched, self.cover_time, cover_text(item, texts),
+                                        out_dir / (f"cover_{variant}.jpg" if variant else "cover.jpg"),
+                                        self.video.captions, emphasis[0] if emphasis else [], size)
+            except Exception as exc:     # a cover is a nicety: never lose the cut over it
+                log.warning("cover not made: %s", exc)
 
         # Thumbnail: the most representative frame of the hook shot (not just frame 0).
         thumb = out_dir / (f"thumbnail_{variant}.jpg" if variant else "thumbnail.jpg")

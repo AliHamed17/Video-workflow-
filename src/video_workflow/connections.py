@@ -78,6 +78,9 @@ SERVICES: tuple[Service, ...] = (
         Field("anthropic_api_key", "Anthropic API key"), Field("openai_api_key", "OpenAI API key"),
         Field("gemini_api_key", "Gemini API key"))),
     Service("apify", "Apify", "find viral TikTok / Instagram videos", (Field("apify_token", "API token"),)),
+    Service("pexels", "Pexels (free stock footage)", "real footage at no credit cost: video.generator: stock, or "
+            "video.budget_fallback: stock when credits run out", (Field("pexels_api_key", "API key"),),
+            how=("pexels.com/api → sign in → Your API key (free, no card)",)),
     Service("stripe", "Stripe", "import sponsor payments into the books (use a read-only restricted key)",
             (Field("stripe_api_key", "Restricted key"),)),
 )
