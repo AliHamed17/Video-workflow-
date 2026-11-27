@@ -23,7 +23,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from ..config import HiggsfieldConfig, VideoConfig
+from ..config import CharactersConfig, HiggsfieldConfig, VideoConfig
 from ..models import Clip, ContentItem, RenderPlan
 from .base import (
     AudioAsset,
@@ -186,8 +186,9 @@ class HiggsfieldMCPGenerator:
                  caller_factory: Callable[[], AbstractAsyncContextManager[ToolCaller]],
                  http: httpx.Client | None = None, poll_interval_s: float = 10.0,
                  on_balance: Callable[[float, str | None], None] | None = None,
-                 video: VideoConfig | None = None):
+                 video: VideoConfig | None = None, characters: CharactersConfig | None = None):
         self.video = video          # for narration / music generated alongside the shots
+        self.characters = characters or CharactersConfig()   # reference sheets for the cast
         self.config = config
         self.aspect_ratio = aspect_ratio
         self.caller_factory = caller_factory
@@ -289,7 +290,13 @@ class HiggsfieldMCPGenerator:
                 kf = keyframe_params(hf, self.aspect_ratio, plan, plan.shots[0]) | {"get_cost": True}
                 per_kf = extract_credits(await caller.call("generate_image", {"params": kf, "context": CONTEXT})) \
                     or hf.unit_costs.keyframe
-            estimate = per_shot * len(video_shots) + per_kf * len(kf_set)
+            # Character sheets the cast still needs (once per character, then reused in every video).
+            from ..cast import needed_sheets, sheet_params
+
+            on_screen = {name for s in plan.shots for name in s.characters}
+            missing_sheets = needed_sheets(item.cast, on_screen) if first_pass else []
+            estimate = (per_shot * len(video_shots) + per_kf * len(kf_set)
+                        + hf.unit_costs.sheet * len(missing_sheets))
             if estimate > hf.max_credits_per_video:
                 raise BudgetExceeded(f"Estimated {estimate:.0f} credits > budget {hf.max_credits_per_video:.0f}")
             credits, plan_type = extract_balance(await caller.call("balance", {}))
@@ -299,6 +306,22 @@ class HiggsfieldMCPGenerator:
                     raise InsufficientCredits(
                         f"Higgsfield balance is {credits:.0f} credits ({plan_type or 'unknown plan'}); "
                         f"this {phase} render needs ≈{estimate:.0f}. Top up, then retry.")
+
+            # 1b. Character sheets first: every keyframe and shot the character is in attaches theirs.
+            sheets: dict[str, dict] = {}
+            if missing_sheets:
+                cc = self.characters
+                requests = [{"index": n, "params": sheet_params(cc, item.cast, m) | {"use_unlim": hf.use_unlim}}
+                            for n, m in enumerate(missing_sheets)]
+                jobs = await self._batch(caller, "generate_image_batch", requests)
+                states = await self._wait(caller, jobs)
+                self._raise_failures(states, "character sheets")
+                for n, m in enumerate(missing_sheets):
+                    job = jobs[n]
+                    m["sheet_job"], m["sheet_url"] = job, states[job]["url"]
+                    sheets[m["name"]] = {"job": job, "url": states[job]["url"]}
+                notes.append(f"character sheet(s) for {', '.join(sheets)}")
+            role = self.characters.reference_role
 
             # 2. Keyframes: the reference shot first, then every other shot drawn from it.
             keyframe_jobs: dict[int, str] = {}
@@ -314,8 +337,8 @@ class HiggsfieldMCPGenerator:
                     if not wave:
                         continue
                     requests = [{"index": s.index, "params": keyframe_params(
-                        hf, self.aspect_ratio, plan, s,
-                        reference_job=None if s.index == ref else ref_job) | {"use_unlim": hf.use_unlim}}
+                        hf, self.aspect_ratio, plan, s, reference_job=None if s.index == ref else ref_job,
+                        cast=item.cast, character_role=role) | {"use_unlim": hf.use_unlim}}
                         for s in wave]
                     jobs = await self._batch(caller, "generate_image_batch", requests)
                     states = await self._wait(caller, jobs)
@@ -338,7 +361,8 @@ class HiggsfieldMCPGenerator:
                 params = self._adapted(info, video_params(
                     hf, self.aspect_ratio, plan, s, phase, keyframe_job=keyframe_jobs.get(s.index),
                     draft_job=drafts.get(s.index) if phase == "final" else None, use_unlim=hf.use_unlim,
-                    end_keyframe_job=known.get(target) if target is not None else None), notes)
+                    end_keyframe_job=known.get(target) if target is not None else None, cast=item.cast,
+                    character_role=role), notes)
                 if any(m.get("role") == hf.end_role for m in params.get("medias", [])):
                     morphs.add(s.index)
                 requests.append({"index": s.index, "params": params})
@@ -411,7 +435,7 @@ class HiggsfieldMCPGenerator:
         sound_credits = (hf.unit_costs.narration * sum(1 for a in audio if a.kind == "voice")
                          + hf.unit_costs.music * sum(1 for a in audio if a.kind == "music"))
         morphed = sorted(i + 1 for i in morphs if any(c.shot_index == i for c in clips))
-        return RenderResult(clips=clips, audio=audio, credits=estimate + sound_credits, failed=failures,
+        return RenderResult(clips=clips, audio=audio, credits=estimate + sound_credits, failed=failures, sheets=sheets,
                             note=f"{sum(c.kind == 'video' for c in clips)} {phase} video shot(s) on {hf.model}"
                                  + (" from keyframes" if use_keyframes and video_shots else "")
                                  + (f" + {sum(c.kind == 'still' for c in clips)} animated still(s) ({hf.render_mode})"

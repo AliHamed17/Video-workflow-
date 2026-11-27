@@ -198,7 +198,17 @@ class AutopilotFlow:
                 self.evaluate_experiments()
             except Exception as exc:
                 log.warning("growth report failed: %s", exc)
+        cast_made = None
+        if self.config.characters.enabled:
+            from .. import cast as cast_mod
+            if not cast_mod.get(self.store):          # first run with characters on: cast before writing
+                try:
+                    cast_made = [m["name"] for m in self.design_cast()["members"]]
+                except Exception as exc:              # no cast is no reason to skip the day's video
+                    log.warning("casting failed: %s", exc)
         report = self.autopilot_fill()
+        if cast_made:
+            report["cast"] = cast_made
         if report["active"] and self.compilation_due():
             try:
                 made = self.make_compilation()

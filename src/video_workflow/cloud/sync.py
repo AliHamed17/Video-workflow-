@@ -26,12 +26,12 @@ SYNC_KV = ("daemon_heartbeat", "higgsfield_balance", "health_last", "selftest_la
            "viral_last", "viral_running", "autopilot_paused", "readiness", "trend_radar", "trends_running",
            "money_snapshot", "autopilot_last_run", "growth", "growth_running",
            "community_running", "maintenance_last", "experiments", "config_overrides", "audience", "sponsors",
-           "sponsor_running")
+           "sponsor_running", "cast", "cast_running")
 # What a fresh worker needs to pick up where the last one stopped (`vw cloud restore`).
 RESTORE_KV = ("content_plan", "viral_last", "viral_used", "last_viral", "last_plan", "last_digest", "last_stats",
               "autopilot_paused", "higgsfield_balance", "alerts_sent", "token_vault", "trend_radar",
               "ledger", "stripe_last", "autopilot_last_run", "growth", "followed_up", "audience_used",
-              "last_follow_up", "experiments", "config_overrides", "audience", "sponsors")
+              "last_follow_up", "experiments", "config_overrides", "audience", "sponsors", "cast")
 MEDIA_ITEMS = 40              # media is kept for the most recent items
 MAX_UPLOAD = 4_300_000        # stay under Vercel's 4.5 MB request limit
 
@@ -226,6 +226,10 @@ def apply_command(pipeline, cmd: dict) -> tuple[bool, str] | None:
             radar = store.kv_get("trend_radar") or {}
             top = radar.get("topics") or []
             return True, f"{len(top)} trend topics" + (f"; top: {top[0]['topic'][:60]}" if top else "")
+        if action == "cast":
+            from ..web.server import run_cast
+
+            return run_cast(pipeline, cmd.get("args") or {})
         if action == "sponsor":
             from ..web.server import run_sponsor
 

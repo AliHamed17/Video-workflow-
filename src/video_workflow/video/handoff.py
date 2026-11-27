@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..config import VideoConfig
+from ..config import CharactersConfig, VideoConfig
 from ..models import ContentItem, RenderPlan
 from .base import (
     KEYFRAME_PLACEHOLDER,
@@ -30,8 +30,9 @@ from .base import (
 class HandoffGenerator:
     name = "handoff"
 
-    def __init__(self, video: VideoConfig):
+    def __init__(self, video: VideoConfig, characters: CharactersConfig | None = None):
         self.video = video
+        self.characters = characters or CharactersConfig()
 
     def build_request(self, item: ContentItem, plan: RenderPlan) -> dict:
         hf, phase = self.video.higgsfield, item.render_phase
@@ -41,6 +42,12 @@ class HandoffGenerator:
         kf_set = ({s.index for s in plan.shots} if hf.keyframes else set(stills)) if first_pass else set()
         use_keyframes = bool(kf_set)
         ref = reference_shot(hf, plan, among=kf_set) if use_keyframes else None
+        from ..cast import needed_sheets, sheet_params
+
+        on_screen = {name for s in plan.shots for name in s.characters}
+        missing_sheets = needed_sheets(item.cast, on_screen) if first_pass else []
+        role = self.characters.reference_role
+        cast_kw = {"cast": item.cast, "character_role": role, "placeholders": True}
         # A re-render of some shots keeps the existing reference keyframe when there is one.
         existing_ref = next((c.keyframe_job for c in item.clips if c.shot_index == ref and c.keyframe_job), None) \
             if ref is not None else None
@@ -52,7 +59,7 @@ class HandoffGenerator:
         for shot in plan.shots:
             draft_job = drafts.get(shot.index) if phase == "final" else None
             anchor = None if shot.index == ref or ref is None else (existing_ref or REFERENCE_PLACEHOLDER)
-            keyframe = keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor) \
+            keyframe = keyframe_params(hf, self.video.aspect_ratio, plan, shot, reference_job=anchor, **cast_kw) \
                 if shot.index in kf_set else None
             if shot.index in stills:          # no video: the keyframe is animated here, for free
                 shots.append({"index": shot.index, "keyframe": keyframe, "video": None, "still": True})
@@ -65,7 +72,7 @@ class HandoffGenerator:
                 "keyframe": keyframe,
                 "video": video_params(hf, self.video.aspect_ratio, plan, shot, phase,
                                       keyframe_job=KEYFRAME_PLACEHOLDER if shot.index in kf_set else None,
-                                      draft_job=draft_job, use_unlim=hf.use_unlim, end_keyframe_job=end),
+                                      draft_job=draft_job, use_unlim=hf.use_unlim, end_keyframe_job=end, **cast_kw),
             }
             if end:
                 entry["morph_into"] = target
@@ -76,8 +83,15 @@ class HandoffGenerator:
         unit = hf.unit_costs
         videos = [s for s in shots if not s.get("still")]
         estimate = (unit.keyframe * len(kf_set) + (unit.draft if phase == "draft" else unit.final) * len(videos)
-                    + unit.narration * len(narration) + (unit.music if music else 0))
+                    + unit.narration * len(narration) + (unit.music if music else 0)
+                    + unit.sheet * len(missing_sheets))
         steps = []
+        if missing_sheets:
+            steps.append("CHARACTER SHEETS FIRST (made once, reused in every video): for each `cast_sheets` entry, "
+                         "generate_image with its `params` (for the best sheets, follow get_preset_instructions "
+                         "/character-sheet with the cast's style and the entry's `character`); jobs_wait; then "
+                         "vw cast sheet \"<name>\" --job <job_id> --url <image_url>, and replace <SHEET:<name>> in "
+                         "every keyframe/video medias below with that job_id")
         if use_keyframes and ref is not None and any(s["index"] == ref for s in shots):
             steps.append(f"generate_image with shot {ref}'s `keyframe` params FIRST; jobs_wait; it is the "
                          f"reference: replace {REFERENCE_PLACEHOLDER} in the other shots' keyframe.medias "
@@ -122,6 +136,9 @@ class HandoffGenerator:
             "max_credits": hf.max_credits_per_video,
             "steps": steps,
             "shots": shots,
+            "cast_sheets": [{"name": m["name"], "character": {k: m.get(k) for k in ("species", "being", "look")},
+                             "style": item.cast.get("style") if item.cast else None,
+                             "params": sheet_params(self.characters, item.cast, m)} for m in missing_sheets],
             "audio": {"narration": narration, "music": music},
         }
 

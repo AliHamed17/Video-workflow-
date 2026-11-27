@@ -41,6 +41,7 @@ video:
     params:                      # passed straight through to generate_video params
       resolution: "1080p"
       generate_audio: true
+      bitrate_mode: high         # sharper, less compressed output (same price, checked Nov 2026)
     use_unlim: false             # false = pay with credits; true = use free-trial unlimited gens
     max_credits_per_video: 600   # budget guard per render phase (prices are preflighted live)
     poll_timeout_s: 1200
@@ -146,6 +147,23 @@ llm:
     claude: ["claude", "-p"]
     codex: ["codex", "exec", "--skip-git-repo-check", "-"]
     gemini: ["gemini", "-p", ""]
+
+characters:
+  # A recurring cast that hosts and acts in the videos (character-led shorts hold attention far better
+  # than faceless footage). The casting director designs it (Dashboard → Cast, or `vw cast design`);
+  # each character gets a Higgsfield reference sheet once (≈1.5 credits) and is drawn from it in every
+  # shot they appear in, and speaks with their own voice.
+  enabled: true
+  style: ""                      # e.g. "Classic 3D" (feature-animation), "Anime", "Realism"; "" = the director chooses
+  members: 2                     # how many recurring characters
+  max_per_shot: 2                # more characters in one AI shot drift; two is safe
+  sheet_model: seedream_5_5      # character reference sheets
+  sheet_params: {resolution: "2k"}
+  voices:                        # Higgsfield preset voices handed to the cast by gender (list_voices)
+    male: ["bd072316-f77c-588b-b6e5-e46b9b03d008", "3c9d6053-6334-592c-8997-4e325286af3f",
+           "6705e465-7b52-5915-a1d8-b1222885e01d", "e6f9b893-51b1-51d3-afe9-9e0482cb7ac1"]
+    female: ["731b4ffe-e95e-59f4-8c00-81608936091f", "a00bc7f3-0236-5e76-ac65-90137ce0f5a4",
+             "d198dc0b-c4e5-5198-aa1d-ecf5ca0927c4", "1550321e-7f5b-526e-b001-02328b03e9bc"]
 
 content:
   languages: []         # extra language versions from the same footage, e.g. [es, ar, pt-BR]

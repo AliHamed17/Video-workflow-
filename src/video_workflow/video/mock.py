@@ -56,6 +56,7 @@ class MockGenerator:
         drafts = {c.shot_index for c in item.clips if c.phase == "draft"}
         use_keyframes = self.hf.keyframes and not (phase == "final" and drafts)
         stills = still_indices(self.hf, item, plan.shots)
+        sheets = self._sheets(item, plan, out_dir) if not (phase == "final" and drafts) else {}
         # Drafts are rendered at half size, like Higgsfield's 480p drafts.
         w, h = (self.width // 2 // 2 * 2, self.height // 2 // 2 * 2) if phase == "draft" else (self.width, self.height)
         clips = []
@@ -100,4 +101,24 @@ class MockGenerator:
         note = (f"mock {phase} animatic" + (" from keyframes" if use_keyframes else "")
                 + (f" + {len(stills)} animated still(s) ({self.hf.render_mode})" if stills else "")
                 + (f", {len(audio)} sound file(s)" if audio else ""))
-        return RenderResult(clips=clips, audio=audio, note=note)
+        if sheets:
+            note += f", character sheet(s) for {', '.join(sheets)}"
+        return RenderResult(clips=clips, audio=audio, note=note, sheets=sheets)
+
+    def _sheets(self, item: ContentItem, plan: RenderPlan, out_dir: Path) -> dict[str, dict]:
+        """Placeholder character sheets for cast members on screen that have none yet."""
+        from ..cast import needed_sheets
+
+        made = {}
+        for m in needed_sheets(item.cast, {n for s in plan.shots for n in s.characters}):
+            path = out_dir.parent / "cast" / f"{m['name'].replace(' ', '_')}.png"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory() as tmp:
+                label = Path(tmp) / "label.txt"
+                label.write_text(f"{m['name']}\n{m['species']}", "utf-8")
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x2b1055:s=960x540",
+                                "-vf", f"drawtext=textfile={label}:fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2",
+                                "-frames:v", "1", str(path)], check=True)
+            m["sheet_job"], m["sheet_url"] = f"mock-sheet-{m['name'].lower().replace(' ', '-')}", None
+            made[m["name"]] = {"job": m["sheet_job"], "url": None}
+        return made

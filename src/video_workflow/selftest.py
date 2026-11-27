@@ -422,6 +422,39 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
                 f"≈{hf.estimate(shots):.0f} hybrid, ≈{budget.estimate(shots):.0f} as stills, 0 with Pexels stock "
                 f"({len(sources)} clips, none repeated)")
 
+    def characters():
+        from . import cast as cast_mod
+        from .video.base import keyframe_params, video_params
+
+        pipe.config.characters.enabled = True
+        pipe.config.characters.voices = {"male": ["selftest-voice-m"], "female": ["selftest-voice-f"]}
+        try:
+            cast = pipe.design_cast()
+            names = [m["name"] for m in cast["members"]]
+            assert [m["voice_id"] for m in cast["members"]] == ["selftest-voice-m", "selftest-voice-f"], cast
+            item = pipe.develop(store.save(ContentItem(channel=pipe.config.channel.name, idea=state["item"].idea)))
+            assert item.cast and [m["name"] for m in item.cast["members"]] == names
+            plan = item.render_plan.model_copy(deep=True)
+            plan.shots[0].characters = names[:1]
+            plan.shots[-1].characters = names[:2]
+            trial = item.model_copy(update={"render_plan": plan, "render_phase": "draft", "stage": Stage.APPROVED})
+            store.save(trial)
+            trial = pipe.render(trial)                       # mock: sheets made once, then shots
+            sheets = {m["name"]: m["sheet_job"] for m in cast_mod.get(store)["members"]}
+            assert all(sheets.values()), sheets
+            trial = store.get(trial.id)
+            hf = pipe.config.video.higgsfield
+            kf = keyframe_params(hf, "9:16", plan, plan.shots[-1], cast=trial.cast)
+            vp = video_params(hf, "9:16", plan, plan.shots[-1], "draft", keyframe_job="kf", cast=trial.cast)
+            refs = [m["value"] for m in kf["medias"] if m["role"] == "image_references"]
+            assert set(sheets.values()) <= set(refs) and all(v in [m["value"] for m in vp["medias"]]
+                                                             for v in sheets.values())
+            assert names[0] in vp["prompt"]
+        finally:
+            pipe.config.characters.enabled = False
+        return (f"cast designed ({cast['style']}): {', '.join(names)} with their own voices; written into a "
+                f"script; a sheet each made once and attached to every keyframe and shot they're in")
+
     def sponsors_and_facebook():
         from . import money
         from . import sponsors as deals
@@ -712,6 +745,7 @@ def run(workdir: Path | None = None, config_path: Path = Path("config/channel.ex
         ("Facebook Reels + sponsorships", sponsors_and_facebook),
         ("Better videos: beats, kinetic captions, transitions, morphs", better_videos),
         ("Cheaper videos + covers: hybrid/stills, stock footage, thumbnails", cheaper_videos),
+        ("Characters: a cast with sheets, voices and references", characters),
         ("Alerts", alerts),
         ("Daily digest", digest),
         ("Dashboard (all pages + APIs)", dashboard),

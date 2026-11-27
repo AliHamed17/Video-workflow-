@@ -48,6 +48,36 @@ class IdeaBatch(BaseModel):
 
 
 BEATS = ("hook", "setup", "escalation", "twist", "payoff", "loop")
+# Higgsfield's character-sheet styles (Drama Studio). One style for the whole cast.
+CHARACTER_STYLES = ("Classic 3D", "Painterly 3D", "CGI", "Noir 3D", "Anime", "2.5D", "Furry", "Classic 2D",
+                    "Painterly 2D", "Realism")
+
+
+class CastMember(BaseModel):
+    name: str = Field(description="Short, memorable name the audience will remember, e.g. 'Professor Octo'")
+    role: Literal["host", "co-host", "recurring"] = Field(description="host: in every video; co-host: most; "
+                                                                      "recurring: when the topic fits")
+    being: Literal["human", "humanoid", "creature"] = Field(
+        description="human; humanoid: stands and moves on two legs with a non-human head or body (an "
+                    "anthropomorphic animal); creature: an animal or creature on its own body")
+    species: str = Field(description="What they are, e.g. 'common octopus', 'retired lighthouse keeper'")
+    look: str = Field(description="The exact visual bible in 2-3 sentences: shape and proportions, named colours, "
+                                  "eyes, outfit and accessories, ONE distinctive feature — enough to draw them "
+                                  "identically every time")
+    personality: str = Field(description="How they act and talk, in one sentence")
+    voice: str = Field(description="How they sound: age, pitch, energy (no accents of real groups)")
+    voice_gender: Literal["male", "female"]
+    catchphrase: str = Field(description="A short line they say at most once a video ('' if none)")
+
+
+class CastPlan(BaseModel):
+    style: Literal["Classic 3D", "Painterly 3D", "CGI", "Noir 3D", "Anime", "2.5D", "Furry", "Classic 2D",
+                   "Painterly 2D", "Realism"] = Field(description="One look for the whole cast")
+    style_notes: str = Field(description="One sentence that pins the look: rendering, palette, light, materials")
+    format: str = Field(description="How the cast is used in every video, e.g. 'Professor Octo hosts and talks "
+                                    "to camera; the animal of the day appears as a guest'")
+    members: list[CastMember]
+    why: str = Field(description="Why this cast and style will hold this channel's audience")
 
 
 class Shot(BaseModel):
@@ -61,13 +91,15 @@ class Shot(BaseModel):
     on_screen_text: str = Field(description="Short caption burned on screen (max ~7 words, '' if none)")
     emphasis: list[str] = Field(description="1-2 words copied exactly from this shot's voiceover that carry the "
                                             "punch (a number, the surprising word); the captions light them up")
+    speaker: str = Field(description="Who says this shot's line: a cast member's exact name, or 'narrator'")
 
     @model_validator(mode="before")
     @classmethod
     def _craft_defaults(cls, data):
-        # Shots stored before beats/emphasis existed. (The LLM schema still requires both.)
-        if isinstance(data, dict) and ("beat" not in data or "emphasis" not in data):
-            data = {"beat": "hook" if data.get("index") == 0 else "escalation", "emphasis": [], **data}
+        # Shots stored before beats/emphasis/speaker existed. (The LLM schema still requires them.)
+        if isinstance(data, dict) and not {"beat", "emphasis", "speaker"} <= data.keys():
+            data = {"beat": "hook" if data.get("index") == 0 else "escalation", "emphasis": [],
+                    "speaker": "narrator", **data}
         return data
 
 
@@ -99,12 +131,13 @@ class ShotPrompt(BaseModel):
         description="How this shot hands over to the next: cut (most), flash (a hard reveal), whip (fast change of "
                     "place), zoom (diving into detail), dissolve (time passing), dip (a pause before the payoff), "
                     "morph (this shot's last frame becomes the next shot's first; at most twice). Last shot: cut")
+    characters: list[str] = Field(description="Exact names of the cast members visible in this shot ([] if none)")
 
     @model_validator(mode="before")
     @classmethod
     def _craft_defaults(cls, data):
-        if isinstance(data, dict) and not {"shot_size", "motion", "transition"} <= data.keys():
-            data = {"shot_size": "medium", "motion": "", "transition": "cut", **data}
+        if isinstance(data, dict) and not {"shot_size", "motion", "transition", "characters"} <= data.keys():
+            data = {"shot_size": "medium", "motion": "", "transition": "cut", "characters": [], **data}
         return data
 
 
@@ -517,6 +550,7 @@ class ContentItem(BaseModel):
     compliance: ComplianceCheck | None = None
     virality: dict | None = None   # Higgsfield Virality Predictor read of the final cut {score, notes, job, at}
     hold_review: bool = False      # a rewritten script waits for a human even with the autopilot on
+    cast: dict | None = None         # the cast this video was written with {style, style_notes, members: [...]}
     review: Review | None = None
     revisions: int = 0
     render_plan: RenderPlan | None = None

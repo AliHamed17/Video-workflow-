@@ -48,7 +48,7 @@ def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None
     if name == "mock":
         return MockGenerator(higgsfield=config.video.higgsfield)
     if name == "handoff":
-        return HandoffGenerator(config.video)
+        return HandoffGenerator(config.video, config.characters)
     if name == "stock":
         from .video.stock import StockGenerator
         return StockGenerator(_s(secrets.pexels_api_key))
@@ -57,7 +57,7 @@ def build_generator(config: AppConfig, secrets: Secrets, name: str | None = None
         return HiggsfieldMCPGenerator(config.video.higgsfield, config.video.aspect_ratio,
                                       caller_factory=lambda: MCPToolCaller(url, token),
                                       on_balance=balance_recorder(store) if store else None,
-                                      video=config.video)
+                                      video=config.video, characters=config.characters)
     raise ValueError(f"Unknown video generator {name!r}")
 
 

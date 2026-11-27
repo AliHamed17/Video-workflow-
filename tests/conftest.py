@@ -6,6 +6,8 @@ import pytest
 
 from video_workflow.config import AppConfig
 from video_workflow.models import (
+    CastMember,
+    CastPlan,
     Claim,
     CompilationCopy,
     ComplianceCheck,
@@ -85,6 +87,22 @@ def default_responses(shots: int = 2) -> dict:
         FactCheck: FactCheck(overall="pass", claims=[Claim(claim="three hearts", verdict="solid", note="")]),
         ShotQA: ShotQA(score=8, matches_brief=True, issues=[], rerender=False, prompt_fix=""),
         ComplianceCheck: ComplianceCheck(verdict="pass", issues=[]),
+        CastPlan: CastPlan(
+            style="Classic 3D", style_notes="Feature-animation 3D: soft subsurface skin, rounded shapes, warm rim "
+            "light, saturated teal-and-coral palette.",
+            format="Professor Octo hosts every video and talks to the viewer; Pip the pistol shrimp pops in to react.",
+            why="A warm, funny host makes facts feel like a show people return to.",
+            members=[CastMember(name="Professor Octo", role="host", being="creature", species="common octopus",
+                                look="A rust-red octopus with pale cream spots, big round amber eyes, tiny brass "
+                                     "round spectacles on the brow and a teal bow tie; one arm always holds a "
+                                     "chalk-white pointer.", personality="Delighted by every weird fact, a little "
+                                     "theatrical.", voice="warm older male, playful", voice_gender="male",
+                                catchphrase="Mind. Blown."),
+                     CastMember(name="Pip", role="co-host", being="creature", species="pistol shrimp",
+                                look="A small coral-pink shrimp with one oversized lilac snapping claw, glossy "
+                                     "black eyes and a white stripe down the back.", personality="Impatient, "
+                                     "loud, wants the punchline now.", voice="bright young female, fast",
+                                voice_gender="female", catchphrase="")]),
         SponsorPitch: SponsorPitch(subject="Your gear, our 40k ocean-curious viewers",
                                    body="Hi! Our viewers love the deep sea... See {media_kit_link}. — Test Channel"),
         CompilationCopy: CompilationCopy(title="5 Animal Superpowers That Sound Fake (#1 Is Real)",

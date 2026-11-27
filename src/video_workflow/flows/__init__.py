@@ -10,11 +10,13 @@ using one object: `pipeline.viral_remix()`, `pipeline.autopilot_day()`, `pipelin
 * experiments.py — A/B tests on our own videos: per-video settings, judging, adopting a winner
 * sponsors.py — follower counts for the media kit, sponsorship pitches drafted for you
 * sound.py     — narration, music, extra-language versions
+* cast.py      — the recurring cast: designed once, drawn from their sheets in every video
 * reporting.py — post stats, performance feedback, the daily digest
 * common.py    — stage constants and shared helpers
 """
 
 from .autopilot import AutopilotFlow
+from .cast import CastFlow
 from .common import AUDIO_EXT, BUDGET_HOLDS, ORDER, STOP_STAGES
 from .community import CommunityFlow
 from .compilation import CompilationFlow
@@ -26,5 +28,5 @@ from .sponsors import SponsorFlow
 from .trends import TrendFlow
 from .viral import ViralFlow
 
-__all__ = ["AUDIO_EXT", "BUDGET_HOLDS", "ORDER", "STOP_STAGES", "AutopilotFlow", "CommunityFlow", "CompilationFlow", "ExperimentFlow", "GrowthFlow", "ReportingFlow", "SoundFlow", "SponsorFlow",
+__all__ = ["AUDIO_EXT", "BUDGET_HOLDS", "ORDER", "STOP_STAGES", "AutopilotFlow", "CastFlow", "CommunityFlow", "CompilationFlow", "ExperimentFlow", "GrowthFlow", "ReportingFlow", "SoundFlow", "SponsorFlow",
            "TrendFlow", "ViralFlow"]

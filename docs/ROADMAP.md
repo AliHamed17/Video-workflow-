@@ -41,6 +41,13 @@ We build this step by step. Each phase ends with something that works end to end
 - [x] Ideas from a source article (`--from-url`), fact-checked against it
 - [x] Publish kit: videos, thumbnail, SRT per language, copy and checklist in one zip
 
+## Phase 3.2: Characters ✅
+
+- [x] AI casting director: an original recurring cast (style, look bible, personality, voice, catchphrase)
+- [x] Higgsfield character sheets made once (headless, or the /character-sheet workflow in Claude Code)
+- [x] Sheets attached to every keyframe and shot a character is in; each character's own voice
+- [x] Cast page on the dashboard; `vw cast`; the autopilot casts on its first run; high-bitrate output
+
 ## Phase 3.1: Cheaper videos and covers ✅
 
 - [x] Render modes: video / hybrid (hero beats only) / stills, with local camera-move animation of keyframes

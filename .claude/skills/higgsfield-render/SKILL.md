@@ -23,6 +23,13 @@ may have another name — use whichever Higgsfield tools are available: `balance
      (remove `medias`) and, if the shot has a `keyframe`, `generate_image` with its `keyframe` params.
      Multiply by the number of shots.
    - If the total exceeds the balance or `max_credits`, **stop** and tell the user the numbers.
+2b. **Character sheets first** (when the request has `cast_sheets`): each recurring character gets a
+   reference sheet once, then every keyframe and shot they're in attaches it. For each entry, follow
+   `get_preset_instructions {"preset": "/character-sheet"}` with the entry's `style` and `character`
+   (best results), or simply `generate_image` with the entry's `params` (≈1.5 credits). `jobs_wait`,
+   show the sheets to the user, then register each: `vw cast sheet "<name>" --job <job_id> --url <url>`,
+   and replace `<SHEET:<name>>` in every keyframe/video `medias` with that job id. Never invent a
+   character's look: the entry's `character.look` is the bible.
 3. **Keyframes** (only if shots have a `keyframe`): if `strategy.reference_shot` is set, render
    that shot's keyframe FIRST (`generate_image`, then `jobs_wait`), then put its job id in place of
    `<REFERENCE_KEYFRAME_JOB_ID>` in every other shot's `keyframe.medias` — that keeps the subject,

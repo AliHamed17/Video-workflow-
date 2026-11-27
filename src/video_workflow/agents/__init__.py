@@ -1,3 +1,4 @@
+from .casting import CastingDirector
 from .community_manager import CommunityManager
 from .compliance import ComplianceReviewer
 from .critic import Critic
@@ -14,5 +15,5 @@ from .trend_scout import TrendScout
 from .viral_analyst import ViralAnalyst
 from .visual_qa import VisualQA
 
-__all__ = ["CommunityManager", "ComplianceReviewer", "Critic", "Director", "FactChecker", "GrowthAnalyst", "HookLab", "Packager", "PitchWriter", "Scriptwriter", "Translator",
+__all__ = ["CastingDirector", "CommunityManager", "ComplianceReviewer", "Critic", "Director", "FactChecker", "GrowthAnalyst", "HookLab", "Packager", "PitchWriter", "Scriptwriter", "Translator",
            "TrendAnalyst", "TrendScout", "ViralAnalyst", "VisualQA"]

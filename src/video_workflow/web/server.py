@@ -277,6 +277,19 @@ def google_finish(pipeline, base: str, code: str, state: str, http=None) -> str:
     return "YouTube connected. Your worker uses it from its next sync."
 
 
+def run_cast(pipeline, args: dict) -> tuple[bool, str]:
+    """Design (or redesign) the cast — shared by the dashboard and cloud commands."""
+    pipeline.store.kv_set("cast_running", True)
+    try:
+        cast = pipeline.design_cast(args.get("style", "")[:40], args.get("notes", "")[:1000])
+        return True, f"cast designed ({cast['style']}): " + ", ".join(m["name"] for m in cast["members"])
+    except Exception as exc:
+        log.exception("casting failed")
+        return False, f"{type(exc).__name__}: {exc}"[:300]
+    finally:
+        pipeline.store.kv_set("cast_running", False)
+
+
 def run_sponsor(pipeline, args: dict) -> tuple[bool, str]:
     """add | update | pitch — shared by the dashboard, Telegram and cloud commands."""
     from .. import sponsors
@@ -407,6 +420,8 @@ def make_handler(pipeline, token: str | None = None):
                     except ValueError as exc:
                         msg = str(exc)[:300]
                     return self._redirect(f"/connect?flash={quote(msg)}")
+                if path == "/cast":
+                    return self._send(200, pages.render_cast(pipeline, data.status(pipeline), flash).encode())
                 if path == "/sponsors":
                     return self._send(200, pages.render_sponsors(pipeline, data.status(pipeline), flash,
                                                                  self._base_url()).encode())
@@ -601,6 +616,17 @@ def make_handler(pipeline, token: str | None = None):
                                                      "at": datetime.now(UTC).isoformat()})
                     msg = "Share link created: copy it from the media kit box."
                 return self._redirect(f"/sponsors?flash={quote(msg)}")
+            if path == "/cast/design":
+                args = {"style": form.get("style", "")[:40], "notes": form.get("notes", "")[:1000]}
+                if cloud:
+                    store.enqueue("cast", None, args, source="cloud dashboard")
+                    msg = "Sent to your worker — the cast appears here after its next sync."
+                elif store.kv_get("cast_running"):
+                    msg = "The casting director is already at work."
+                else:
+                    _background("cast", lambda: run_cast(pipeline, args))
+                    msg = "The casting director is designing your cast… refresh in a minute."
+                return self._redirect(f"/cast?flash={quote(msg)}")
             if path in ("/sponsors/add", "/sponsors/update", "/sponsors/pitch"):
                 op = path.rsplit("/", 1)[1]
                 args = {"op": op, **{k: form.get(k, "")[:2000] for k in ("brand", "contact", "value", "notes", "status",

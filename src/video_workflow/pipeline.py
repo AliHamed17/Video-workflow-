@@ -33,6 +33,7 @@ import httpx
 
 from . import quality, schedule
 from .agents import (
+    CastingDirector,
     CommunityManager,
     ComplianceReviewer,
     Critic,
@@ -55,6 +56,7 @@ from .agents.planner import Planner
 from .config import AppConfig
 from .flows import (
     AutopilotFlow,
+    CastFlow,
     CommunityFlow,
     CompilationFlow,
     ExperimentFlow,
@@ -83,7 +85,7 @@ __all__ = ["ORDER", "STOP_STAGES", "Pipeline"]
 
 @dataclass
 class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, CompilationFlow, SoundFlow,
-               ExperimentFlow, SponsorFlow, ReportingFlow):
+               ExperimentFlow, SponsorFlow, CastFlow, ReportingFlow):
     config: AppConfig
     store: Store
     router: LLMRouter
@@ -115,6 +117,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         self.compliance = ComplianceReviewer(self.config, self.router)
         self.community_manager = CommunityManager(self.config, self.router)
         self.pitch_writer = PitchWriter(self.config, self.router)
+        self.casting = CastingDirector(self.config, self.router)
         self.notifier = self.notifier or Dispatcher([LogNotifier()])
         self.tracer = self.tracer or Tracer(self.store)
         self.router.listeners.append(self._on_llm_call)
@@ -226,6 +229,11 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                             (Scriptwriter(item_cfg, self.router), HookLab(item_cfg, self.router)))
         with self.tracer.bind(item.id), usage.tracking(item.usage):
             lessons = self.lessons()   # what our own results say works (the growth playbook)
+            # The recurring cast (characters.enabled): the video keeps a snapshot of who it was written for.
+            from . import cast as cast_mod
+            live_cast = cast_mod.get(self.store) if self.config.characters.enabled else None
+            item.cast = cast_mod.snapshot(live_cast)
+            cast_text = cast_mod.brief(live_cast) if live_cast else ""
             if cc.hook_variants > 0:
                 with self.tracer.span("develop.hooks", item.id) as span:
                     hooks = hook_lab.generate(item.idea, cc.hook_variants, lessons=lessons)
@@ -243,7 +251,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             for round_ in range(rounds):
                 with self.tracer.span("develop.write", item.id, round=round_ + 1) as span:
                     script = writer.write(item.idea, previous=script, review=review, corrections=corrections,
-                                               inspiration=brief, lessons=lessons)
+                                          inspiration=brief, lessons=lessons, cast=cast_text)
                     span.detail = f"draft {round_ + 1}: {len(script.shots)} shots"
                 # Fact-check and critic read the same draft independently: run them side by side.
                 def factcheck(script=script, round_=round_):
@@ -295,7 +303,8 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
 
             def direct():
                 with self.tracer.span("develop.direct", item.id) as span:
-                    plan = self.director.plan(item.script, inspiration=brief)
+                    plan = self.director.plan(item.script, inspiration=brief, cast=cast_text,
+                                              max_per_shot=self.config.characters.max_per_shot)
                     span.detail = f"{len(plan.shots)} Higgsfield prompts"
                 return plan
 
@@ -320,6 +329,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
                     fixes = summarize_compliance(check)
                     item.script = writer.write(
                         item.idea, previous=item.script, corrections=fixes, inspiration=brief, lessons=lessons,
+                        cast=cast_text,
                         review=item.review.model_copy(update={
                             "verdict": "revise", "problems": ["compliance: " + i.issue for i in check.issues
                                                               if i.severity == "fix"],
@@ -452,6 +462,7 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
         self._expect(item, Stage.APPROVED, Stage.AWAITING_RENDER)
         if item.stage == Stage.AWAITING_RENDER:
             return self._maybe_complete_render(item)
+        self._cast_for_render(item)           # sheets and voices made since the script was written
         plan = self._local_stills(item, self._missing_plan(item))
         if not plan.shots:
             return self._maybe_complete_render(item)
@@ -479,6 +490,8 @@ class Pipeline(TrendFlow, ViralFlow, AutopilotFlow, GrowthFlow, CommunityFlow, C
             if result.pending:
                 span.status = "gated"
         item.usage.credits += result.credits
+        if result.sheets:            # character sheets made for this video: the cast's from now on
+            self._keep_sheets(item, result.sheets)
         for asset in result.audio:   # narration / music generated alongside the shots
             try:
                 item = self.add_audio(item, asset.kind, asset.url, asset.index, asset.job, asset.path)

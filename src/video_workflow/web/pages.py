@@ -250,7 +250,9 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
             punch = punch_positions(words, shot.emphasis)
             return " ".join(f"<mark>{e(w)}</mark>" if i in punch else e(w) for i, w in enumerate(words))
 
-        rows = "".join(f"<tr><td>{s.index + 1}<div class=meta>{e(s.beat)}</div></td><td>{e(s.visual)}</td>"
+        rows = "".join(f"<tr><td>{s.index + 1}<div class=meta>{e(s.beat)}</div>"
+                       + (f"<div class=meta>🎙 {e(s.speaker)}</div>" if s.speaker and s.speaker != "narrator" else "")
+                       + f"</td><td>{e(s.visual)}</td>"
                        f"<td>{spoken(s)}</td><td><b>{e(s.on_screen_text)}</b></td></tr>" for s in item.script.shots)
         parts.append(_section("Script", "<table><colgroup><col style='width:4%'><col style='width:44%'>"
                               "<col style='width:32%'><col style='width:20%'></colgroup>"
@@ -324,8 +326,8 @@ def render_item(pipeline, item: ContentItem, st: dict, flash: str = "") -> str:
                    for c in sorted(item.clips, key=lambda c: c.phase == "final")}
 
         def direction(s) -> str:
-            bits = [made_as.get(s.index, ""), SHOT_SIZES.get(s.shot_size, ""), s.camera,
-                    f"motion: {s.motion}" if s.motion else ""]
+            bits = [made_as.get(s.index, ""), ("🎭 " + ", ".join(s.characters)) if s.characters else "",
+                    SHOT_SIZES.get(s.shot_size, ""), s.camera, f"motion: {s.motion}" if s.motion else ""]
             into = ("morph ✓" if s.index in morphed else s.transition) if s.transition != "cut" else ""
             return (" · ".join(e(b) for b in bits if b)
                     + (f" · then {pill(into, 'info')}" if into and s.index < len(plan.shots) - 1 else ""))
@@ -1323,3 +1325,46 @@ def render_sponsors(pipeline, st: dict, flash: str = "", base: str = "") -> str:
             + ("<p class=warn>Drafting a pitch…</p>" if busy else ""))
     body = (_flash(flash) + "<h2>Sponsors</h2>" + kit_html + "<h2>Deals</h2>" + head + add + "".join(rows))
     return page("Sponsors", body, st, "/sponsors", every_ms=3000 if busy else 30000)
+
+
+def render_cast(pipeline, st: dict, flash: str = "") -> str:
+    """The recurring cast: who they are, how they look and sound, and their Higgsfield reference sheets."""
+    from .. import cast as cast_mod
+    from ..models import CHARACTER_STYLES
+
+    cc = pipeline.config.characters
+    cast = cast_mod.get(pipeline.store)
+    busy = pipeline.store.kv_get("cast_running")
+    styles = "".join(f"<option{' selected' if s == cc.style else ''}>{e(s)}</option>" for s in CHARACTER_STYLES)
+    design = ("<p class=meta>The casting director is at work…</p>" if busy else
+              "<form method=post action='/cast/design' class=row style='gap:8px;flex-wrap:wrap'>"
+              f"<select name=style><option value=''>Let the director choose a style</option>{styles}</select>"
+              "<input name=notes placeholder='what you want (optional), e.g. a curious octopus host' "
+              "style='flex:1;min-width:200px'>"
+              f"<button class=primary>🎭 {'Redesign' if cast else 'Design'} the cast</button></form>")
+    state = (pill("used in new videos", "ok") if cc.enabled else
+             pill("not used yet — set characters.enabled: true", "warn"))
+    body = f"<h2>Cast</h2>{f'<p class=flash>{e(flash)}</p>' if flash else ''}"
+    if not cast:
+        body += _section("🎭 No cast yet", "<p>Character-led shorts — a host the audience follows, a recurring cast — "
+                                          "hold attention far better than faceless footage. The casting director "
+                                          "designs original characters for this channel; each gets a Higgsfield "
+                                          "reference sheet once (≈1.5 credits) and looks identical in every video.</p>"
+                                          + design)
+        return page("Cast", body, st, "/cast", live="")
+    cards = []
+    for m in cast["members"]:
+        sheet = (f"<img src='{e(m['sheet_url'], quote=True)}' alt='{e(m['name'])} reference sheet' loading=lazy "
+                 "style='width:100%;border-radius:8px;margin-top:8px'>" if m.get("sheet_url") else
+                 f"<p class=meta>{'Sheet made ✓' if m.get('sheet_job') else 'Sheet: made with their first video (≈1.5 credits)'}</p>")
+        voice = f"voice {e(m['voice_id'][:8])}…" if m.get("voice_id") else "narrator's voice"
+        cards.append(f"<section><h3>{e(m['name'])} <span class=meta>· {e(m['role'])} · {e(m['species'])}</span></h3>"
+                     f"<p>{e(m['look'])}</p><p class=meta>{e(m['personality'])}</p>"
+                     f"<p class=meta>Sounds: {e(m['voice'])} ({voice})"
+                     + (f" · catchphrase “{e(m['catchphrase'])}”" if m.get("catchphrase") else "") + f"</p>{sheet}</section>")
+    body += (f"<section><p><b>{e(cast['style'])}</b> — {e(cast['style_notes'])} {state}</p>"
+             f"<p>{e(cast['format'])}</p><p class=meta>{e(cast.get('why', ''))}</p></section>"
+             f"<div class=charts>{''.join(cards)}</div>" + _section("Change the cast", design +
+             "<p class=meta>A redesign keeps the sheet of every character whose name and look stay the same. "
+             "Videos already written keep the cast they were written with.</p>"))
+    return page("Cast", body, st, "/cast", live="")

@@ -90,6 +90,7 @@ class UnitCosts(BaseModel):
     draft: float = 15        # one 480p draft shot
     final: float = 80        # one full-resolution shot
     narration: float = 0.3   # one narration line (Higgsfield text-to-speech)
+    sheet: float = 1.5       # one character reference sheet (made once per character)
     music: float = 3.2       # one original music track (~20 s)
 
 
@@ -153,6 +154,21 @@ class HiggsfieldConfig(BaseModel):
         first = phase == "draft" or not self.draft_preview
         keyframes = (shots if self.keyframes else shots - video) * c.keyframe if first else 0
         return keyframes + video * (c.draft if phase == "draft" else c.final)
+
+
+class CharactersConfig(BaseModel):
+    """A recurring cast (animated or realistic characters) that hosts and acts in the videos."""
+
+    enabled: bool = False
+    style: str = ""                 # e.g. "Classic 3D"; "" lets the casting director choose for the channel
+    members: int = 2                # how many recurring characters the casting director designs
+    max_per_shot: int = 2           # more characters in one AI shot drift; two is safe
+    sheet_model: str = "seedream_5_5"                    # character reference sheets (≈1.5 credits each, once)
+    sheet_params: dict = Field(default_factory=lambda: {"resolution": "2k"})
+    sheet_aspect: str = "16:9"
+    reference_role: str = "image_references"             # how a sheet is attached to keyframes and videos
+    # Higgsfield preset voice ids per gender, handed out to the cast in order (see list_voices).
+    voices: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class CaptionConfig(BaseModel):
@@ -536,6 +552,7 @@ class AppConfig(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
     content: ContentConfig = Field(default_factory=ContentConfig)
+    characters: CharactersConfig = Field(default_factory=CharactersConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> AppConfig:

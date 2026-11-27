@@ -64,7 +64,9 @@ class SoundFlow:
             if line is None or not line.voiceover.strip():
                 raise ValueError(f"Item {item.id} has no narration for shot {shot}")
             dest = Path(path) if path else download(url, audio_dir / f"voice_{shot:02d}{audio_ext(url)}", self.http)
-            digest = text_hash("higgsfield", self.config.video.voice.voice, line.voiceover.strip())
+            from ..cast import voice_for
+            digest = text_hash("higgsfield", voice_for(item.cast, getattr(line, "speaker", ""), self.config.video.voice.voice),
+                               line.voiceover.strip())
             item.voice_clips = [v for v in item.voice_clips if v.shot_index != shot] + [
                 VoiceClip(shot_index=shot, path=str(dest), text_hash=digest, duration=probe(dest)["duration"])]
             item.voice_clips.sort(key=lambda v: v.shot_index)

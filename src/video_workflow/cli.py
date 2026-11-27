@@ -238,6 +238,61 @@ def clips_add(item_id: str, shot_index: int, source: str,
     _table([pipe.add_clip(pipe.store.get(item_id), shot_index, source, job, keyframe_job, keyframe_url, morph)])
 
 
+cast_app = typer.Typer(help="The recurring cast: characters designed once, drawn identically in every video")
+app.add_typer(cast_app, name="cast")
+
+
+@cast_app.callback(invoke_without_command=True)
+def cast_show(ctx: typer.Context, config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Show the cast (vw cast design / sheet / clear to change it)."""
+    if ctx.invoked_subcommand:
+        return
+    from . import cast as cast_mod
+
+    pipe = _setup(config, data, publishers=False)
+    cast = cast_mod.get(pipe.store)
+    if not cast:
+        console.print("No cast yet: `vw cast design` (and characters.enabled: true to use it)")
+        return
+    console.print(f"[bold]{cast['style']}[/] — {cast['style_notes']}\n{cast['format']}")
+    for m in cast["members"]:
+        sheet = "sheet ✓" if m.get("sheet_job") else "no sheet yet"
+        console.print(f"• [bold]{m['name']}[/] ({m['role']}, {m['species']}; {sheet}; voice {m.get('voice_id') or 'narrator'})"
+                      f"\n  {m['look']}\n  {m['personality']}")
+    if not pipe.config.characters.enabled:
+        console.print("[yellow]characters.enabled is false: videos don't use the cast yet[/]")
+
+
+@cast_app.command("design")
+def cast_design(style: Annotated[str, typer.Option(help="e.g. 'Classic 3D'; empty: the director chooses")] = "",
+                notes: Annotated[str, typer.Option(help="What you want from the cast")] = "",
+                config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Have the casting director design (or redesign) the cast."""
+    pipe = _setup(config, data, publishers=False)
+    cast = pipe.design_cast(style, notes)
+    console.print(f"Cast ({cast['style']}): " + ", ".join(f"{m['name']} — {m['species']}" for m in cast["members"]))
+
+
+@cast_app.command("sheet")
+def cast_sheet(name: str, job: Annotated[str, typer.Option(help="Higgsfield image job id of the sheet")],
+               url: Annotated[str | None, typer.Option(help="The sheet image URL")] = None,
+               config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Register a character's reference sheet (the render skill calls this)."""
+    from . import cast as cast_mod
+
+    pipe = _setup(config, data, publishers=False)
+    m = cast_mod.register_sheet(pipe.store, name, job, url)
+    console.print(f"{m['name']}: sheet {job}")
+
+
+@cast_app.command("clear")
+def cast_clear(config: ConfigOpt = None, data: DataOpt = Path("data")) -> None:
+    """Forget the cast (videos already written keep theirs)."""
+    pipe = _setup(config, data, publishers=False)
+    pipe.store.kv_set("cast", None)
+    console.print("Cast cleared.")
+
+
 @clips_app.command("still")
 def clips_still(item_id: str, shot_index: int,
                 keyframe_url: Annotated[str, typer.Option(help="The shot's keyframe image (https URL or file)")],
@@ -699,7 +754,7 @@ def selftest(out: Annotated[Path | None, typer.Option(help="Keep the outputs her
     passed = sum(r.ok for r in results)
     console.print(f"\n[bold]{passed}/{len(results)} steps passed[/] · total {sum(r.seconds for r in results):.1f}s")
     console.print(f"Final video: {final}")
-    if passed != len(results) or len(results) < 28:
+    if passed != len(results) or len(results) < 29:
         raise typer.Exit(1)
 
 
